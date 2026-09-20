@@ -23,6 +23,13 @@ export default function AgentDrawer({
     api.listConnections().then((cs) => setConns(cs.filter((c) => c.conn_type === 'chat' && c.enabled))).catch(() => {})
   }, [agent.id])
 
+  // Esc 关闭抽屉（原型 06 §5）
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
   const set = (k: keyof Agent, v: any) => setForm((f) => ({ ...f, [k]: v }))
 
   const save = async () => {
@@ -71,7 +78,7 @@ export default function AgentDrawer({
         <input value={form.name ?? ''} onChange={(e) => set('name', e.target.value)} />
       </div>
       <div className="field">
-        <label>描述（用于多 Agent 协作时互相理解）</label>
+        <label>描述（用于多智能体协作时互相理解）</label>
         <textarea value={form.description ?? ''} onChange={(e) => set('description', e.target.value)} />
       </div>
       <div className="field">

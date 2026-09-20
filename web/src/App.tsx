@@ -17,7 +17,7 @@ const PLACEHOLDERS: Record<string, { title: string; desc: string; milestone: str
   },
   skills: {
     title: '技能',
-    desc: '技能市场、绑定与运行链路将在这里进行：内置技能、Skillfile 描述的 Agent 技能与 MCP 工具。',
+    desc: '技能市场、绑定与运行链路将在这里进行：内置技能、Skillfile 描述的智能体技能与 MCP 工具。',
     milestone: 'M6',
   },
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { Agent, Project } from '../api/types'
 import { useUI } from '../store/ui'
@@ -35,6 +35,13 @@ export default function ProjectDrawer({
     return init
   })
   const set = (k: keyof Project, v: any) => setForm((f) => ({ ...f, [k]: v }))
+
+  // Esc 关闭（原型 06 §5 dialog 约定）
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
 
   const save = async () => {
     if (!form.name?.trim()) {

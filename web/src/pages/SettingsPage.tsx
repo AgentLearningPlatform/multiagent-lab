@@ -147,6 +147,13 @@ function ConnModal({ conn, onClose, onSaved }: { conn: ModelConnection | null; o
   const [busy, setBusy] = useState(false)
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }))
 
+  // Esc 关闭弹窗（原型 06 §5 dialog 约定）
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
   const save = async () => {
     if (!form.name?.trim() || !form.base_url?.trim() || !form.model_name?.trim()) {
       showToast('名称、Base URL、模型必填', 'err')
