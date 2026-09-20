@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { Menu } from 'antd'
 import { RobotOutlined, ProjectOutlined, ApartmentOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons'
 import { useUI, type PageKey } from '../store/ui'
 
@@ -12,22 +11,47 @@ const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
 ]
 
 /**
- * 顶部导航（蚂蚁 Menu horizontal）。
- * 设置不在导航菜单内：顶栏最右端独立齿轮按钮进入（原型 06 §2 / §3.6 v0.4），
- * 悬停微旋转、激活态高亮，与五模块同一切换机制（useUI.setPage）。
+ * 顶部导航（开发者工具风格，浅色克制）：
+ * - 品牌区：渐变几何标记（多智能体联结点，内联 SVG 非 emoji）+ 词标 / Lab 徽标 / 副标题；
+ * - 导航：自绘 pill 按钮（图标 + 文字节奏一致），激活态品牌底 + 底部 2px 强调条；
+ * - 设置入口不在导航内，顶栏最右端独立齿轮按钮（原型 06 §2 / §3.6 v0.4），与五模块同一切换机制。
  */
 export default function TopNav() {
   const { page, setPage } = useUI()
   return (
-    <div className="topnav">
-      <span className="logo">◆ Eino 多智能体学习平台</span>
-      <Menu
-        mode="horizontal"
-        selectedKeys={[page]}
-        onClick={({ key }) => setPage(key as PageKey)}
-        style={{ flex: 1, minWidth: 0, borderBottom: 'none', background: 'transparent' }}
-        items={PAGES.map((p) => ({ key: p.key, label: p.label, icon: p.icon }))}
-      />
+    <header className="topnav">
+      <div className="brand">
+        <span className="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+            <path d="M12 6.6 6.4 15.5M12 6.6l5.6 8.9M7.4 16.2h9.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            <circle cx="12" cy="5.2" r="2.5" fill="currentColor" />
+            <circle cx="5.6" cy="16.6" r="2.2" fill="currentColor" opacity="0.86" />
+            <circle cx="18.4" cy="16.6" r="2.2" fill="currentColor" opacity="0.86" />
+          </svg>
+        </span>
+        <span className="brand-text">
+          <span className="brand-name">Eino</span>
+          <span className="brand-chip">Lab</span>
+          <span className="brand-sub">多智能体学习平台</span>
+        </span>
+      </div>
+
+      <nav className="topnav-nav" aria-label="主导航">
+        {PAGES.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            className={`nav-item${page === p.key ? ' active' : ''}`}
+            aria-current={page === p.key ? 'page' : undefined}
+            onClick={() => setPage(p.key)}
+          >
+            <span className="nav-item-icon">{p.icon}</span>
+            <span className="nav-item-label">{p.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <span className="topnav-spacer" />
       <button
         type="button"
         className={`topnav-gear${page === 'settings' ? ' active' : ''}`}
@@ -38,6 +62,6 @@ export default function TopNav() {
       >
         <SettingOutlined />
       </button>
-    </div>
+    </header>
   )
 }

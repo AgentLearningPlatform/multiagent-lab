@@ -3,6 +3,7 @@ import { Button, Collapse, Space, Switch, Tag, Typography, Avatar } from 'antd'
 import { RobotOutlined, UserOutlined, BulbOutlined, BugOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
+import XMarkdown from '@ant-design/x-markdown'
 import { api, runConversation } from '../api/client'
 import type { Agent, Conversation, Message, ModelConnection, Project } from '../api/types'
 import { useUI } from '../store/ui'
@@ -80,6 +81,15 @@ const BUBBLE_ROLES: BubbleListProps['role'] = {
     placement: 'start',
     avatar: <Avatar icon={<RobotOutlined />} style={{ background: '#eef0fe', color: '#4f46e5' }} />,
     styles: { content: { background: '#fff', border: '1px solid var(--c-line)', borderRadius: 12, borderBottomLeftRadius: 4 } },
+    // 助手正文走 Markdown（XMarkdown）：流式期间尾部游标，hasNextChunk=false 时收尾刷新
+    contentRender: (content, info) => (
+      <XMarkdown
+        className="chat-md"
+        content={String(content ?? '')}
+        openLinksInNewTab
+        streaming={{ hasNextChunk: !!info.extraInfo?.streaming, tail: true }}
+      />
+    ),
   },
   event: {
     variant: 'borderless',
@@ -94,6 +104,8 @@ const BUBBLE_ROLES: BubbleListProps['role'] = {
  * 中间对话窗口（原型 06 §3.1 / §3.2，Ant Design X Bubble/Sender/ThoughtChain）：
  * - 垂直三段：配置条（单行徽标）/ 消息流（Bubble.List 内建滚动 + autoScroll 置底）/ 输入区；
  * - 阅读尺度：气泡自身 max-width 880 居中（滚动条因此贴对话区最右缘），输入区同宽对齐；
+ * - 助手正文：XMarkdown 渲染（流式期间尾部游标），用户消息保持纯文本；
+ * - 运行中：消息流右下角悬浮「停止生成」入口，复用 stop()（abort + POST /stop）；
  * - agent 直聊：头部显示智能体名，「配置」打开智能体弹窗；
  * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」；
  * - 执行细节：历史事件回放、token 用量与耗时、深度思考 ThoughtChain、工具调用 JSON、原始事件调试开关
@@ -269,6 +281,7 @@ export default function ChatWindow({
             role: it.role === 'user' ? 'user' : 'ai',
             content: it.content ?? '',
             loading: !!it.streaming && !it.content,
+            extraInfo: { streaming: !!it.streaming }, // 供 contentRender 判断流式状态（尾部游标）
           }
         }
         return {
@@ -420,7 +433,7 @@ export default function ChatWindow({
         </Space>
       </div>
 
-      <div className="msg-list">
+      <div className={`msg-list${running ? ' running' : ''}`}>
         {items.length === 0 ? (
           <div className="msg-empty">
             <Welcome
@@ -436,6 +449,14 @@ export default function ChatWindow({
           </div>
         ) : (
           <Bubble.List items={listItems} role={BUBBLE_ROLES} />
+        )}
+        {running && (
+          <div className="chat-stop">
+            <button type="button" className="chat-stop-btn" onClick={stop} title="停止本次生成">
+              <span className="chat-stop-glyph" aria-hidden="true" />
+              <span>停止生成</span>
+            </button>
+          </div>
         )}
       </div>
 

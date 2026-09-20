@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Collapse, Empty, Space } from 'antd'
-import { PlusOutlined, SettingOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Button, Empty } from 'antd'
+import {
+  PlusOutlined,
+  SettingOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  DownOutlined,
+  RightOutlined,
+  RobotOutlined,
+  ProjectOutlined,
+} from '@ant-design/icons'
 import { Conversations } from '@ant-design/x'
 import { api } from '../api/client'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
 import { confirmAction } from '../lib/antd'
+import NameModal from './NameModal'
 
 interface TreeNode {
   key: string
@@ -14,9 +24,10 @@ interface TreeNode {
 }
 
 /**
- * 左栏树（原型 06 §3.1 / §3.2，Ant Design X Conversations + antd Collapse）：
- * - mode=agent：智能体折叠列表，每个智能体节点常驻「＋新对话」「⚙配置」，其下挂该智能体的对话
- * - mode=project：项目折叠列表，每个项目节点同样入口，其下挂项目对话
+ * 左栏树（原型 06 §3.1 / §3.2）：
+ * - mode=agent：智能体节点（头像点 + 对话数徽标 + 常驻「＋新对话」「⚙配置」），其下挂该智能体的对话；
+ * - mode=project：项目节点同样结构，其下挂项目对话；
+ * - 自绘节点头部 + 子树缩进导轨（替代 antd Collapse），统一行高与间距；会话行仍用 X Conversations（含重命名/删除菜单）。
  */
 export default function Sidebar({
   mode,
@@ -49,6 +60,7 @@ export default function Sidebar({
 }) {
   const { currentConvId, setCurrentConv, bumpData, showToast } = useUI()
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  const [renaming, setRenaming] = useState<Conversation | null>(null)
 
   const nodes = useMemo<TreeNode[]>(() => {
     const byCreated = (a: Conversation, b: Conversation) => a.created_at.localeCompare(b.created_at)
@@ -78,6 +90,19 @@ export default function Sidebar({
     else onSelectProject(id)
   }
 
+  // 点击节点头部：展开/收起；展开时同时选中该节点
+  const toggleNode = (id: string) => {
+    const next = !open[id]
+    setOpen((o) => ({ ...o, [id]: next }))
+    if (next) selectNode(id)
+  }
+
+  const isAgent = mode === 'agent'
+  const configure = (id: string) => {
+    if (isAgent) onConfigureAgent(id)
+    else onConfigureProject(id)
+  }
+
   const removeConversation = (id: string) => {
     confirmAction('删除该对话及其全部消息？', '删除后不可恢复。', async () => {
       try {
@@ -90,72 +115,104 @@ export default function Sidebar({
     })
   }
 
-  const isAgent = mode === 'agent'
-  const configure = (id: string) => {
-    if (isAgent) onConfigureAgent(id)
-    else onConfigureProject(id)
+  const renameConversation = async (name: string) => {
+    const target = renaming
+    setRenaming(null)
+    if (!target) return
+    try {
+      await api.updateConversation(target.id, { title: name })
+      bumpData()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
   }
 
   return (
     <div className="sidebar">
       <div className="side-head">
         <span className="side-title">{isAgent ? '智能体' : '项目'}</span>
+        <span className="side-count">{nodes.length}</span>
       </div>
-      <Button block type="dashed" icon={<PlusOutlined />} onClick={isAgent ? onNewAgent : onNewProject} style={{ margin: '0 12px 8px', width: 'calc(100% - 24px)' }}>
-        新建{isAgent ? '智能体' : '项目'}
-      </Button>
+      <div className="side-actions">
+        <Button block type="dashed" icon={<PlusOutlined />} onClick={isAgent ? onNewAgent : onNewProject}>
+          新建{isAgent ? '智能体' : '项目'}
+        </Button>
+      </div>
+
       <div className="conv-list">
         {nodes.length === 0 && (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={isAgent ? '还没有智能体，点击上方创建' : '还没有项目，点击上方创建'}
-            style={{ marginTop: 40 }}
+            style={{ marginTop: 32 }}
           />
         )}
-        <Collapse
-          ghost
-          size="small"
-          activeKey={nodes.filter((n) => open[n.key]).map((n) => n.key)}
-          onChange={(keys) => {
-            const arr = Array.isArray(keys) ? keys : [keys]
-            setOpen(Object.fromEntries(nodes.map((n) => [n.key, arr.includes(n.key)])))
-            // 点击标题即选中该智能体/项目
-            const last = arr[arr.length - 1]
-            if (last) selectNode(last)
-          }}
-          items={nodes.map((n) => ({
-            key: n.key,
-            label: (
-              <span className="node-title" aria-current={activeId === n.key ? 'true' : undefined}>
-                {n.name}
-              </span>
-            ),
-            extra: (
-              <Space size={0} onClick={(e) => e.stopPropagation()}>
-                <Button type="text" size="small" icon={<PlusOutlined />} title="新建对话" onClick={() => onNewConversation(n.key)} />
-                <Button type="text" size="small" icon={<SettingOutlined />} title="配置" onClick={() => configure(n.key)} />
-              </Space>
-            ),
-            children: (
-              <Conversations
-                items={n.convs.map((c) => ({ key: c.id, label: c.title || '未命名对话' }))}
-                activeKey={currentConvId ?? undefined}
-                onActiveChange={setCurrentConv}
-                menu={(c) => ({
-                  items: [{ key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true }],
-                  onClick: ({ key }) => {
-                    if (key === 'delete') removeConversation(c.key)
-                  },
-                })}
-              />
-            ),
-          }))}
-        />
-        {nodes.some((n) => open[n.key] && n.convs.length === 0) && null}
-        {nodes.length > 0 && (
-          <div className="empty-hint">展开节点后点 ＋ 新建对话</div>
-        )}
+
+        {nodes.map((n) => {
+          const expanded = !!open[n.key]
+          const active = activeId === n.key
+          return (
+            <div key={n.key} className={`side-node${active ? ' active' : ''}`}>
+              <div className="side-node-row">
+                <button
+                  type="button"
+                  className="side-node-head"
+                  aria-expanded={expanded}
+                  onClick={() => toggleNode(n.key)}
+                >
+                  <span className="side-node-chev">{expanded ? <DownOutlined /> : <RightOutlined />}</span>
+                  <span className="side-node-dot">{isAgent ? <RobotOutlined /> : <ProjectOutlined />}</span>
+                  <span className="side-node-name" title={n.name}>{n.name}</span>
+                  <span className="side-node-count">{n.convs.length}</span>
+                </button>
+                <span className="side-node-ops">
+                  <Button type="text" size="small" icon={<PlusOutlined />} title="新建对话" onClick={() => onNewConversation(n.key)} />
+                  <Button type="text" size="small" icon={<SettingOutlined />} title="配置" onClick={() => configure(n.key)} />
+                </span>
+              </div>
+
+              {expanded && (
+                <div className="side-node-children">
+                  {n.convs.length === 0 ? (
+                    <div className="side-node-empty">暂无对话 · 点 ＋ 新建</div>
+                  ) : (
+                    <Conversations
+                      items={n.convs.map((c) => ({ key: c.id, label: c.title || '未命名对话' }))}
+                      activeKey={currentConvId ?? undefined}
+                      onActiveChange={setCurrentConv}
+                      menu={(c) => ({
+                        items: [
+                          { key: 'rename', label: '重命名', icon: <EditOutlined /> },
+                          { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true },
+                        ],
+                        onClick: ({ key }) => {
+                          const conv = n.convs.find((x) => x.id === c.key)
+                          if (!conv) return
+                          if (key === 'rename') setRenaming(conv)
+                          else if (key === 'delete') removeConversation(conv.id)
+                        },
+                      })}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {nodes.length > 0 && <div className="empty-hint">展开节点后点 ＋ 新建对话</div>}
       </div>
+
+      {renaming && (
+        <NameModal
+          open
+          title="重命名对话"
+          placeholder="对话名称"
+          okText="保存"
+          onCancel={() => setRenaming(null)}
+          onSubmit={renameConversation}
+        />
+      )}
     </div>
   )
 }
