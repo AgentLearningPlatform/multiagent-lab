@@ -150,6 +150,21 @@ button { font-family: inherit; }
   padding: 5px 10px; max-width: 80%;
 }
 .event-card.err { background: var(--c-err-weak); color: var(--c-err); border-color: transparent; }
+/* 执行细节：深度思考折叠卡 / 工具详情 / 原始事件 JSON（06 §4 执行可观测） */
+.event-card details summary { cursor: pointer; user-select: none; }
+.event-card details[open] summary { margin-bottom: 4px; }
+.event-card pre.thinking {
+  margin: 0; font-family: var(--mono); font-size: 11.5px; color: var(--c-ink-2);
+  white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto;
+}
+.event-card .tool-detail summary { color: var(--c-brand); font-size: 11.5px; }
+.event-card .tool-detail pre, .event-card pre.raw-json {
+  margin: 4px 0 0; padding: 6px 8px; background: var(--c-surface);
+  border: 1px solid var(--c-line); border-radius: 6px;
+  font-family: var(--mono); font-size: 11px; color: var(--c-ink-2);
+  white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto;
+}
+.btn-ghost.on { color: var(--c-brand); font-weight: 600; }
 .cursor-blink { display: inline-block; width: 7px; height: 14px; background: var(--c-brand); vertical-align: -2px; animation: blink 0.9s infinite; border-radius: 2px; }
 @keyframes blink { 50% { opacity: 0.15; } }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,10 +35,10 @@ type EmitFn func(ev *Event)
 
 // Event 平台事件（方案 §7 统一协议）。
 type Event struct {
-	Type      string          `json:"type"`
-	RunID     string          `json:"run_id,omitempty"`
-	Ts        string          `json:"ts"`
-	Data      json.RawMessage `json:"data,omitempty"`
+	Type  string          `json:"type"`
+	RunID string          `json:"run_id,omitempty"`
+	Ts    string          `json:"ts"`
+	Data  json.RawMessage `json:"data,omitempty"`
 }
 
 // NewErrorEvent 构造 run.error 事件（供 API 层运行前错误直接输出）。
@@ -112,6 +113,7 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	}()
 
 	// run.started
+	start := time.Now()
 	s.emitAndRecord(runCtx, conv, runID, newEvent("run.started", runID, map[string]any{
 		"conversation_id": conv.ID,
 		"agent_name":      rt.AgentName,
@@ -122,13 +124,20 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		buf        []byte
 		stopped    bool
 		runErr     string
-		msgEmitted bool
+		lastUsage  *schema.TokenUsage           // 最后一片的 token 用量（流式 usage 在尾片）
+		lastFinish string                       // 最后一次 finish_reason
+		toolAgg    = map[int]*pendingToolCall{} // 流式 tool_calls 增量聚合（按 Index）
 	)
+	// 深度思考内容（reasoner 类模型）独立事件流，不进正文
+	emitReasoning := func(delta string) {
+		if delta != "" {
+			s.emitAndRecord(runCtx, conv, runID, newEvent("reasoning.delta", runID, map[string]any{"delta": delta}), emit)
+		}
+	}
 	recordDelta := func(delta string) {
 		buf = append(buf, delta...)
 		if len(delta) > 0 {
 			emit(newEvent("message.delta", runID, map[string]any{"delta": delta}))
-			msgEmitted = true
 		}
 	}
 
@@ -168,19 +177,55 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 					}
 					break
 				}
-				if chunk != nil && chunk.Content != "" {
+				if chunk == nil {
+					continue
+				}
+				if chunk.ReasoningContent != "" {
+					emitReasoning(chunk.ReasoningContent)
+				}
+				if chunk.Content != "" {
 					recordDelta(chunk.Content)
 				}
+				mergeToolCallChunk(toolAgg, chunk.ToolCalls)
+				if chunk.ResponseMeta != nil {
+					if chunk.ResponseMeta.Usage != nil {
+						lastUsage = chunk.ResponseMeta.Usage
+					}
+					if chunk.ResponseMeta.FinishReason != "" {
+						lastFinish = chunk.ResponseMeta.FinishReason
+					}
+				}
+			}
+			// 流结束：输出聚合完成的 tool.call（含入参 JSON）
+			flushToolCalls(s, runCtx, conv, runID, toolAgg, emit)
+			for k := range toolAgg {
+				delete(toolAgg, k)
 			}
 		case mo.Message != nil && mo.Role == schema.Tool:
-			// 工具结果事件（M2 无工具，翻译层预留）
-			s.emitAndRecord(runCtx, conv, runID, newEvent("tool.result", runID, map[string]any{
-				"tool_name": mo.ToolName, "content": mo.Message.Content,
-			}), emit)
+			// 工具执行结果（对应发起见 tool.call 事件）
+			data := map[string]any{"tool_name": mo.Message.ToolName, "content": mo.Message.Content}
+			if mo.Message.ToolCallID != "" {
+				data["tool_call_id"] = mo.Message.ToolCallID
+			}
+			s.emitAndRecord(runCtx, conv, runID, newEvent("tool.result", runID, data), emit)
 		case mo.Message != nil && mo.Role == schema.Assistant && !mo.IsStreaming:
 			// 非流式完整输出（兜底）
+			if mo.Message.ReasoningContent != "" {
+				emitReasoning(mo.Message.ReasoningContent)
+			}
 			if mo.Message.Content != "" {
 				recordDelta(mo.Message.Content)
+			}
+			for _, tc := range mo.Message.ToolCalls {
+				emitToolCall(s, runCtx, conv, runID, tc, emit)
+			}
+			if mo.Message.ResponseMeta != nil {
+				if mo.Message.ResponseMeta.Usage != nil {
+					lastUsage = mo.Message.ResponseMeta.Usage
+				}
+				if mo.Message.ResponseMeta.FinishReason != "" {
+					lastFinish = mo.Message.ResponseMeta.FinishReason
+				}
 			}
 		}
 	}
@@ -196,18 +241,84 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	}
 
 	// 5) 终态事件
+	// 5) 终态事件（附带耗时 / token 用量 / finish_reason，供前端执行细节展示）
+	finishData := func(reason string) map[string]any {
+		data := map[string]any{"reason": reason, "elapsed_ms": time.Since(start).Milliseconds()}
+		if lastUsage != nil {
+			data["usage"] = map[string]any{
+				"prompt_tokens":     lastUsage.PromptTokens,
+				"completion_tokens": lastUsage.CompletionTokens,
+				"total_tokens":      lastUsage.TotalTokens,
+			}
+		}
+		if lastFinish != "" {
+			data["finish_reason"] = lastFinish
+		}
+		return data
+	}
 	switch {
 	case stopped:
-		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, map[string]any{"reason": "stopped"}), emit)
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("stopped")), emit)
 		res.Stopped = true
 	case runErr != "":
-		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, map[string]any{"code": "run_failed", "message": runErr}), emit)
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, map[string]any{
+			"code": "run_failed", "message": runErr, "elapsed_ms": time.Since(start).Milliseconds(),
+		}), emit)
 		res.Error = runErr
 	default:
-		_ = msgEmitted
-		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, map[string]any{"reason": "completed"}), emit)
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
 	}
 	return res, nil
+}
+
+// pendingToolCall 流式 tool_calls 增量聚合（Index -> 名称/参数累积）。
+type pendingToolCall struct {
+	ID   string
+	Name string
+	Args strings.Builder
+}
+
+// mergeToolCallChunk 合并流式 tool_calls 增量分片。
+func mergeToolCallChunk(agg map[int]*pendingToolCall, tcs []schema.ToolCall) {
+	for _, tc := range tcs {
+		idx := 0
+		if tc.Index != nil {
+			idx = *tc.Index
+		}
+		p := agg[idx]
+		if p == nil {
+			p = &pendingToolCall{}
+			agg[idx] = p
+		}
+		if tc.ID != "" && p.ID == "" {
+			p.ID = tc.ID
+		}
+		if tc.Function.Name != "" {
+			p.Name = tc.Function.Name // 名称一次性到达
+		}
+		p.Args.WriteString(tc.Function.Arguments) // 参数为增量分片
+	}
+}
+
+// flushToolCalls 输出聚合完成的 tool.call 事件（M2 无工具执行器，先打通事件链路）。
+func flushToolCalls(s *Service, ctx context.Context, conv *store.Conversation, runID string, agg map[int]*pendingToolCall, emit EmitFn) {
+	for _, p := range agg {
+		if p.Name == "" {
+			continue
+		}
+		emitToolCall(s, ctx, conv, runID, schema.ToolCall{
+			ID: p.ID, Function: schema.FunctionCall{Name: p.Name, Arguments: p.Args.String()},
+		}, emit)
+	}
+}
+
+// emitToolCall 输出模型发起的工具调用事件（含入参 JSON 字符串）。
+func emitToolCall(s *Service, ctx context.Context, conv *store.Conversation, runID string, tc schema.ToolCall, emit EmitFn) {
+	data := map[string]any{"tool_name": tc.Function.Name, "arguments": tc.Function.Arguments}
+	if tc.ID != "" {
+		data["tool_call_id"] = tc.ID
+	}
+	s.emitAndRecord(ctx, conv, runID, newEvent("tool.call", runID, data), emit)
 }
 
 // Stop 停止对话正在进行的运行。

@@ -77,3 +77,13 @@ export interface PlatformEvent {
   ts?: string
   data?: any
 }
+
+/** run_event 持久化事件（GET /conversations/{id}/events，历史时间线回放） */
+export interface RunEventDTO {
+  id: string
+  conversation_id: string
+  run_id: string
+  type: string
+  data?: string
+  created_at: string
+}

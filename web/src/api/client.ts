@@ -1,4 +1,4 @@
-import type { Agent, Conversation, Message, ModelConnection, Project } from './types'
+import type { Agent, Conversation, Message, ModelConnection, Project, RunEventDTO } from './types'
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -42,6 +42,7 @@ export const api = {
   updateConversation: (id: string, c: Partial<Conversation>) => req<Conversation>(`/api/conversations/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
   deleteConversation: (id: string) => req<{ deleted: string }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   listMessages: (id: string) => req<Message[]>(`/api/conversations/${id}/messages`),
+  listEvents: (id: string) => req<RunEventDTO[]>(`/api/conversations/${id}/events`),
 
   // model connections
   listConnections: () => req<ModelConnection[]>('/api/model-connections'),

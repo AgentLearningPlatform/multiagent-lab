@@ -11,12 +11,52 @@ interface ChatItem {
   eventText?: string
   eventErr?: boolean
   streaming?: boolean
+  // 执行细节增强（06 §4 执行可观测）
+  evType?: string // reasoning | run.started | run.finished | run.error | tool.call | tool.result | skill.loaded
+  evData?: any // 事件 data（解析后，供详情展开与调试面板）
+  reasoning?: string // 深度思考累积内容
+  streamKey?: string // 运行中的 reasoning 卡合并键；运行结束置空收起
+}
+
+// 事件卡文案（实时流与历史回放共用）
+function describeEvent(type: string, d: any): { text: string; err?: boolean } {
+  switch (type) {
+    case 'run.started':
+      return { text: `▶ 运行开始 · ${d?.agent_name ?? ''} · ${d?.model ?? ''}`.replace(/ ·\s*$/, '') }
+    case 'run.finished':
+      return d?.reason === 'stopped' ? { text: '⏹ 已停止' } : { text: finishSummary(d) }
+    case 'run.error':
+      return { text: `⚠ ${d?.message ?? '运行失败'}`, err: true }
+    case 'tool.call':
+      return { text: `⚙ 调用工具 ${d?.tool_name ?? ''}` }
+    case 'tool.result':
+      return { text: `⚙ 工具结果 ${d?.tool_name ?? ''}` }
+    case 'skill.loaded':
+      return { text: `📚 技能 ${d?.skill_name ?? d?.name ?? ''}`.replace(/ $/, '') }
+    default:
+      return { text: `· ${type}` }
+  }
+}
+
+// run.finished 摘要：耗时 / token 用量 / finish_reason
+function finishSummary(d: any): string {
+  const parts = ['✓ 运行完成']
+  if (typeof d?.elapsed_ms === 'number') {
+    parts.push(d.elapsed_ms >= 1000 ? `${(d.elapsed_ms / 1000).toFixed(1)}s` : `${d.elapsed_ms}ms`)
+  }
+  const u = d?.usage
+  if (u && typeof u.total_tokens === 'number' && u.total_tokens > 0) {
+    parts.push(`tokens ${u.prompt_tokens ?? 0}+${u.completion_tokens ?? 0}=${u.total_tokens}`)
+  }
+  if (d?.finish_reason) parts.push(`finish=${d.finish_reason}`)
+  return parts.join(' · ')
 }
 
 /**
  * 中间对话窗口（原型 06 §3.1 / §3.2）：
  * - agent 直聊：头部显示智能体名，「属性」打开智能体配置
  * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」，「属性」打开项目配置
+ * - 执行细节：历史事件回放、token 用量与耗时、深度思考折叠卡、工具调用入参/出参 JSON、原始事件调试开关
  */
 export default function ChatWindow({
   conversation,
@@ -50,26 +90,57 @@ export default function ChatWindow({
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
+  const [showRaw, setShowRaw] = useState(false) // 原始事件 JSON 调试开关
   const runRef = useRef<{ abort: () => void; done: Promise<void> } | null>(null)
+  const runKeyRef = useRef('')
   const listRef = useRef<HTMLDivElement>(null)
   const connRef = useRef<ModelConnection[]>([])
 
-  // 历史还原：进入对话时拉取消息
+  // 历史还原：消息表（对话正文）+ 事件表（执行时间线）按时间合并
   useEffect(() => {
     let alive = true
     setItems([])
     if (!conversation) return
-    api.listMessages(conversation.id).then((msgs) => {
-      if (!alive) return
-      setItems(
-        msgs.map((m) => ({
-          kind: 'msg' as const,
-          role: m.role,
-          content: m.content,
-          metaAgent: undefined,
-        })),
-      )
-    })
+    Promise.all([api.listMessages(conversation.id), api.listEvents(conversation.id).catch(() => [] as never[])])
+      .then(([msgs, evs]) => {
+        if (!alive) return
+        const timeline: { ts: string; item: ChatItem }[] = []
+        msgs.forEach((m) =>
+          timeline.push({ ts: m.created_at, item: { kind: 'msg', role: m.role, content: m.content } }),
+        )
+        const reasoningCards: Record<string, ChatItem> = {}
+        for (const e of evs) {
+          let d: any = {}
+          try {
+            d = e.data ? JSON.parse(e.data) : {}
+          } catch {
+            /* 忽略非 JSON 数据 */
+          }
+          if (e.type === 'message.delta') continue // 正文已由消息表还原，避免重复
+          if (e.type === 'reasoning.delta') {
+            const k = e.run_id || '_'
+            if (!reasoningCards[k]) {
+              reasoningCards[k] = {
+                kind: 'event',
+                evType: 'reasoning',
+                reasoning: '',
+                evData: { run_id: e.run_id, type: 'reasoning' },
+              }
+              timeline.push({ ts: e.created_at, item: reasoningCards[k] })
+            }
+            reasoningCards[k].reasoning += d?.delta ?? ''
+            continue
+          }
+          const desc = describeEvent(e.type, d)
+          timeline.push({
+            ts: e.created_at,
+            item: { kind: 'event', evType: e.type, eventText: desc.text, eventErr: desc.err, evData: d },
+          })
+        }
+        timeline.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+        setItems(timeline.map((t) => t.item))
+      })
+      .catch(() => {})
     return () => {
       alive = false
     }
@@ -102,20 +173,44 @@ export default function ChatWindow({
       return
     }
     setInput('')
+    runKeyRef.current = `run-${Date.now()}`
     setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
 
     // 追加流式助手消息
-    const streamKey = items.length + 1
-    setItems((prev) => [...prev, { kind: 'msg', role: 'assistant', content: '', streaming: true, metaAgent: `run-${streamKey}` }])
+    setItems((prev) => [...prev, { kind: 'msg', role: 'assistant', content: '', streaming: true }])
     setRunning(true)
     const aborter = runConversation(conversation.id, text, ({ event, data }) => {
       const payload = data?.data ?? {}
       switch (event) {
         case 'run.started':
+        case 'run.finished': {
+          const desc = describeEvent(event, payload)
           setItems((prev) => {
             const next = [...prev]
-            const ev: ChatItem = { kind: 'event', eventText: `▶ 运行开始 · ${payload.agent_name ?? agent?.name ?? ''} · ${payload.model ?? ''}` }
+            if (event === 'run.finished') {
+              const last = next[next.length - 1]
+              if (last && last.kind === 'msg' && last.streaming) {
+                last.streaming = false
+                if (!last.content) last.content = payload.reason === 'stopped' ? '（已停止生成）' : ''
+              }
+            }
+            const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
             next.splice(next.length - 1, 0, ev)
+            return next
+          })
+          break
+        }
+        case 'reasoning.delta':
+          setItems((prev) => {
+            const next = [...prev]
+            for (let i = next.length - 1; i >= 0; i--) {
+              if (next[i].evType === 'reasoning' && next[i].streamKey === runKeyRef.current) {
+                next[i] = { ...next[i], reasoning: (next[i].reasoning ?? '') + (payload.delta ?? '') }
+                return next
+              }
+            }
+            const card: ChatItem = { kind: 'event', evType: 'reasoning', reasoning: payload.delta ?? '', streamKey: runKeyRef.current }
+            next.splice(Math.max(next.length - 1, 0), 0, card)
             return next
           })
           break
@@ -127,37 +222,26 @@ export default function ChatWindow({
             return next
           })
           break
-        case 'run.finished':
-          setItems((prev) => {
-            const next = [...prev]
-            const last = next[next.length - 1]
-            if (last && last.kind === 'msg' && last.streaming) {
-              last.streaming = false
-              if (!last.content) last.content = payload.reason === 'stopped' ? '（已停止生成）' : ''
-            }
-            const ev: ChatItem = { kind: 'event', eventText: payload.reason === 'stopped' ? '⏹ 已停止' : '✓ 运行完成' }
-            next.splice(next.length - 1, 0, ev)
-            return next
-          })
-          break
         case 'run.error': {
           const msg = payload.message ?? '运行失败'
           setItems((prev) => {
             const next = [...prev]
             const last = next[next.length - 1]
             if (last && last.kind === 'msg' && last.streaming && !last.content) next.pop()
-            const ev: ChatItem = { kind: 'event', eventErr: true, eventText: `⚠ ${msg}` }
+            const ev: ChatItem = { kind: 'event', evType: 'run.error', eventErr: true, eventText: `⚠ ${msg}`, evData: payload }
             return [...next, ev]
           })
           break
         }
         default:
           if (event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded') {
-            setItems((prev) => [
-              ...prev.slice(0, -1),
-              { kind: 'event', eventText: `⚙ ${event} ${payload.tool_name ?? ''}`.trim() },
-              prev[prev.length - 1],
-            ])
+            const desc = describeEvent(event, payload)
+            setItems((prev) => {
+              const next = [...prev]
+              const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
+              next.splice(next.length - 1, 0, ev) // 流式助手消息存在时插到其前
+              return next
+            })
           }
       }
     })
@@ -165,6 +249,8 @@ export default function ChatWindow({
     try {
       await aborter.done
     } catch { /* 用户中断 */ }
+    // 运行结束：reasoning 卡收起（保留内容，可手动展开）
+    setItems((prev) => prev.map((it) => (it.streamKey ? { ...it, streamKey: undefined } : it)))
     setRunning(false)
     runRef.current = null
     bumpData()
@@ -202,6 +288,13 @@ export default function ChatWindow({
         )}
         <span className="spacer" />
         <button
+          className={`btn-ghost ${showRaw ? 'on' : ''}`}
+          onClick={() => setShowRaw((v) => !v)}
+          title="显示运行事件的原始 JSON（调试用）"
+        >
+          {showRaw ? '调试：开' : '调试'}
+        </button>
+        <button
           className="btn-ghost"
           onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
           disabled={isProjectScope ? !project : !agent}
@@ -227,13 +320,30 @@ export default function ChatWindow({
           it.kind === 'msg' ? (
             <div key={i} className={`msg ${it.role === 'user' ? 'user' : 'assistant'}`}>
               <div className="bubble">
-                {it.role === 'assistant' && it.metaAgent && <div className="meta">助手</div>}
+                {it.role === 'assistant' && <div className="meta">助手</div>}
                 {it.content}
                 {it.streaming && <span className="cursor-blink" />}
               </div>
             </div>
+          ) : it.evType === 'reasoning' ? (
+            <div key={i} className="event-card reasoning">
+              <details open={!!it.streamKey}>
+                <summary>💭 深度思考{it.reasoning ? `（${it.reasoning.length} 字）` : ''}</summary>
+                <pre className="thinking">{it.reasoning}</pre>
+              </details>
+              {showRaw && it.evData && <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>}
+            </div>
           ) : (
-            <div key={i} className={`event-card ${it.eventErr ? 'err' : ''}`}>{it.eventText}</div>
+            <div key={i} className={`event-card ${it.eventErr ? 'err' : ''}`}>
+              <span>{it.eventText}</span>
+              {(it.evType === 'tool.call' || it.evType === 'tool.result') && it.evData && (
+                <details className="tool-detail">
+                  <summary>详情</summary>
+                  <pre>{JSON.stringify(it.evData, null, 2)}</pre>
+                </details>
+              )}
+              {showRaw && it.evData && <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>}
+            </div>
           ),
         )}
       </div>
@@ -270,7 +380,7 @@ export default function ChatWindow({
           )}
         </div>
         <div className="tips">
-          Enter 发送 · Shift+Enter 换行 · 运行过程事件（运行开始/完成/错误）会以卡片显示在消息流中
+          Enter 发送 · Shift+Enter 换行 · 运行过程（开始/思考/工具/用量/完成）以卡片显示，「调试」可查看原始事件
         </div>
       </div>
     </div>
