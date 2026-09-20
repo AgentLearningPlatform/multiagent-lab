@@ -70,6 +70,14 @@ func (s *Server) routes() {
 
 	// 工具注册表（REQ-24 工具勾选）
 	m.HandleFunc("GET /api/tools", s.listTools)
+
+	// 技能库（M7，§6.12）
+	m.HandleFunc("GET /api/skills", s.listSkills)
+	m.HandleFunc("POST /api/skills", s.createSkill)
+	m.HandleFunc("GET /api/skills/{id}", s.getSkill)
+	m.HandleFunc("PUT /api/skills/{id}", s.updateSkill)
+	m.HandleFunc("GET /api/skills/{id}/preview", s.previewSkill)
+	m.HandleFunc("DELETE /api/skills/{id}", s.deleteSkill)
 }
 
 // ---- JSON 工具 ----

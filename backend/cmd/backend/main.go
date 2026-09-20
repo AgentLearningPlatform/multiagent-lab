@@ -16,6 +16,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/api"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/skill"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 )
@@ -42,7 +43,12 @@ func main() {
 		log.Fatalf("register builtin tools: %v", err)
 	}
 
-	asm := &chat.Assembler{Store: st, Box: box, Tools: reg}
+	asm := &chat.Assembler{
+		Store:    st,
+		Box:      box,
+		Tools:    reg,
+		Composer: &skill.Composer{Store: st}, // M9：技能注入
+	}
 	svc := chat.NewService(st, asm)
 	srv := api.NewServer(st, box, svc, reg)
 

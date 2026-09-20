@@ -1,10 +1,12 @@
 // Package chat 负责 Agent 运行时装配与执行。
 // 每次运行按当前配置装配（配置驱动，验收5），支持单 Agent 直聊与项目多 Agent 协作（M4）。
+// M9：技能挂载生效（§6.12 注入）+ MCP servers 工具装载（§6.11，失败降级）。
 package chat
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
@@ -13,25 +15,31 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/skill"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 )
 
+// mcpFetchTimeout 单个 MCP server 连接+列工具的超时（§13：不做重试风暴）。
+const mcpFetchTimeout = 10 * time.Second
+
 // Assembler 从平台配置装配 Eino Agent。
 type Assembler struct {
-	Store *store.Store
-	Box   *secrets.Box
-	Tools *tool.Registry
+	Store    *store.Store
+	Box      *secrets.Box
+	Tools    *tool.Registry
+	Composer *skill.Composer // M9：技能注入（nil 时技能不生效）
 }
 
 // BuildResult 装配产物。
 type BuildResult struct {
-	Runner     *adk.Runner
-	AgentName  string            // 根 Agent 名
-	ModelLabel string            // 根 Agent 的连接名@模型名
-	ConnID     string            // 根 Agent 使用的连接
-	SourceOf   map[string]string // 工具 function name -> 来源（tool.call 事件 source 标注）
-	Warnings   []string          // 装配期告警（并入 run.started data）
+	Runner       *adk.Runner
+	AgentName    string            // 根 Agent 名
+	ModelLabel   string            // 根 Agent 的连接名@模型名
+	ConnID       string            // 根 Agent 使用的连接
+	SourceOf     map[string]string // 工具 function name -> 来源（tool.call 事件 source 标注）
+	Warnings     []string          // 装配期告警（并入 run.started data）
+	LoadedSkills []*store.Skill    // 本次运行生效的技能（skill.loaded 事件，M9）
 }
 
 // Runtime 兼容别名（历史调用方）。
@@ -63,12 +71,13 @@ func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent) (*Build
 	}
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: b.Inst, EnableStreaming: true})
 	return &BuildResult{
-		Runner:     runner,
-		AgentName:  ag.Name,
-		ModelLabel: b.Meta.ModelLabel,
-		ConnID:     b.Meta.ConnID,
-		SourceOf:   b.Meta.SourceOf,
-		Warnings:   b.Meta.Warnings,
+		Runner:       runner,
+		AgentName:    ag.Name,
+		ModelLabel:   b.Meta.ModelLabel,
+		ConnID:       b.Meta.ConnID,
+		SourceOf:     b.Meta.SourceOf,
+		Warnings:     b.Meta.Warnings,
+		LoadedSkills: b.Meta.LoadedSkills,
 	}, nil
 }
 
@@ -142,20 +151,21 @@ func (a *Assembler) assembleProject(ctx context.Context, p *store.Project) (*Bui
 
 // assembleAgentAsTool 协调者以工具形式调用成员（推荐路径，ADK AgentTool）。
 func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string) (*BuildResult, error) {
-	// 协调者基础装配（模型 + 勾选工具）
+	// 协调者基础装配（模型 + 技能 + MCP + 勾选工具）
 	cm, label, connID, err := a.buildModel(ctx, coord)
 	if err != nil {
 		return nil, fmt.Errorf("build coordinator: %w", err)
 	}
-	composed, err := a.Tools.Compose(ctx, coord.Tools)
+	tbc, err := a.assembleTools(ctx, coord)
 	if err != nil {
 		return nil, fmt.Errorf("compose coordinator tools: %w", err)
 	}
-	tools := append([]einotool.BaseTool{}, composed.Tools...)
-	src := copySourceOf(composed.SourceOf)
-	allWarns := append(append([]string{}, composed.Warnings...), warns...)
+	tools := append([]einotool.BaseTool{}, tbc.Tools...)
+	src := copySourceOf(tbc.SourceOf)
+	allWarns := append(append([]string{}, tbc.Warnings...), warns...)
+	loaded := appendLoadedSkills(nil, tbc.LoadedSkills)
 
-	// 成员 → AgentTool（成员全量装配：各自模型/工具；ADK 要求 Name/Description 非空）
+	// 成员 → AgentTool（成员全量装配：各自模型/技能/MCP/工具；ADK 要求 Name/Description 非空）
 	for _, s := range subs {
 		if err := requireAgentToolFields(s); err != nil {
 			return nil, err
@@ -171,10 +181,11 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 			}
 		}
 		allWarns = append(allWarns, sb.Meta.Warnings...)
+		loaded = appendLoadedSkills(loaded, sb.Meta.LoadedSkills)
 		src[s.Name] = fmt.Sprintf("agent:%s", s.ID) // AgentTool 的 function name = 成员名
 	}
 
-	inst, err := newChatModelAgent(ctx, coord, cm, tools)
+	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstruction(coord), coord.MaxIteration, cm, tools)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +193,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
 		ModelLabel: label, ConnID: connID,
-		SourceOf: src, Warnings: allWarns,
+		SourceOf: src, Warnings: allWarns, LoadedSkills: loaded,
 	}, nil
 }
 
@@ -192,14 +203,15 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	if err != nil {
 		return nil, fmt.Errorf("build coordinator: %w", err)
 	}
-	composed, err := a.Tools.Compose(ctx, coord.Tools)
+	tbc, err := a.assembleTools(ctx, coord)
 	if err != nil {
 		return nil, fmt.Errorf("compose coordinator tools: %w", err)
 	}
-	src := copySourceOf(composed.SourceOf)
-	allWarns := append(append([]string{}, composed.Warnings...), warns...)
+	src := copySourceOf(tbc.SourceOf)
+	allWarns := append(append([]string{}, tbc.Warnings...), warns...)
+	loaded := appendLoadedSkills(nil, tbc.LoadedSkills)
 
-	inst, err := newChatModelAgent(ctx, coord, cm, composed.Tools)
+	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstruction(coord), coord.MaxIteration, cm, tbc.Tools)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +228,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 			}
 		}
 		allWarns = append(allWarns, sb.Meta.Warnings...)
+		loaded = appendLoadedSkills(loaded, sb.Meta.LoadedSkills)
 	}
 	root, err := adk.SetSubAgents(ctx, inst, subAgents)
 	if err != nil {
@@ -225,35 +238,138 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
 		ModelLabel: label, ConnID: connID,
-		SourceOf: src, Warnings: allWarns,
+		SourceOf: src, Warnings: allWarns, LoadedSkills: loaded,
 	}, nil
 }
 
-// buildOne 装配单个 Agent 实例：模型解析（显式>默认，M3）→ 工具合并（§6.8）→ ChatModelAgent。
+// buildOne 装配单个 Agent 实例：模型解析（显式>默认，M3）→ 工具合并（§6.8/§6.12/§6.11）→ ChatModelAgent。
 func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent) (*agentBuild, error) {
 	cm, label, connID, err := a.buildModel(ctx, ag)
 	if err != nil {
 		return nil, err
 	}
-	// 工具合并（M5）：agent.tools 勾选 → 注册表实例化。
-	// M7/M9 扩展点：技能白名单、MCP servers、本体 onto_* 均并入同一装配管线。
-	composed, err := a.Tools.Compose(ctx, append([]string{}, ag.Tools...))
+	tb, err := a.assembleTools(ctx, ag)
 	if err != nil {
-		return nil, fmt.Errorf("compose tools: %w", err)
+		return nil, err
 	}
-	inst, err := newChatModelAgent(ctx, ag, cm, composed.Tools)
+	inst, err := newChatModelAgent(ctx, ag.Name, ag.Description, a.composeInstruction(ag), ag.MaxIteration, cm, tb.Tools)
 	if err != nil {
 		return nil, err
 	}
 	return &agentBuild{
 		Inst: inst,
 		Meta: &agentMeta{
-			ModelLabel: label,
-			ConnID:     connID,
-			SourceOf:   composed.SourceOf,
-			Warnings:   composed.Warnings,
+			ModelLabel:   label,
+			ConnID:       connID,
+			SourceOf:     tb.SourceOf,
+			Warnings:     tb.Warnings,
+			LoadedSkills: tb.LoadedSkills,
 		},
 	}, nil
+}
+
+// toolBundle 单 Agent 的工具装配产物。
+type toolBundle struct {
+	Tools        []einotool.BaseTool
+	SourceOf     map[string]string
+	Warnings     []string
+	LoadedSkills []*store.Skill
+}
+
+// assembleTools 工具合并管线（§6.8 M5 / §6.12 M9 技能 / §6.11 M9 MCP）：
+// 1) builtin 注册表按 agent.tools 勾选实例化；
+// 2) 技能白名单（挂载且启用）并集补充，source=skill:{id}；
+// 3) MCP servers 拉取远端工具，{server}__{tool} 前缀，source=mcp:{server}，失败降级告警；
+// function name 冲突先到先得 + 告警。
+func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent) (*toolBundle, error) {
+	tb := &toolBundle{Tools: []einotool.BaseTool{}, SourceOf: map[string]string{}, Warnings: []string{}}
+
+	// 1) builtin 勾选
+	composed, err := a.Tools.Compose(ctx, append([]string{}, ag.Tools...))
+	if err != nil {
+		return nil, fmt.Errorf("compose tools: %w", err)
+	}
+	tb.Tools = append(tb.Tools, composed.Tools...)
+	for k, v := range composed.SourceOf {
+		tb.SourceOf[k] = v
+	}
+	tb.Warnings = append(tb.Warnings, composed.Warnings...)
+
+	// 2) 技能白名单（M9 挂载生效）
+	if a.Composer != nil {
+		tb.LoadedSkills = a.Composer.LoadedSkills(ag)
+		for _, sk := range tb.LoadedSkills {
+			for _, tid := range sk.Tools {
+				e, ok := a.Tools.Get(tid)
+				if !ok {
+					tb.Warnings = append(tb.Warnings, fmt.Sprintf("技能 %q 引用未知工具 %q，已跳过", sk.Name, tid))
+					continue
+				}
+				if _, dup := tb.SourceOf[e.Name]; dup {
+					continue // agent.tools 已勾选或前序技能已装
+				}
+				bt, berr := e.New(ctx)
+				if berr != nil {
+					tb.Warnings = append(tb.Warnings, fmt.Sprintf("技能 %q 工具 %q 实例化失败: %v", sk.Name, tid, berr))
+					continue
+				}
+				tb.Tools = append(tb.Tools, bt)
+				tb.SourceOf[e.Name] = "skill:" + sk.ID
+			}
+		}
+	}
+
+	// 3) MCP servers（M9；连接失败降级继续，不阻断运行）
+	for _, ms := range ag.MCPServers {
+		if ms.URL == "" {
+			continue
+		}
+		bts, ferr := tool.FetchMCPTools(ctx, ms.Name, ms.URL, mcpFetchTimeout)
+		if ferr != nil {
+			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 连接失败，本次运行不加载其工具: %v", ms.Name, ms.URL, ferr))
+			continue
+		}
+		if len(bts) == 0 {
+			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s 未暴露任何工具", ms.Name))
+			continue
+		}
+		for _, bt := range bts {
+			ti, ierr := bt.Info(ctx)
+			if ierr != nil || ti == nil || ti.Name == "" {
+				continue
+			}
+			if _, dup := tb.SourceOf[ti.Name]; dup {
+				tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP 工具 %q 与已有工具重名，已跳过", ti.Name))
+				continue
+			}
+			tb.Tools = append(tb.Tools, bt)
+			tb.SourceOf[ti.Name] = "mcp:" + ms.Name
+		}
+	}
+	return tb, nil
+}
+
+// composeInstruction 技能注入后的最终系统提示词（§6.12；无 Composer/无技能时即原指令）。
+func (a *Assembler) composeInstruction(ag *store.Agent) string {
+	if a.Composer == nil {
+		return ag.Instruction
+	}
+	return a.Composer.ComposeInstruction(ag)
+}
+
+// appendLoadedSkills 合并去重（多 Agent 协作时 skill.loaded 汇总）。
+func appendLoadedSkills(dst, add []*store.Skill) []*store.Skill {
+	seen := map[string]bool{}
+	for _, sk := range dst {
+		seen[sk.ID] = true
+	}
+	for _, sk := range add {
+		if !seen[sk.ID] {
+			seen[sk.ID] = true
+			dst = append(dst, sk)
+		}
+	}
+	return dst
 }
 
 // agentBuild 单个 Agent 装配产物（可独立运行，也可并入协作结构）。
@@ -264,20 +380,21 @@ type agentBuild struct {
 
 // agentMeta 单 Agent 元信息。
 type agentMeta struct {
-	ModelLabel string
-	ConnID     string
-	SourceOf   map[string]string
-	Warnings   []string
+	ModelLabel   string
+	ConnID       string
+	SourceOf     map[string]string
+	Warnings     []string
+	LoadedSkills []*store.Skill
 }
 
 // newChatModelAgent 构造 ADK ChatModelAgent（统一 ToolsConfig / EmitInternalEvents）。
-func newChatModelAgent(ctx context.Context, ag *store.Agent, cm *openai.ChatModel, tools []einotool.BaseTool) (adk.Agent, error) {
+func newChatModelAgent(ctx context.Context, name, description, instruction string, maxIter int, cm *openai.ChatModel, tools []einotool.BaseTool) (adk.Agent, error) {
 	inst, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:          ag.Name,
-		Description:   ag.Description,
-		Instruction:   ag.Instruction, // M7：ComposeInstruction 技能注入
+		Name:          name,
+		Description:   description,
+		Instruction:   instruction, // M9：ComposeInstruction 技能注入后文本
 		Model:         cm,
-		MaxIterations: normalizeMaxIter(ag.MaxIteration),
+		MaxIterations: normalizeMaxIter(maxIter),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools},
 			// agent_as_tool / transfer 模式下内层 Agent 事件流出（subagent 事件时间线，M4）
@@ -285,7 +402,7 @@ func newChatModelAgent(ctx context.Context, ag *store.Agent, cm *openai.ChatMode
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create adk agent %q: %w", ag.Name, err)
+		return nil, fmt.Errorf("create adk agent %q: %w", name, err)
 	}
 	return inst, nil
 }

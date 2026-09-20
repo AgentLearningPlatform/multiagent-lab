@@ -124,6 +124,15 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	}
 	s.emitAndRecord(runCtx, conv, runID, newEvent("run.started", runID, startData), emit)
 
+	// skill.loaded（§6.12：本次运行实际生效的技能，M9 挂载生效）
+	if len(rt.LoadedSkills) > 0 {
+		skills := make([]map[string]string, 0, len(rt.LoadedSkills))
+		for _, sk := range rt.LoadedSkills {
+			skills = append(skills, map[string]string{"id": sk.ID, "name": sk.Name})
+		}
+		s.emitAndRecord(runCtx, conv, runID, newEvent("skill.loaded", runID, map[string]any{"skills": skills}), emit)
+	}
+
 	var (
 		buf        []byte
 		stopped    bool
