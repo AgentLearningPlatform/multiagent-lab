@@ -10,6 +10,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 )
 
 // Server 聚合依赖并持有路由。
@@ -17,12 +18,13 @@ type Server struct {
 	Store *store.Store
 	Box   *secrets.Box
 	Chat  *chat.Service
+	Tools *tool.Registry
 	Mux   *http.ServeMux
 }
 
 // NewServer 构造并注册全部路由。
-func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service) *Server {
-	s := &Server{Store: st, Box: box, Chat: chatSvc, Mux: http.NewServeMux()}
+func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry) *Server {
+	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -65,6 +67,9 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/model-connections/{id}", s.deleteConnection)
 	m.HandleFunc("PUT /api/model-connections/{id}/default", s.setDefaultConnection)
 	m.HandleFunc("POST /api/model-connections/test", s.testConnection)
+
+	// 工具注册表（REQ-24 工具勾选）
+	m.HandleFunc("GET /api/tools", s.listTools)
 }
 
 // ---- JSON 工具 ----

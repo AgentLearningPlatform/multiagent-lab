@@ -109,8 +109,8 @@ func (s *Store) UpdateConnection(c *ModelConnection, apiKeyEnc []byte) (*ModelCo
 		res, err = s.DB.Exec(`UPDATE model_connection SET name=?,conn_type=?,protocol=?,base_url=?,model_name=?,api_key_enc=?,api_key_hint=?,enabled=?,is_default=?,updated_at=? WHERE id=?`,
 			c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, apiKeyEnc, c.APIKeyHint, boolInt(c.Enabled), boolInt(c.IsDefault), now(), c.ID)
 	} else {
-		res, err = s.DB.Exec(`UPDATE model_connection SET name=?,conn_type=?,protocol=?,base_url=?,model_name=?,api_key_hint=?,enabled=?,is_default=?,updated_at=? WHERE id=?`,
-			c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, c.APIKeyHint, boolInt(c.Enabled), boolInt(c.IsDefault), now(), c.ID)
+		res, err = s.DB.Exec(`UPDATE model_connection SET name=?,conn_type=?,protocol=?,base_url=?,model_name=?,enabled=?,is_default=?,updated_at=? WHERE id=?`,
+			c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, boolInt(c.Enabled), boolInt(c.IsDefault), now(), c.ID)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {

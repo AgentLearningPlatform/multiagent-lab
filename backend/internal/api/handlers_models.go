@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
@@ -51,7 +52,8 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 //  3. 两者皆空 → 返回 nil（创建 = 无 Key；更新 = 保留原 Key）。
 func (s *Server) resolveConnKey(c *store.ModelConnection) ([]byte, error) {
 	switch {
-	case c.APIKey != "":
+	case c.APIKey != "" && !strings.HasPrefix(c.APIKey, "sk-****"):
+		// api_key 为掩码串（sk-****xxxx）时视为"保留原 key"（防止前端回显掩码误存）
 		b, err := s.Box.Encrypt(c.APIKey)
 		if err != nil {
 			return nil, err
@@ -124,6 +126,10 @@ func (s *Server) setDefaultConnection(w http.ResponseWriter, r *http.Request) {
 	c, err := s.Store.GetConnection(id)
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if !c.Enabled {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "连接已停用，请先启用再设为默认"})
 		return
 	}
 	if err := s.Store.SetDefaultConnection(id, c.ConnType); err != nil {

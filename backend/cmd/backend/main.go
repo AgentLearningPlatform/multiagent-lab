@@ -17,6 +17,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 )
 
 func main() {
@@ -35,9 +36,15 @@ func main() {
 		log.Fatalf("load secret key: %v", err)
 	}
 
-	asm := &chat.Assembler{Store: st, Box: box}
+	// 工具注册表（M5，方案 §6.8）：内置工具启动时登记
+	reg := tool.NewRegistry()
+	if err := tool.RegisterBuiltin(reg); err != nil {
+		log.Fatalf("register builtin tools: %v", err)
+	}
+
+	asm := &chat.Assembler{Store: st, Box: box, Tools: reg}
 	svc := chat.NewService(st, asm)
-	srv := api.NewServer(st, box, svc)
+	srv := api.NewServer(st, box, svc, reg)
 
 	httpSrv := &http.Server{
 		Addr:              addr,
