@@ -5,7 +5,7 @@ import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
-import ProjectDrawer from '../components/ProjectDrawer'
+import ProjectModal from '../components/ProjectModal'
 import NameModal from '../components/NameModal'
 
 /**
@@ -18,7 +18,7 @@ export default function ProjectsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [convs, setConvs] = useState<Conversation[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
-  const [drawerProjectId, setDrawerProjectId] = useState<string | null>(null)
+  const [configProjectId, setConfigProjectId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
 
   const reload = () => {
@@ -33,7 +33,7 @@ export default function ProjectsPage() {
   useEffect(reload, [dataVersion])
 
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null
-  const drawerProject = projects.find((p) => p.id === drawerProjectId) ?? null
+  const configProject = projects.find((p) => p.id === configProjectId) ?? null
   const currentConv = useMemo(() => convs.find((c) => c.id === currentConvId) ?? null, [convs, currentConvId])
 
   // 选中对话不属于当前项目（或属于智能体）时，归位到空态
@@ -56,7 +56,7 @@ export default function ProjectsPage() {
       bumpData()
       setActiveProjectId(p.id)
       showToast('项目已创建，请在配置中完善信息并添加成员智能体')
-      setDrawerProjectId(p.id)
+      setConfigProjectId(p.id)
     } catch (e: any) {
       showToast(e.message, 'err')
     }
@@ -75,7 +75,7 @@ export default function ProjectsPage() {
 
   const configureProject = (projectId: string) => {
     setActiveProjectId(projectId)
-    setDrawerProjectId(projectId)
+    setConfigProjectId(projectId)
   }
 
   return (
@@ -102,7 +102,7 @@ export default function ProjectsPage() {
           agents={agents}
           projects={projects}
           onOpenAgentDrawer={() => {}}
-          onOpenProjectDrawer={() => activeProject && setDrawerProjectId(activeProject.id)}
+          onOpenProjectDrawer={() => activeProject && setConfigProjectId(activeProject.id)}
           onConversationUpdated={reload}
         />
       ) : (
@@ -120,14 +120,14 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {drawerProject && (
-        <ProjectDrawer
-          project={drawerProject}
+      {configProject && (
+        <ProjectModal
+          project={configProject}
           agents={agents}
-          onClose={() => setDrawerProjectId(null)}
+          onClose={() => setConfigProjectId(null)}
           onChanged={reload}
           onDeleted={() => {
-            setDrawerProjectId(null)
+            setConfigProjectId(null)
             reload()
           }}
         />

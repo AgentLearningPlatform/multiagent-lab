@@ -11,7 +11,11 @@ const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
   { key: 'skills', label: '技能', icon: <ThunderboltOutlined /> },
 ]
 
-/** 顶部导航（蚂蚁 Menu horizontal） */
+/**
+ * 顶部导航（蚂蚁 Menu horizontal）。
+ * 设置不在导航菜单内：顶栏最右端独立齿轮按钮进入（原型 06 §2 / §3.6 v0.4），
+ * 悬停微旋转、激活态高亮，与五模块同一切换机制（useUI.setPage）。
+ */
 export default function TopNav() {
   const { page, setPage } = useUI()
   return (
@@ -22,11 +26,18 @@ export default function TopNav() {
         selectedKeys={[page]}
         onClick={({ key }) => setPage(key as PageKey)}
         style={{ flex: 1, minWidth: 0, borderBottom: 'none', background: 'transparent' }}
-        items={[
-          ...PAGES.map((p) => ({ key: p.key, label: p.label, icon: p.icon })),
-          { key: 'settings', label: '设置', icon: <SettingOutlined /> },
-        ]}
+        items={PAGES.map((p) => ({ key: p.key, label: p.label, icon: p.icon }))}
       />
+      <button
+        type="button"
+        className={`topnav-gear${page === 'settings' ? ' active' : ''}`}
+        aria-label="设置"
+        aria-current={page === 'settings' ? 'true' : undefined}
+        title="设置（模型管理等）"
+        onClick={() => setPage('settings')}
+      >
+        <SettingOutlined />
+      </button>
     </div>
   )
 }

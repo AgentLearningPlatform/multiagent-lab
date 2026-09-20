@@ -5,7 +5,7 @@ import type { Agent, Conversation } from '../api/types'
 import { useUI } from '../store/ui'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
-import AgentDrawer from '../components/AgentDrawer'
+import AgentModal from '../components/AgentModal'
 import NameModal from '../components/NameModal'
 
 /**
@@ -17,7 +17,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [convs, setConvs] = useState<Conversation[]>([])
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [configOpen, setConfigOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
 
   const reload = () => {
@@ -47,7 +47,7 @@ export default function AgentsPage() {
       bumpData()
       setActiveAgentId(a.id)
       showToast('智能体已创建，请在配置中完善信息')
-      setDrawerOpen(true)
+      setConfigOpen(true)
     } catch (e: any) {
       showToast(e.message, 'err')
     }
@@ -67,7 +67,7 @@ export default function AgentsPage() {
 
   const configureAgent = (agentId: string) => {
     setActiveAgentId(agentId)
-    setDrawerOpen(true)
+    setConfigOpen(true)
   }
 
   return (
@@ -93,7 +93,7 @@ export default function AgentsPage() {
           conversation={currentConv}
           agents={agents}
           projects={[]}
-          onOpenAgentDrawer={() => setDrawerOpen(true)}
+          onOpenAgentDrawer={() => setConfigOpen(true)}
           onOpenProjectDrawer={() => {}}
           onConversationUpdated={reload}
         />
@@ -112,8 +112,8 @@ export default function AgentsPage() {
         </div>
       )}
 
-      {drawerOpen && activeAgent && (
-        <AgentDrawer agent={activeAgent} onClose={() => setDrawerOpen(false)} onChanged={reload} />
+      {configOpen && activeAgent && (
+        <AgentModal agent={activeAgent} onClose={() => setConfigOpen(false)} onChanged={reload} />
       )}
 
       <NameModal open={createOpen} title="新建智能体" placeholder="智能体名称" onCancel={() => setCreateOpen(false)} onSubmit={createAgent} />

@@ -1,11 +1,9 @@
-import { Layout, Result, Tag, Typography } from 'antd'
+import { Result, Tag, Typography } from 'antd'
 import { useUI } from './store/ui'
 import TopNav from './components/TopNav'
 import AgentsPage from './pages/AgentsPage'
 import ProjectsPage from './pages/ProjectsPage'
 import SettingsPage from './pages/SettingsPage'
-
-const { Content } = Layout
 
 const PLACEHOLDERS: Record<string, { title: string; desc: string; milestone: string }> = {
   ontology: {
@@ -45,14 +43,15 @@ function Placeholder({ page }: { page: string }) {
 export default function App() {
   const { page } = useUI()
   return (
-    <Layout className="app" style={{ minHeight: '100vh' }}>
+    <div className="app">
       <TopNav />
-      <Content style={{ minHeight: 0 }}>
+      {/* 顶栏以下整块：左栏/右栏均为满高分栏（.app-body 为行向 flex，子页撑满剩余高度） */}
+      <div className="app-body">
         {page === 'agents' && <AgentsPage />}
         {page === 'projects' && <ProjectsPage />}
         {page === 'settings' && <SettingsPage />}
         {(page === 'ontology' || page === 'knowledge' || page === 'skills') && <Placeholder page={page} />}
-      </Content>
-    </Layout>
+      </div>
+    </div>
   )
 }

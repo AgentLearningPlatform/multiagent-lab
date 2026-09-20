@@ -1,6 +1,6 @@
 /*
  * 布局骨架样式（蚂蚁生态重构后）：
- * 组件视觉全部交给 antd 5 + @ant-design/x（ConfigProvider 统一主题），
+ * 组件视觉全部交给 antd 6 + @ant-design/x（ConfigProvider 统一主题），
  * 这里只保留整体布局网格、局部滚动与少数自定义卡片的补充样式。
  */
 :root {
@@ -19,7 +19,12 @@ html, body, #root { height: 100%; margin: 0; }
 body { font-size: 14px; background: var(--c-bg); }
 
 /* ---- 布局 ---- */
-.app { height: 100%; }
+/* 根因修复：antd <App> 在 #root 与 .app 之间渲染 .ant-app 包裹 div（默认无高度），
+   不补齐这条高度链，.app 的 height:100% 会退化为内容高度——空态时左栏不满高 */
+.ant-app { height: 100%; }
+/* 顶栏 + 主区：主区占满剩余视口高度，内部再左右分栏（各栏自行内滚）；关键节点显式 height:100% 加固 */
+.app { height: 100%; display: flex; flex-direction: column; }
+.app-body { flex: 1; display: flex; min-height: 0; }
 .topnav {
   display: flex; align-items: center; gap: 8px;
   padding: 0 20px; height: 52px; flex: none;
@@ -27,12 +32,22 @@ body { font-size: 14px; background: var(--c-bg); }
 }
 .topnav .logo { font-weight: 700; margin-right: 12px; font-size: 15px; color: var(--c-brand); white-space: nowrap; }
 
-.main { flex: 1; display: flex; min-height: 0; }
+/* 顶栏最右端设置齿轮（原型 06 §3.6 入口：导航栏外侧，悬停微旋转，激活态高亮） */
+.topnav-gear {
+  margin-left: 10px; width: 34px; height: 34px; border-radius: 8px; border: 0; background: none;
+  color: var(--c-ink-3); display: inline-flex; align-items: center; justify-content: center;
+  flex: none; cursor: pointer; padding: 0; font-size: 17px;
+}
+.topnav-gear .anticon { display: inline-flex; transition: transform .25s ease; }
+.topnav-gear:hover, .topnav-gear.active { background: #eef0f6; color: var(--c-brand); }
+.topnav-gear:hover .anticon { transform: rotate(30deg); }
+
+.main { flex: 1; display: flex; min-height: 0; height: 100%; }
 
 /* ---- 左栏 ---- */
 .sidebar {
   width: 280px; flex: none; border-right: 1px solid var(--c-line);
-  background: #fff; display: flex; flex-direction: column; min-height: 0;
+  background: #fff; display: flex; flex-direction: column; min-height: 0; height: 100%;
 }
 .sidebar .side-head { padding: 12px 14px 4px; }
 .sidebar .side-title { font-size: 13px; font-weight: 600; color: var(--c-ink-2); }
@@ -43,24 +58,39 @@ body { font-size: 14px; background: var(--c-bg); }
 .sidebar .ant-collapse-header { align-items: center !important; }
 .empty-hint { color: var(--c-ink-3); font-size: 12px; padding: 12px 10px 0; text-align: center; }
 
-/* ---- 对话区 ---- */
-.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* ---- 对话区（原型 06 §3.1：配置条 / 消息流 / 输入区 三段，仅消息流滚动） ---- */
+.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
 .chat-header {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow: hidden;
   background: #fff; border-bottom: 1px solid var(--c-line);
   padding: 10px 18px; flex: none;
 }
+.chat-header .subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-header .ant-tag { flex: none; }
+.chat-header .chat-ops { flex: none; }
 .chat-header .spacer { flex: 1; }
-.msg-list { flex: 1; overflow: auto; padding: 18px 20px; }
 
-/* 事件卡（运行时间线 / 工具调用 / 错误） */
+/* 消息流：外层不滚动（Bubble.List 内建滚动条 + autoScroll 负责滚动与置底）。
+   阅读尺度约束在气泡自身（而不是外层包裹列），这样滚动条始终落在对话区最右缘：
+   .ant-bubble 自身 width:100%，用 max-width 收窄 + 横向 auto margin 居中（auto margin 会压过
+   放置类的 align-self），配合 Bubble 自带的 15% 侧边留白，得到约 748px 的正文宽度。 */
+.msg-list { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.msg-list .ant-bubble { max-width: 880px; margin-inline: auto; }
+.msg-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+
+/* 事件卡（运行时间线 / 工具调用 / 错误）：紧凑、从属于正文，与助手文本对齐，
+   左侧色条区分来源（06 §10：内置 灰 / 技能 绿 / MCP 紫 / 本体 青 / 异常 红） */
 .event-card {
   font-size: 12px; color: var(--c-ink-2);
-  background: var(--c-bg); border: 1px solid var(--c-line); border-radius: 8px;
-  padding: 5px 10px; width: 100%;
+  background: #fbfbfd; border: 1px solid var(--c-line); border-left: 3px solid #8b91a7;
+  border-radius: 8px; padding: 4px 10px; max-width: 640px; margin-left: 44px;
 }
-.event-card.err { background: var(--c-err-weak); color: var(--c-err); border-color: transparent; }
+.event-card.src-skill { border-left-color: #0b7a55; }
+.event-card.src-mcp { border-left-color: #7c3aed; }
+.event-card.src-onto { border-left-color: #0891b2; }
+.event-card.err { background: var(--c-err-weak); color: var(--c-err); border-color: transparent; border-left-color: var(--c-err); }
 .event-card .ant-collapse-header { padding: 2px 0 !important; }
+.event-side { margin-left: 44px; max-width: 640px; }
 
 /* 深度思考（ThoughtChain panel 内 pre） */
 pre.thinking {
@@ -75,13 +105,23 @@ pre.raw-json {
   white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto;
 }
 
-.composer { border-top: 1px solid var(--c-line); background: #fff; padding: 12px 18px 12px; flex: none; }
+.composer { border-top: 1px solid var(--c-line); background: #fff; padding: 12px 20px 14px; flex: none; }
+.composer-inner { max-width: 880px; margin: 0 auto; }
 .composer .tips { color: var(--c-ink-3); font-size: 12px; margin-top: 6px; }
 
 /* ---- 通用页面 ---- */
 .page { flex: 1; overflow: auto; padding: 22px 26px; }
 
-/* 项目配置弹窗：成员智能体区块 */
+/* ---- 设置页（原型 06 §3.6：左分类 + 右内容，满高两栏） ---- */
+.settings-main { flex: 1; min-width: 0; overflow: auto; padding: 16px 22px 28px; }
+.settings-note {
+  margin: 12px 12px 0; padding: 10px 12px; border: 1px dashed var(--c-line); border-radius: 8px;
+  font-size: 12px; color: var(--c-ink-3); line-height: 1.8;
+}
+.tab-footer { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.tab-footer .hint { color: var(--c-ink-3); font-size: 12px; }
+
+/* 配置弹窗（智能体 / 项目）：成员区块（小节标题用 antd Divider + inline 边距） */
 .member-block { margin-top: 4px; }
-.member-title { font-size: 13px; font-weight: 600; color: var(--c-ink-2); margin-bottom: 10px; }
+.member-hint { font-size: 12px; color: var(--c-ink-3); margin-bottom: 10px; }
 .member-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
