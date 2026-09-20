@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>eino-multiagent-lab · 智能体平台 界面交互原型 v0.2</title>
+<title>eino-multiagent-lab · 智能体平台 界面交互原型 v0.4</title>
 <style>
 :root{
   --c-bg:#f6f7fb; --c-surface:#ffffff; --c-line:#e6e8f0; --c-line-strong:#d3d7e4;
@@ -46,7 +46,7 @@ h1,h2,h3{margin:0;line-height:1.4}
 .ws-side .cap .new:hover{background:var(--c-brand-weak)}
 .ws-main{min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
 
-/* 左栏列表项 / Agent 折叠树 */
+/* 左栏列表项 / 智能体 折叠树 */
 .lsitem{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;margin:1px 0;border-radius:var(--radius-s);border:0;background:none;font-size:13px;color:var(--c-ink-2)}
 .lsitem:hover{background:#eef0f6;color:var(--c-ink)}
 .lsitem[aria-current="true"]{background:var(--c-brand-weak);color:var(--c-brand-ink);font-weight:600}
@@ -59,6 +59,26 @@ h1,h2,h3{margin:0;line-height:1.4}
 .agent-node[open]>summary .chev{transform:rotate(90deg)}
 .gear{background:none;border:0;color:var(--c-ink-3);width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .gear:hover{background:var(--c-brand-weak);color:var(--c-brand-ink)}
+/* 顶栏右端设置齿轮（图标取自开源 Lucide `settings`，ISC License） */
+.topbar-gear{margin-left:10px;width:34px;height:34px;border-radius:8px;border:0;background:none;color:var(--c-ink-3);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.topbar-gear:hover{background:#eef0f6;color:var(--c-brand-ink)}
+.topbar-gear:hover svg{transform:rotate(30deg)}
+.topbar-gear[aria-current="true"]{background:#eef0f6;color:var(--c-brand-ink)}
+.topbar-gear svg{display:block;transition:transform .25s ease}
+/* 设置右栏：提供商 / 模型 页签（Ant Design Tabs 范式，实现映射见 06 说明） */
+.settings-tabs{display:flex;gap:22px;border-bottom:1px solid var(--c-line);padding:0 4px;margin-bottom:14px}
+.settings-tab{border:0;background:none;padding:10px 2px;font-size:14px;font-weight:500;color:var(--c-ink-2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:6px}
+.settings-tab:hover{color:var(--c-brand-ink)}
+.settings-tab[aria-current="true"]{color:var(--c-brand-ink);font-weight:600;border-bottom-color:var(--c-brand)}
+.settings-tab .sub{font-size:11px;color:var(--c-ink-3);font-weight:400}
+/* 表格（Ant Design Table 范式：浅色表头、行分隔、hover） */
+.tbl{width:100%;border-collapse:collapse;font-size:13px;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius-s);overflow:hidden}
+.tbl th{background:#fafafc;color:var(--c-ink-3);font-weight:600;text-align:left;padding:9px 12px;border-bottom:1px solid var(--c-line);white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--c-line);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:#f7f8fb}
+.tbl .mono{font-size:12px}
+.tbl .ops{display:flex;gap:6px;flex-wrap:wrap}
 .conv-list{padding:1px 0 4px}
 .conv{display:flex;align-items:center;gap:7px;width:100%;text-align:left;padding:6px 8px 6px 26px;margin:1px 0;border-radius:var(--radius-s);font-size:13px;color:var(--c-ink-2);cursor:pointer;border:0;background:none}
 .conv:hover{background:#eef0f6;color:var(--c-ink)}
@@ -301,26 +321,29 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
     <h1>eino-multiagent-lab</h1>
   </div>
   <nav class="topnav" aria-label="平台模块导航">
-    <button class="tnav" data-view="agents" aria-current="true" aria-controls="view-agents">Agent</button>
+    <button class="tnav" data-view="agents" aria-current="true" aria-controls="view-agents">智能体</button>
     <button class="tnav" data-view="projects" aria-controls="view-projects">项目</button>
     <button class="tnav" data-view="ontology" aria-controls="view-ontology">本体</button>
     <button class="tnav" data-view="kb" aria-controls="view-kb">知识库</button>
     <button class="tnav" data-view="skills" aria-controls="view-skills">技能</button>
   </nav>
-  <span class="badge-proto">界面原型 v0.2 · 待确认</span>
+  <span class="badge-proto">界面原型 v0.4 · 待确认</span>
+  <button class="topbar-gear" data-view="settings" aria-controls="view-settings" aria-label="设置" title="设置（模型管理等）"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
 </header>
 
-<!-- ============ 视图 1：Agent ============ -->
-<section class="view active" id="view-agents" aria-label="Agent 模块">
+<main>
+
+<!-- ============ 视图 1：智能体 ============ -->
+<section class="view active" id="view-agents" aria-label="智能体 模块">
   <div class="ws">
-    <aside class="ws-side" aria-label="Agent 与对话列表">
-      <div class="cap">Agent 列表
-        <button class="new" id="btn-new-agent">＋ 新建 Agent</button>
+    <aside class="ws-side" aria-label="智能体 与对话列表">
+      <div class="cap">智能体 列表
+        <button class="new" id="btn-new-agent">＋ 新建 智能体</button>
       </div>
       <details class="agent-node" open>
         <summary>
           <span class="dot" style="background:var(--c-skill)"></span>K8s 运维助手
-          <button class="gear" data-open-agent="k8s" aria-label="配置 K8s 运维助手" title="Agent 配置"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.6v2M7 10.4v2M1.6 7h2M10.4 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M10.8 3.2L9.4 4.6M4.6 9.4l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+          <button class="gear" data-open-agent="k8s" aria-label="配置 K8s 运维助手" title="智能体配置"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.6v2M7 10.4v2M1.6 7h2M10.4 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M10.8 3.2L9.4 4.6M4.6 9.4l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
           <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </summary>
         <div class="conv-list">
@@ -332,7 +355,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
       <details class="agent-node">
         <summary>
           <span class="dot" style="background:var(--c-onto)"></span>文档问答助手
-          <button class="gear" data-open-agent="doc" aria-label="配置 文档问答助手" title="Agent 配置"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.6v2M7 10.4v2M1.6 7h2M10.4 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M10.8 3.2L9.4 4.6M4.6 9.4l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+          <button class="gear" data-open-agent="doc" aria-label="配置 文档问答助手" title="智能体配置"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.6v2M7 10.4v2M1.6 7h2M10.4 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M10.8 3.2L9.4 4.6M4.6 9.4l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
           <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </summary>
         <div class="conv-list">
@@ -347,12 +370,12 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
       <div class="pane active" id="pane-agent-1" data-group="agent-convs" aria-label="对话：Pod 异常排查">
         <div class="pane-head">
           <h2>Pod 异常排查</h2>
-          <p>Agent：K8s 运维助手 · 执行后端 docker · 创建于 09-20</p>
+          <p>智能体：K8s 运维助手 · 执行后端 docker · 创建于 09-20</p>
         </div>
         <div class="conv-grid">
           <div class="chat-col">
             <div class="cfgbar">
-              <span class="chip model"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="6" r="1.4" fill="currentColor"/></svg>模型：DeepSeek-V3（Agent 独立配置）</span>
+              <span class="chip model"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="6" r="1.4" fill="currentColor"/></svg>模型：DeepSeek-V3（智能体 独立配置）</span>
               <label class="lab" for="onto-profile-1">本体运行方案</label>
               <span class="selwrap">
               <select id="onto-profile-1">
@@ -431,10 +454,10 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
 
       <!-- 对话 2：简版 -->
       <div class="pane" id="pane-agent-2" data-group="agent-convs" aria-label="对话：节点资源巡检">
-        <div class="pane-head"><h2>节点资源巡检</h2><p>Agent：K8s 运维助手 · 执行后端 docker · 创建于 09-19</p></div>
+        <div class="pane-head"><h2>节点资源巡检</h2><p>智能体：K8s 运维助手 · 执行后端 docker · 创建于 09-19</p></div>
         <div class="conv-grid"><div class="chat-col">
           <div class="cfgbar">
-            <span class="chip model">模型：DeepSeek-V3（Agent 独立配置）</span>
+            <span class="chip model">模型：DeepSeek-V3（智能体 独立配置）</span>
             <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>K8s 故障排查</span>
             <span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>本体：未挂载</span>
           </div>
@@ -451,7 +474,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
 
       <!-- 对话 3：简版 -->
       <div class="pane" id="pane-agent-3" data-group="agent-convs" aria-label="对话：FLUIDOS 论文问答">
-        <div class="pane-head"><h2>FLUIDOS 论文问答</h2><p>Agent：文档问答助手 · 执行后端 inprocess · 创建于 09-19</p></div>
+        <div class="pane-head"><h2>FLUIDOS 论文问答</h2><p>智能体：文档问答助手 · 执行后端 inprocess · 创建于 09-19</p></div>
         <div class="conv-grid"><div class="chat-col">
           <div class="cfgbar">
             <span class="chip model">模型：跟随全局默认</span>
@@ -496,27 +519,27 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
 
     <div class="ws-main">
       <div class="pane active" id="pane-proj-1" data-group="proj-convs" aria-label="项目会话：Pod 异常排查">
-        <div class="pane-head"><h2>Pod 异常排查</h2><p>项目：K8s 运维平台 · 会话使用的 Agent：K8s 运维助手</p></div>
+        <div class="pane-head"><h2>Pod 异常排查</h2><p>项目：K8s 运维平台 · 会话使用的 智能体：K8s 运维助手</p></div>
         <div class="conv-grid"><div class="chat-col">
           <div class="cfgbar">
-            <span class="chip model">Agent：K8s 运维助手</span>
+            <span class="chip model">智能体：K8s 运维助手</span>
             <span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>本体运行方案：内存图 v3（running）</span>
             <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>K8s 故障排查</span>
-            <span class="hint">项目会话界面与 Agent 对话保持一致</span>
+            <span class="hint">项目会话界面与 智能体 对话保持一致</span>
           </div>
           <div class="stream">
             <div class="msg user"><div class="who">董奎 · 10:21</div><div class="bubble">default 命名空间里 nginx-7d9f 这个 Pod 一直重启，帮我排查下原因</div></div>
-            <div class="msg assistant"><div class="who">K8s 运维助手 · 10:21</div><div class="bubble"><p>（同一对话在项目视图打开）结论：nginx-7d9f 因内存超限被 OOMKill 后反复重启。事件流、工具调用、本体查询过程与 Agent 对话视图完全一致。</p></div></div>
+            <div class="msg assistant"><div class="who">K8s 运维助手 · 10:21</div><div class="bubble"><p>（同一对话在项目视图打开）结论：nginx-7d9f 因内存超限被 OOMKill 后反复重启。事件流、工具调用、本体查询过程与 智能体 对话视图完全一致。</p></div></div>
           </div>
           <div class="composer"><textarea aria-label="消息输入" placeholder="输入消息…"></textarea><button class="btn primary">发送</button></div>
         </div></div>
       </div>
 
       <div class="pane" id="pane-proj-2" data-group="proj-convs" aria-label="项目会话：巡检日报">
-        <div class="pane-head"><h2>巡检日报</h2><p>项目：K8s 运维平台 · 会话使用的 Agent：K8s 运维助手</p></div>
+        <div class="pane-head"><h2>巡检日报</h2><p>项目：K8s 运维平台 · 会话使用的 智能体：K8s 运维助手</p></div>
         <div class="conv-grid"><div class="chat-col">
           <div class="cfgbar">
-            <span class="chip model">Agent：K8s 运维助手</span>
+            <span class="chip model">智能体：K8s 运维助手</span>
             <span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>知识库：K8s 运维手册</span>
           </div>
           <div class="stream">
@@ -528,10 +551,10 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
       </div>
 
       <div class="pane" id="pane-proj-3" data-group="proj-convs" aria-label="项目会话：论文概念问答">
-        <div class="pane-head"><h2>论文概念问答</h2><p>项目：本体学习实验室 · 会话使用的 Agent：文档问答助手</p></div>
+        <div class="pane-head"><h2>论文概念问答</h2><p>项目：本体学习实验室 · 会话使用的 智能体：文档问答助手</p></div>
         <div class="conv-grid"><div class="chat-col">
           <div class="cfgbar">
-            <span class="chip model">Agent：文档问答助手</span>
+            <span class="chip model">智能体：文档问答助手</span>
             <span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>知识库：FLUIDOS 论文库</span>
           </div>
           <div class="stream">
@@ -577,7 +600,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
             <button class="step" data-group="stages" data-pane="stage-s4"><span class="sid">S4</span><span class="sname">可视化</span><span class="stool done">WebVOWL</span></button>
             <button class="step" data-group="stages" data-pane="stage-s5"><span class="sid">S5</span><span class="sname">运行方式</span><span class="stool done">2 方案 running</span></button>
             <button class="step" data-group="stages" data-pane="stage-s6"><span class="sid">S6</span><span class="sname">对外暴露</span><span class="stool done">MCP facade</span></button>
-            <button class="step" data-group="stages" data-pane="stage-s7"><span class="sid">S7</span><span class="sname">对接 Agent</span><span class="stool done">已挂载 2 对话</span></button>
+            <button class="step" data-group="stages" data-pane="stage-s7"><span class="sid">S7</span><span class="sname">对接智能体</span><span class="stool done">已挂载 2 对话</span></button>
           </div>
 
           <div class="stage-pane active" id="stage-s1" data-group="stages">
@@ -643,7 +666,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
 
           <div class="stage-pane" id="stage-s6" data-group="stages">
             <h3>S6 · 对外暴露（统一 MCP facade）<span class="mode-tag mode-managed">managed</span></h3>
-            <p class="sdesc">Runtime Manager 内嵌 mcp-go Server：每个 running 方案经统一 facade 暴露<b>相同签名的 4 个 onto_* 工具</b>，按 ontology_id 路由到方案内本体——Agent 侧无需感知运行时差异（memory_graph 直查；oxigraph/fuseki 翻译为 SPARQL）。</p>
+            <p class="sdesc">Runtime Manager 内嵌 mcp-go Server：每个 running 方案经统一 facade 暴露<b>相同签名的 4 个 onto_* 工具</b>，按 ontology_id 路由到方案内本体——智能体侧无需感知运行时差异（memory_graph 直查；oxigraph/fuseki 翻译为 SPARQL）。</p>
             <div class="pipe-row"><span class="mname">Facade 端点</span><span class="mono">http://127.0.0.1:8090/mcp（Streamable HTTP）</span><span class="sw sw-ok">健康</span></div>
             <div class="tool-list">
               <div class="tool"><span class="mono">onto_get_concept</span><span class="tdesc">查询概念定义与层级</span></div>
@@ -654,13 +677,13 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
           </div>
 
           <div class="stage-pane" id="stage-s7" data-group="stages">
-            <h3>S7 · 对接 Agent <span class="mode-tag mode-guided">guided</span></h3>
+            <h3>S7 · 对接智能体 <span class="mode-tag mode-guided">guided</span></h3>
             <p class="sdesc">对话挂载运行方案（conversation.runtime_profile_id）：主平台经 eino-ext GetTools 连 facade；方案提供 guide 注入（运维指南）；方案停止时对话降级（ONTOLOGY_SERVICE_UNAVAILABLE，按方案隔离，不影响其他对话）。</p>
             <div class="check-list">
               <div class="prow"><span class="mname">对话「Pod 异常排查」</span><span class="mono">挂载 内存图 v3 · guide 已注入</span><span class="sw sw-ok">使用中</span></div>
               <div class="prow"><span class="mname">对话「节点资源巡检」</span><span class="mono">未挂载（可随时在对话顶部切换）</span><span class="sw sw-off">未挂载</span></div>
             </div>
-            <p class="hintline">主平台侧配置入口：Agent 对话窗口顶部「本体运行方案」下拉（本原型 Agent 视图）</p>
+            <p class="hintline">主平台侧配置入口：智能体 对话窗口顶部「本体运行方案」下拉（本原型 智能体 视图）</p>
           </div>
         </div>
       </div>
@@ -676,7 +699,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
             <button class="step" data-group="stages2" data-pane="stage2-s4"><span class="sid">S4</span><span class="sname">可视化</span><span class="stool todo">未开始</span></button>
             <button class="step" data-group="stages2" data-pane="stage2-s5"><span class="sid">S5</span><span class="sname">运行方式</span><span class="stool todo">未配置</span></button>
             <button class="step" data-group="stages2" data-pane="stage2-s6"><span class="sid">S6</span><span class="sname">对外暴露</span><span class="stool todo">未配置</span></button>
-            <button class="step" data-group="stages2" data-pane="stage2-s7"><span class="sid">S7</span><span class="sname">对接 Agent</span><span class="stool todo">未对接</span></button>
+            <button class="step" data-group="stages2" data-pane="stage2-s7"><span class="sid">S7</span><span class="sname">对接智能体</span><span class="stool todo">未对接</span></button>
           </div>
           <div class="stage-pane active" id="stage2-s1" data-group="stages2">
             <h3>S1 · 本体来源 <span class="mode-tag mode-builtin">builtin</span></h3>
@@ -690,7 +713,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
           <div class="stage-pane" id="stage2-s4" data-group="stages2"><h3>S4 · 可视化</h3><p class="sdesc">未开始。校验通过后生成 WebVOWL 预览（按 version 缓存）。</p></div>
           <div class="stage-pane" id="stage2-s5" data-group="stages2"><h3>S5 · 运行方式</h3><p class="sdesc">未配置。需选择引擎（memory_graph / oxigraph / fuseki）创建运行方案。</p></div>
           <div class="stage-pane" id="stage2-s6" data-group="stages2"><h3>S6 · 对外暴露</h3><p class="sdesc">未配置。方案 running 后自动纳入统一 MCP facade（4 个 onto_* 工具）。</p></div>
-          <div class="stage-pane" id="stage2-s7" data-group="stages2"><h3>S7 · 对接 Agent</h3><p class="sdesc">未对接。方案 running 后可在对话顶部「本体运行方案」下拉中选择（当前因 draft 状态禁选）。</p></div>
+          <div class="stage-pane" id="stage2-s7" data-group="stages2"><h3>S7 · 对接智能体</h3><p class="sdesc">未对接。方案 running 后可在对话顶部「本体运行方案」下拉中选择（当前因 draft 状态禁选）。</p></div>
         </div>
       </div>
 
@@ -705,7 +728,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
             <button class="step" data-group="stages3" data-pane="stage3-s4"><span class="sid">S4</span><span class="sname">可视化</span><span class="stool todo">—</span></button>
             <button class="step" data-group="stages3" data-pane="stage3-s5"><span class="sid">S5</span><span class="sname">运行方式</span><span class="stool todo">—</span></button>
             <button class="step" data-group="stages3" data-pane="stage3-s6"><span class="sid">S6</span><span class="sname">对外暴露</span><span class="stool todo">—</span></button>
-            <button class="step" data-group="stages3" data-pane="stage3-s7"><span class="sid">S7</span><span class="sname">对接 Agent</span><span class="stool todo">—</span></button>
+            <button class="step" data-group="stages3" data-pane="stage3-s7"><span class="sid">S7</span><span class="sname">对接智能体</span><span class="stool todo">—</span></button>
           </div>
           <div class="stage-pane active" id="stage3-s1" data-group="stages3">
             <h3>S1 · 本体来源 <span class="mode-tag mode-builtin">builtin</span></h3>
@@ -717,7 +740,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
           <div class="stage-pane" id="stage3-s4" data-group="stages3"><h3>S4 · 可视化</h3><p class="sdesc">—</p></div>
           <div class="stage-pane" id="stage3-s5" data-group="stages3"><h3>S5 · 运行方式</h3><p class="sdesc">—</p></div>
           <div class="stage-pane" id="stage3-s6" data-group="stages3"><h3>S6 · 对外暴露</h3><p class="sdesc">—</p></div>
-          <div class="stage-pane" id="stage3-s7" data-group="stages3"><h3>S7 · 对接 Agent</h3><p class="sdesc">—</p></div>
+          <div class="stage-pane" id="stage3-s7" data-group="stages3"><h3>S7 · 对接智能体</h3><p class="sdesc">—</p></div>
         </div>
       </div>
     </div>
@@ -813,7 +836,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
               </div>
               <div class="s-meta">
                 <span class="tag">工具 ×3</span>
-                <span class="state-tag ready">已挂载 · 1 Agent</span>
+                <span class="state-tag ready">已挂载 · 1 智能体</span>
               </div>
               <div class="foot"><button class="btn" data-open-skill="k8s">编辑</button></div>
             </article>
@@ -837,10 +860,10 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
   </div>
 </section>
 
-<!-- ===== Agent 配置抽屉 ===== -->
+<!-- ===== 智能体配置抽屉 ===== -->
 <dialog id="dlg-agent" aria-labelledby="dlg-agent-title">
   <div class="dlg">
-    <div class="dlg-head"><h3 id="dlg-agent-title">Agent 配置 · K8s 运维助手</h3><button class="x" data-close="dlg-agent" aria-label="关闭">✕</button></div>
+    <div class="dlg-head"><h3 id="dlg-agent-title">智能体配置 · K8s 运维助手</h3><button class="x" data-close="dlg-agent" aria-label="关闭">✕</button></div>
     <div class="dlg-body">
       <fieldset>
         <legend>基本信息</legend>
@@ -850,16 +873,17 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
         </div>
       </fieldset>
       <fieldset>
-        <legend>模型（Agent 级独立配置）</legend>
+        <legend>模型（智能体 级独立配置）</legend>
         <div class="radio-row">
-          <label><input type="radio" name="model-mode" value="global"><span><span class="rtitle">跟随全局默认</span><span class="rdesc">DeepSeek-V3 · temperature 0.7（全局设置中配置）</span></span></label>
-          <label><input type="radio" name="model-mode" value="own" checked><span><span class="rtitle">独立配置</span><span class="rdesc">为该 Agent 单独指定模型与参数</span></span></label>
+          <label><input type="radio" name="model-mode" value="global"><span><span class="rtitle">跟随全局默认</span><span class="rdesc">DeepSeek-V3（设置 → 模型管理 中设为 chat 默认）· temperature 0.7</span></span></label>
+          <label><input type="radio" name="model-mode" value="own" checked><span><span class="rtitle">独立配置</span><span class="rdesc">从模型列表中选择（列表由 设置 → 模型管理 维护）</span></span></label>
         </div>
         <div class="backend-detail show" id="model-own-detail">
           <div class="frow">
-            <div><span class="flabel">模型</span><span class="selwrap"><select aria-label="模型"><option selected>DeepSeek-V3</option><option>DeepSeek-R1</option><option>Qwen2.5-72B</option></select></span></div>
+            <div><span class="flabel">模型</span><span class="selwrap"><select aria-label="模型（引用 设置→模型管理 列表）"><option selected>DeepSeek-V3 · DeepSeek</option><option>DeepSeek-R1 · DeepSeek</option><option>Qwen2.5-72B · DashScope</option></select></span></div>
             <div><span class="flabel">Temperature</span><input type="text" value="0.3"></div>
           </div>
+          <p class="hintline">模型仅从「设置 → 模型管理」引用（提供商 / 模型 / 密钥统一维护，智能体 内不新建连接）；智能体 级仅覆盖 temperature 等参数</p>
         </div>
       </fieldset>
       <fieldset>
@@ -882,7 +906,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
         <legend>执行后端（沙箱策略）</legend>
         <div class="radio-row">
           <label><input type="radio" name="backend" value="inproc"><span><span class="rtitle">inprocess（默认）</span><span class="rdesc">进程内 ADK 装配，零基础设施，适合个人使用与调试</span></span></label>
-          <label><input type="radio" name="backend" value="docker" checked><span><span class="rtitle">docker 容器</span><span class="rdesc">每 Agent 一个独立容器跑 agent-runtime 镜像，配置经 manifest 下发</span></span></label>
+          <label><input type="radio" name="backend" value="docker" checked><span><span class="rtitle">docker 容器</span><span class="rdesc">每智能体一个独立容器跑 agent-runtime 镜像，配置经 manifest 下发</span></span></label>
           <label><input type="radio" name="backend" value="k8s"><span><span class="rtitle">k8s Pod</span><span class="rdesc">Pod 部署 + requests/limits 资源约束</span></span></label>
         </div>
         <div class="backend-detail show" id="backend-docker-detail">镜像 <span class="mono">kma-agentd:latest</span> · 资源上限 <span class="mono">cpu 1 / mem 512Mi</span> · 超时回收 <span class="mono">30m</span></div>
@@ -913,7 +937,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
 输出结论必须区分「证据」与「推断」，并给出可执行的修复命令。</textarea>
       </fieldset>
       <fieldset>
-        <legend>工具白名单（合并进挂载该技能的 Agent）</legend>
+        <legend>工具白名单（合并进挂载该技能的 智能体）</legend>
         <div class="check-list">
           <label><input type="checkbox" checked><span>k8s_get_pods</span><span class="cdesc">内置工具</span></label>
           <label><input type="checkbox" checked><span>k8s_get_events</span><span class="cdesc">内置工具</span></label>
@@ -926,6 +950,75 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
     <div class="dlg-foot"><button class="btn" data-close="dlg-skill">取消</button><button class="btn primary" id="btn-save-skill">保存技能</button></div>
   </div>
 </dialog>
+
+<!-- ============ 视图 6：设置（v0.3 新增，含模型管理） ============ -->
+<section class="view" id="view-settings" aria-label="设置模块">
+  <div class="ws">
+    <aside class="ws-side" aria-label="设置侧栏">
+      <div class="cap">设置</div>
+      <button class="lsitem" data-group="settings" data-pane="pane-models" aria-current="true"><span class="dot" style="background:var(--c-brand)"></span>模型管理<span class="sub">2 提供商 · 4 模型</span></button>
+      <button class="lsitem" data-group="settings" data-pane="pane-global"><span class="dot" style="background:var(--c-ink-3)"></span>全局参数<span class="sub">P1 预留</span></button>
+      <button class="lsitem" data-group="settings" data-pane="pane-security"><span class="dot" style="background:var(--c-ink-3)"></span>数据与安全<span class="sub">P2 预留</span></button>
+      <div class="reserved-box" style="margin-top:14px">模型连接集中在此维护，智能体配置只做<strong>引用</strong>（对应主平台 model_connection 表：conn_type chat/embedding，每类型至多一条默认）</div>
+    </aside>
+
+    <div class="ws-main">
+      <div class="pane active" id="pane-models" data-group="settings" aria-label="模型管理">
+        <div class="pane-head"><h2>模型管理</h2><p>提供商与模型分页签管理（原型范式对齐 Ant Design Tabs + Table，实现组件映射见 06）；chat / embedding 各设一条默认模型，供 智能体「跟随全局默认」引用</p></div>
+        <div class="settings-tabs" role="tablist" aria-label="模型管理子页签">
+          <button class="settings-tab" data-pane="pane-prov" data-group="settings-sub" aria-current="true">模型提供商<span class="sub">2</span></button>
+          <button class="settings-tab" data-pane="pane-mdl" data-group="settings-sub">模型<span class="sub">4</span></button>
+        </div>
+        <div class="pane active" id="pane-prov" data-group="settings-sub" aria-label="模型提供商">
+          <table class="tbl">
+            <thead><tr><th>提供商</th><th>Base URL</th><th>API Key</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>DeepSeek</strong></td>
+                <td class="mono">https://api.deepseek.com/v1</td>
+                <td class="mono">sk-••••7f3a（AES-256-GCM 加密存储）</td>
+                <td><span class="state-tag ready">已连接</span></td>
+                <td><div class="ops"><button class="btn" data-test-conn="DeepSeek">测试连接</button><button class="btn">编辑</button></div></td>
+              </tr>
+              <tr>
+                <td><strong>DashScope（阿里云百炼）</strong></td>
+                <td class="mono">https://dashscope.aliyuncs.com/compatible-mode/v1</td>
+                <td class="mono">sk-••••2b81</td>
+                <td><span class="state-tag ready">已连接</span></td>
+                <td><div class="ops"><button class="btn" data-test-conn="DashScope">测试连接</button><button class="btn">编辑</button></div></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="hintline">添加提供商：名称 · Base URL · API Key（掩码输入）· 协议（OpenAI 兼容）　<button class="btn primary" id="btn-add-provider">＋ 添加提供商</button></p>
+        </div>
+        <div class="pane" id="pane-mdl" data-group="settings-sub" aria-label="模型">
+          <table class="tbl">
+            <thead><tr><th>模型</th><th>所属提供商</th><th>类型</th><th>默认</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><strong>DeepSeek-V3</strong></td><td>DeepSeek</td><td><span class="tag">chat</span></td><td><span class="state-tag ready">chat 默认</span></td><td><div class="ops"><button class="btn" data-test-conn="DeepSeek-V3">测试</button><button class="btn">编辑</button></div></td></tr>
+              <tr><td><strong>DeepSeek-R1</strong></td><td>DeepSeek</td><td><span class="tag">chat</span></td><td>—</td><td><div class="ops"><button class="btn" data-test-conn="DeepSeek-R1">测试</button><button class="btn">编辑</button></div></td></tr>
+              <tr><td><strong>Qwen2.5-72B</strong></td><td>DashScope</td><td><span class="tag">chat</span></td><td>—</td><td><div class="ops"><button class="btn" data-test-conn="Qwen2.5-72B">测试</button><button class="btn">编辑</button></div></td></tr>
+              <tr><td><strong>text-embedding-v3</strong></td><td>DashScope</td><td><span class="tag">embedding</span></td><td><span class="state-tag ready">embedding 默认</span></td><td><div class="ops"><button class="btn" data-test-conn="text-embedding-v3">测试</button><button class="btn">编辑</button></div></td></tr>
+            </tbody>
+          </table>
+          <p class="hintline">添加模型：所属提供商（下拉引用「模型提供商」页签）· 模型 ID · 类型（chat / embedding）· 设为该类型默认（每类型至多一条，P1）　<button class="btn primary" id="btn-add-model">＋ 添加模型</button></p>
+          <p class="hintline">引用关系：智能体「独立配置」下拉直接引用本列表（显示 模型 · 提供商）；「跟随全局默认」= 此处对应类型的默认模型。删除被引用的模型时需先解除 智能体 引用。</p>
+        </div>
+      </div>
+
+      <div class="pane" id="pane-global" data-group="settings" aria-label="全局参数（P1 预留）">
+        <div class="pane-head"><h2>全局参数</h2><p>P1 预留：全局 temperature / 系统提示词兜底 / 对话保留策略等</p></div>
+        <div class="detail-wrap"><p class="hintline">（原型占位）待 P1 里程碑细化</p></div>
+      </div>
+      <div class="pane" id="pane-security" data-group="settings" aria-label="数据与安全（P2 预留）">
+        <div class="pane-head"><h2>数据与安全</h2><p>P2 预留：API Key 轮换 / 数据导出清理 / 审计日志</p></div>
+        <div class="detail-wrap"><p class="hintline">（原型占位）待 P2 里程碑细化</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
 
 <div class="toast" id="toast" role="status"></div>
 
@@ -947,12 +1040,12 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
     /* 顶部导航切换视图 */
     function showView(name){
       $$('.view').forEach(function(v){v.classList.toggle('active', v.id==='view-'+name)});
-      $$('.tnav').forEach(function(b){
+      $$('.tnav, .topbar-gear').forEach(function(b){
         if(b.dataset.view===name){b.setAttribute('aria-current','true')}
         else{b.removeAttribute('aria-current')}
       });
     }
-    $$('.tnav').forEach(function(b){
+    $$('.tnav, .topbar-gear').forEach(function(b){
       b.addEventListener('click',function(){showView(b.dataset.view)});
     });
 
@@ -965,6 +1058,10 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
       });
       /* 阶段步骤条按钮同机制 */
       $$('.step[data-group="'+group+'"]').forEach(function(b){
+        b.setAttribute('aria-current',b.dataset.pane===id?'true':'false');
+      });
+      /* 设置页子页签（AntD Tabs 范式）同机制 */
+      $$('.settings-tab[data-group="'+group+'"]').forEach(function(b){
         b.setAttribute('aria-current',b.dataset.pane===id?'true':'false');
       });
     }
@@ -986,7 +1083,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
       });
     });
 
-    /* SSE 事件重放（Agent 对话 1） */
+    /* SSE 事件重放（智能体 对话 1） */
     var steps=$$('#evgroup .ev-step');
     var reduceMotion=false;
     try{reduceMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
@@ -1036,7 +1133,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
         setTimeout(function(){
           var a=document.createElement('div');
           a.className='msg assistant';
-          a.innerHTML='<div class="who">K8s 运维助手 · 刚刚</div><div class="bubble"><p>（原型演示）已收到消息。正式实现中将按 Agent 配置装配模型 / 技能 / MCP / 本体工具并流式返回。</p></div>';
+          a.innerHTML='<div class="who">K8s 运维助手 · 刚刚</div><div class="bubble"><p>（原型演示）已收到消息。正式实现中将按 智能体配置装配模型 / 技能 / MCP / 本体工具并流式返回。</p></div>';
           stream.appendChild(a);
           stream.scrollTop=stream.scrollHeight;
         },900);
@@ -1063,12 +1160,12 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
         if(d&&typeof d.close==='function'){d.close()}
       });
     });
-    /* Agent 树上的齿轮按钮：阻止触发 summary 折叠 */
+    /* 智能体 树上的齿轮按钮：阻止触发 summary 折叠 */
     $$('.gear').forEach(function(g){
       g.addEventListener('click',function(e){
         e.preventDefault(); e.stopPropagation();
         var t=document.getElementById('dlg-agent-title');
-        if(t){t.textContent = g.dataset.openAgent==='doc' ? 'Agent 配置 · 文档问答助手' : 'Agent 配置 · K8s 运维助手';}
+        if(t){t.textContent = g.dataset.openAgent==='doc' ? '智能体配置 · 文档问答助手' : '智能体配置 · K8s 运维助手';}
         openDlg('dlg-agent');
       });
     });
@@ -1076,7 +1173,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
       if(b.classList.contains('gear')) return;
       b.addEventListener('click',function(){
         var t=document.getElementById('dlg-agent-title');
-        if(t){t.textContent = b.dataset.openAgent==='doc' ? 'Agent 配置 · 文档问答助手' : 'Agent 配置 · K8s 运维助手';}
+        if(t){t.textContent = b.dataset.openAgent==='doc' ? '智能体配置 · 文档问答助手' : '智能体配置 · K8s 运维助手';}
         openDlg('dlg-agent');
       });
     });
@@ -1089,16 +1186,24 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
     });
 
     /* 新建类按钮：原型演示反馈 */
-    [['btn-new-agent','将在当前列表新建 Agent'],['btn-new-conv-agent','将在「K8s 运维助手」下新建对话'],
+    [['btn-new-agent','将在当前列表新建 智能体'],['btn-new-conv-agent','将在「K8s 运维助手」下新建对话'],
      ['btn-new-conv-doc','将在「文档问答助手」下新建对话'],['btn-new-project','将新建项目'],
      ['btn-new-conv-proj','将在「K8s 运维平台」下新建会话'],['btn-new-conv-proj2','将在「本体学习实验室」下新建会话'],
      ['btn-new-pipe','将新建本体流水线（进入 S1 来源选择）'],['btn-new-kb','将新建知识库'],
-     ['btn-new-skill','将新建技能']].forEach(function(pair){
+     ['btn-new-skill','将新建技能'],
+     ['btn-add-provider','将新建模型提供商（名称 / Base URL / API Key）'],['btn-add-model','将新增模型（提供商 / 模型 ID / 类型 / 默认标记）']].forEach(function(pair){
       var el=document.getElementById(pair[0]);
       if(el){el.addEventListener('click',function(){toast('（原型演示）'+pair[1])});}
     });
 
-    /* Agent 抽屉联动 */
+    /* 设置 → 模型管理：连接测试（原型演示） */
+    $$('[data-test-conn]').forEach(function(b){
+      b.addEventListener('click',function(){
+        toast('（原型演示）'+b.getAttribute('data-test-conn')+' 连接成功 · 延迟 320ms');
+      });
+    });
+
+    /* 智能体 抽屉联动 */
     var modelDetail=$('#model-own-detail');
     $$('input[name="model-mode"]').forEach(function(r){
       r.addEventListener('change',function(){
@@ -1126,7 +1231,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
     if(sa){sa.addEventListener('click',function(){
       var d=document.getElementById('dlg-agent');
       if(d&&typeof d.close==='function'){d.close()}
-      toast('Agent 配置已保存（原型演示）');
+      toast('智能体配置已保存（原型演示）');
     })}
     var ss=$('#btn-save-skill');
     if(ss){ss.addEventListener('click',function(){

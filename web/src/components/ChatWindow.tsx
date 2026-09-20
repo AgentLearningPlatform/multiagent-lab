@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, runConversation } from '../api/client'
-import type { Agent, Conversation, Message, ModelConnection } from '../api/types'
+import type { Agent, Conversation, Message, ModelConnection, Project } from '../api/types'
 import { useUI } from '../store/ui'
 
 interface ChatItem {
@@ -13,20 +13,40 @@ interface ChatItem {
   streaming?: boolean
 }
 
-/** 中间对话窗口：配置条 + 消息流（含过程事件卡）+ 输入区 */
+/**
+ * 中间对话窗口（原型 06 §3.1 / §3.2）：
+ * - agent 直聊：头部显示智能体名，「属性」打开智能体配置
+ * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」，「属性」打开项目配置
+ */
 export default function ChatWindow({
   conversation,
   agents,
-  onOpenDrawer,
+  projects,
+  onOpenAgentDrawer,
+  onOpenProjectDrawer,
   onConversationUpdated,
 }: {
   conversation: Conversation
   agents: Agent[]
-  onOpenDrawer: () => void
+  projects: Project[]
+  onOpenAgentDrawer: () => void
+  onOpenProjectDrawer: () => void
   onConversationUpdated: () => void
 }) {
-  const { bumpData } = useUI()
-  const agent = agents.find((a) => a.id === conversation.agent_id) ?? null
+  const { bumpData, showToast } = useUI()
+  const isProjectScope = conversation.scope === 'project'
+
+  const project = isProjectScope
+    ? projects.find((p) => p.id === conversation.project_id) ?? null
+    : null
+  // agent 直聊 = 绑定的智能体；项目会话 = 主智能体，缺省取第一个成员
+  const agent =
+    conversation.scope === 'agent'
+      ? agents.find((a) => a.id === conversation.agent_id) ?? null
+      : project
+        ? agents.find((a) => a.id === (project.coordinator || project.agent_ids[0])) ?? null
+        : null
+
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
@@ -55,7 +75,7 @@ export default function ChatWindow({
     }
   }, [conversation.id])
 
-  // 模型标签：agent 指定连接 或 默认连接
+  // 模型标签：智能体指定连接 或 默认连接
   useEffect(() => {
     api.listConnections().then((conns) => {
       connRef.current = conns
@@ -63,9 +83,10 @@ export default function ChatWindow({
   }, [conversation.id])
 
   const modelLabel = (() => {
-    const connId = agent?.model_conn_id
+    if (!agent) return '项目未配置成员'
+    const connId = agent.model_conn_id
     const conn = connId ? connRef.current.find((c) => c.id === connId) : connRef.current.find((c) => c.conn_type === 'chat' && c.is_default)
-    return conn ? `${conn.name} · ${conn.model_name}` : agent?.model_conn_id ? '指定连接' : '默认模型'
+    return conn ? `${conn.name} · ${conn.model_name}` : agent.model_conn_id ? '指定连接' : '默认模型'
   })()
 
   useEffect(() => {
@@ -74,7 +95,12 @@ export default function ChatWindow({
 
   const send = async () => {
     const text = input.trim()
-    if (!text || running || !agent) return
+    if (!text || running) return
+    if (!isProjectScope && !agent) return
+    if (isProjectScope && !agent) {
+      showToast('项目还没有成员智能体，请先在项目配置中添加成员', 'err')
+      return
+    }
     setInput('')
     setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
 
@@ -88,7 +114,7 @@ export default function ChatWindow({
         case 'run.started':
           setItems((prev) => {
             const next = [...prev]
-            const ev: ChatItem = { kind: 'event', eventText: `▶ 运行开始 · ${payload.agent_name ?? agent.name} · ${payload.model ?? ''}` }
+            const ev: ChatItem = { kind: 'event', eventText: `▶ 运行开始 · ${payload.agent_name ?? agent?.name ?? ''} · ${payload.model ?? ''}` }
             next.splice(next.length - 1, 0, ev)
             return next
           })
@@ -152,26 +178,48 @@ export default function ChatWindow({
   }
 
   const emptyState = items.length === 0
+  const subjectName = isProjectScope ? project?.name : agent?.name
+  const canSend = isProjectScope ? !!project : !!agent
 
   return (
     <div className="chat">
       <div className="chat-header">
-        <span className="agent-name">{agent ? agent.name : '对话'}</span>
+        {isProjectScope && project ? (
+          <>
+            <span className="agent-name">项目：{project.name}</span>
+            <span className="badge gray">会话使用的智能体：{agent ? agent.name : '未配置成员'}</span>
+          </>
+        ) : (
+          <span className="agent-name">{agent ? agent.name : '对话'}</span>
+        )}
         <span className="badge">{modelLabel}</span>
-        <span className="badge gray">{agent?.runtime_backend ?? 'inprocess'}</span>
-        {agent && <span className="badge gray">最大迭代 {agent.max_iteration}</span>}
+        {isProjectScope && project && <span className="badge gray">{project.collab_mode}</span>}
+        {!isProjectScope && agent && (
+          <>
+            <span className="badge gray">{agent.runtime_backend}</span>
+            <span className="badge gray">最大迭代 {agent.max_iteration}</span>
+          </>
+        )}
         <span className="spacer" />
-        <button className="btn-ghost" onClick={onOpenDrawer} disabled={!agent}>
-          属性
+        <button
+          className="btn-ghost"
+          onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
+          disabled={isProjectScope ? !project : !agent}
+        >
+          配置
         </button>
       </div>
 
       <div className="msg-list" ref={listRef}>
         {emptyState && (
           <div className="placeholder" style={{ marginTop: 60 }}>
-            <b>开始与「{agent?.name ?? '智能体'}」对话</b>
+            <b>
+              开始与「{subjectName ?? '智能体'}」对话
+            </b>
             <p style={{ fontSize: 13 }}>
-              消息将流式返回；可在右侧「属性」中调整系统提示词、模型与采样参数（下次运行生效）。
+              {isProjectScope
+                ? '项目会话由成员智能体协作处理；「配置」中可维护项目成员与协作模式（M4 起生效）。'
+                : '消息将流式返回；「配置」中可调整系统提示词、模型与采样参数（下次运行生效）。'}
             </p>
           </div>
         )}
@@ -194,7 +242,13 @@ export default function ChatWindow({
         <div className="box">
           <textarea
             rows={2}
-            placeholder={agent ? `给「${agent.name}」发消息…（Enter 发送，Shift+Enter 换行）` : '请先创建智能体'}
+            placeholder={
+              canSend
+                ? `给「${subjectName}」发消息…（Enter 发送，Shift+Enter 换行）`
+                : isProjectScope
+                  ? '项目尚未配置成员智能体'
+                  : '请先创建智能体'
+            }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -203,21 +257,20 @@ export default function ChatWindow({
                 send()
               }
             }}
-            disabled={!agent}
+            disabled={!canSend}
           />
           {running ? (
             <button className="btn-primary btn-stop" onClick={stop}>
               停止
             </button>
           ) : (
-            <button className="btn-primary" onClick={send} disabled={!input.trim() || !agent}>
+            <button className="btn-primary" onClick={send} disabled={!input.trim() || !canSend}>
               发送
             </button>
           )}
         </div>
         <div className="tips">
           Enter 发送 · Shift+Enter 换行 · 运行过程事件（运行开始/完成/错误）会以卡片显示在消息流中
-
         </div>
       </div>
     </div>

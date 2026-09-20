@@ -22,6 +22,7 @@ func (s *Server) runConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var agent *store.Agent
+	var projectName string
 	if conv.Scope == "agent" {
 		if conv.AgentID == nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation is not bound to an agent"})
@@ -33,8 +34,30 @@ func (s *Server) runConversation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "项目对话运行将在多 Agent 协作里程碑（M4）支持，当前请使用 Agent 直聊"})
-		return
+		// 项目会话：解析运行成员——主智能体优先，缺省取第一个成员（M4 接入编排，当前单成员直跑）
+		if conv.ProjectID == nil || *conv.ProjectID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation is not bound to a project"})
+			return
+		}
+		p, err := s.Store.GetProject(*conv.ProjectID)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		projectName = p.Name
+		agentID := p.Coordinator
+		if agentID == "" && len(p.AgentIDs) > 0 {
+			agentID = p.AgentIDs[0]
+		}
+		if agentID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "项目还没有成员智能体，请先在项目配置中添加成员"})
+			return
+		}
+		agent, err = s.Store.GetAgent(agentID)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 
 	sw, err := sse.NewWriter(w)
@@ -45,7 +68,11 @@ func (s *Server) runConversation(w http.ResponseWriter, r *http.Request) {
 	runID := store.NewID()
 
 	// 元信息事件（供前端校验会话与运行归属）
-	_ = sw.Event("meta", map[string]any{"run_id": runID, "conversation_id": conv.ID, "agent_name": agent.Name})
+	meta := map[string]any{"run_id": runID, "conversation_id": conv.ID, "agent_name": agent.Name}
+	if projectName != "" {
+		meta["project_name"] = projectName
+	}
+	_ = sw.Event("meta", meta)
 
 	// 统一事件协议：{type, run_id, ts, data}
 	emit := func(ev *chat.Event) {
