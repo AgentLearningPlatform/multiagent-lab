@@ -5,6 +5,7 @@ import zhCN from 'antd/locale/zh_CN'
 import App from './App'
 import { AntdBridge } from './lib/antd'
 import './styles.css'
+import './pages.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

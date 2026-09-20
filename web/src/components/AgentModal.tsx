@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button, Col, Divider, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space } from 'antd'
 import { api } from '../api/client'
-import type { Agent, ModelConnection } from '../api/types'
+import type { Agent, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
 
 /** 连接名已按 `{提供商}·{模型}` 约定时直接展示，否则补上模型名（兼容老数据） */
@@ -19,7 +19,8 @@ function Section({ children, first }: { children: ReactNode; first?: boolean }) 
 
 /**
  * 智能体属性弹窗（P0 字段），保存后下次运行生效（配置驱动）；与 NameModal 同一弹窗范式。
- * 布局分组：基本信息 → 模型 → 采样参数 → 执行；短字段走两列 Row/Col，长文本整行 autoSize。
+ * 布局分组：基本信息 → 模型 → 采样参数 → 工具 → 执行；短字段走两列 Row/Col，长文本整行 autoSize。
+ * M5：工具白名单来自工具注册表（api.listTools），勾选落 agent.tools；模型连接留空 = 跟随全局默认（M3）。
  */
 export default function AgentModal({
   agent,
@@ -33,11 +34,15 @@ export default function AgentModal({
   const { showToast } = useUI()
   const [form] = Form.useForm()
   const [conns, setConns] = useState<ModelConnection[]>([])
+  const [tools, setTools] = useState<ToolInfo[]>([])
+  const [toolsErr, setToolsErr] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     form.setFieldsValue(agent)
     api.listConnections().then((cs) => setConns(cs.filter((c) => c.conn_type === 'chat' && c.enabled))).catch(() => {})
+    // M5：工具注册表（失败降级为空 + 提示，不阻塞保存）
+    api.listTools().then((ts) => { setTools(ts); setToolsErr(false) }).catch(() => setToolsErr(true))
   }, [agent.id, form])
 
   const save = async () => {
@@ -53,6 +58,7 @@ export default function AgentModal({
         max_tokens: v.max_tokens ?? null,
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
+        tools: v.tools ?? [],
       })
       showToast('已保存，下次运行生效')
       onChanged()
@@ -111,11 +117,15 @@ export default function AgentModal({
         <Form.Item
           name="model_conn_id"
           label="模型连接"
-          extra={conns.length === 0 ? '当前无可用的 chat 连接；可到「设置-模型管理」新增。' : '没有合适的连接？到「设置-模型管理」新增。'}
+          extra={
+            conns.length === 0
+              ? '留空 = 跟随全局默认（设置中 chat 类型的默认连接）；当前无可用 chat 连接，可到「设置-模型管理」新增。'
+              : '留空 = 跟随全局默认（设置中 chat 类型的默认连接）。'
+          }
         >
           <Select
             allowClear
-            placeholder="跟随默认（在设置中指定）"
+            placeholder="跟随全局默认"
             options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))}
           />
         </Form.Item>
@@ -133,6 +143,32 @@ export default function AgentModal({
             </Form.Item>
           </Col>
         </Row>
+
+        <Section>工具</Section>
+        <Form.Item
+          name="tools"
+          label="工具白名单"
+          extra={toolsErr ? '工具注册表暂不可用，可稍后重开弹窗重试。' : '来自工具注册表（内置 / 本体 / MCP 动态工具），勾选后随运行装配。'}
+        >
+          <Select
+            mode="multiple"
+            allowClear
+            virtual={false}
+            placeholder={toolsErr ? '工具注册表暂不可用' : '选择可用工具'}
+            options={tools.map((t) => ({ value: t.id, label: t.name, title: t.description, source: t.source }))}
+            notFoundContent={toolsErr ? '工具注册表暂不可用' : '暂无工具'}
+            classNames={{ popup: { root: 'tool-select-popup' } }}
+            optionRender={(opt) => (
+              <div className="tool-option">
+                <div className="tool-option-name">
+                  <span>{opt.data?.label}</span>
+                  {opt.data?.source ? <span className="tool-option-src">{opt.data.source}</span> : null}
+                </div>
+                {opt.data?.title ? <div className="tool-option-desc">{opt.data.title}</div> : null}
+              </div>
+            )}
+          />
+        </Form.Item>
 
         <Section>执行</Section>
         <Row gutter={16}>

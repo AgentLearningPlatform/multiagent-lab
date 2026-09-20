@@ -1,0 +1,131 @@
+/*
+ * 页面级样式：知识库（M6）/ 技能（M7）/ 本体（M8）三视图。
+ * 与 styles.css 分离（该文件由对话区维护）；此处只补三视图的布局与卡片细节。
+ * 基础布局类 .main / .sidebar / .side-head / .side-title / .side-count / .side-actions /
+ * .empty-hint 复用 styles.css，三视图统一沿用「左列表 + 右主区」满高两栏范式。
+ */
+
+/* ---- 右主区：占满剩余高度，内部滚动，纵向节奏排布 ---- */
+.work-main {
+  flex: 1; min-width: 0; min-height: 0; overflow: auto;
+  padding: 16px 22px 28px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.work-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+
+/* 页头：标题 + 状态标签 + 描述，右侧放主操作 */
+.work-head { display: flex; align-items: flex-start; gap: 12px; }
+.work-head-text { flex: 1; min-width: 0; }
+.work-head-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.work-head-desc { margin: 5px 0 0; color: var(--c-ink-2); font-size: 13px; line-height: 1.65; }
+.work-card { border-radius: 12px; }
+
+/* ---- 左栏通用列表（库 / 流水线） ---- */
+.side-list { overflow: auto; flex: 1; padding: 4px 8px 20px; display: flex; flex-direction: column; gap: 2px; }
+.side-item {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 9px 10px; border-radius: 9px; border: 1px solid transparent;
+  cursor: pointer; transition: background .16s ease, border-color .16s ease;
+}
+.side-item:hover { background: #eef0f6; }
+.side-item.active { background: #e9ebf7; border-color: #dbdefa; }
+.side-item-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.side-item-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 600; color: var(--c-ink);
+}
+.side-item.active .side-item-name { color: var(--c-brand); }
+.side-item-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--c-ink-3); }
+.side-item-meta .dot { color: #c3c7d6; }
+.side-item-progress { display: flex; align-items: center; gap: 8px; }
+.side-item-progress .ant-progress { flex: 1; margin: 0; line-height: 1; }
+
+/* ---- 统计条（库概览） ---- */
+.stat-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.stat-tile {
+  background: #fff; border: 1px solid var(--c-line); border-radius: 10px;
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 2px;
+}
+.stat-tile .k { font-size: 11px; color: var(--c-ink-3); letter-spacing: .02em; }
+.stat-tile .v { font-size: 20px; font-weight: 700; color: var(--c-ink); line-height: 1.25; font-variant-numeric: tabular-nums; }
+
+/* ---- 配置行（TopK / min_score） ---- */
+.cfg-row { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.cfg-field { display: flex; flex-direction: column; gap: 4px; }
+.cfg-label { font-size: 12px; color: var(--c-ink-2); }
+
+/* ---- 检索试运行 ---- */
+.search-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hits { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.hit {
+  border: 1px solid var(--c-line); border-left: 3px solid #c7cbe0;
+  border-radius: 8px; padding: 8px 12px; background: #fbfbfd;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.hit.hi { border-left-color: #16a34a; }
+.hit.mid { border-left-color: #4f46e5; }
+.hit.lo { border-left-color: #d9a23b; }
+.hit-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.hit-doc { font-weight: 600; color: var(--c-ink); }
+.hit-seq { color: var(--c-ink-3); font-family: var(--mono); font-size: 11.5px; }
+.hit-spacer { flex: 1; }
+.hit-score { font-variant-numeric: tabular-nums; }
+.hit-excerpt { font-size: 12.5px; color: var(--c-ink-2); line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+
+/* ---- 技能：卡片栅格 ---- */
+.skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.skill-card {
+  border: 1px solid var(--c-line); border-radius: 12px; background: #fff;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+  transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease;
+}
+.skill-card:hover { box-shadow: 0 6px 20px rgba(28, 33, 48, .07); border-color: #d9dcec; transform: translateY(-1px); }
+.skill-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.skill-card-icon {
+  width: 24px; height: 24px; border-radius: 7px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--c-brand); background: #e6e8fb; border: 1px solid #dbdefa;
+}
+.skill-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; color: var(--c-ink); }
+.skill-card-desc {
+  margin: 0; font-size: 12.5px; color: var(--c-ink-2); line-height: 1.6; min-height: 40px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.skill-card-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--c-ink-3); }
+.skill-card-meta .dot { color: #c3c7d6; }
+.skill-card-ops { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; border-top: 1px solid var(--c-line); padding-top: 6px; }
+
+/* ---- 技能：左栏预留区 ---- */
+.side-reserve-wrap { margin-top: auto; padding: 0 12px 16px; }
+.reserve-note {
+  padding: 10px 12px; border: 1px dashed var(--c-line); border-radius: 8px;
+  font-size: 12px; color: var(--c-ink-3); line-height: 1.7;
+}
+.reserve-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--c-ink-2); margin-bottom: 6px; }
+.reserve-list { margin: 0; padding-left: 16px; }
+.reserve-list li { margin: 2px 0; }
+.reserve-tip { margin: 8px 0 0; color: var(--c-ink-3); }
+
+/* ---- 技能：resources 可编辑列表 ---- */
+.res-list { display: flex; flex-direction: column; gap: 8px; }
+.res-row { display: flex; align-items: flex-start; gap: 8px; }
+
+/* ---- 注入预览 ---- */
+.preview-pre {
+  margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.7; color: var(--c-ink-2);
+  white-space: pre-wrap; word-break: break-word;
+  background: #f6f7fb; border: 1px solid #e3e6f0; border-radius: 10px;
+  padding: 12px 14px; max-height: 52vh; overflow: auto;
+}
+
+/* ---- 本体：七阶段步骤条 + 阶段配置卡 ---- */
+.onto-steps { background: #fff; border: 1px solid var(--c-line); border-radius: 12px; padding: 18px 20px 6px; }
+.onto-steps .ant-steps-item.onto-step-selected .ant-steps-item-title { color: var(--c-brand); font-weight: 600; }
+.onto-stage-card .ant-card-head-title { min-width: 0; }
+.onto-detail-empty { color: var(--c-ink-3); font-size: 12.5px; line-height: 1.7; padding: 4px 0; }
+.onto-json {
+  margin: 0; font-family: var(--mono); font-size: 11.5px; color: var(--c-ink-2);
+  white-space: pre-wrap; word-break: break-word;
+  background: #f6f7fb; border: 1px solid #e3e6f0; border-radius: 8px;
+  padding: 8px 10px; max-height: 220px; overflow: auto;
+}

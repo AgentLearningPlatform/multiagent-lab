@@ -1,11 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Collapse, Space, Switch, Tag, Typography, Avatar } from 'antd'
-import { RobotOutlined, UserOutlined, BulbOutlined, BugOutlined } from '@ant-design/icons'
+import { Avatar, Badge, Button, Collapse, Drawer, InputNumber, Select, Space, Switch, Tag, Typography } from 'antd'
+import {
+  ApartmentOutlined,
+  BugOutlined,
+  BulbOutlined,
+  DatabaseOutlined,
+  RobotOutlined,
+  SlidersOutlined,
+  ThunderboltOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
 import { api, runConversation } from '../api/client'
-import type { Agent, Conversation, Message, ModelConnection, Project } from '../api/types'
+import type {
+  Agent,
+  Conversation,
+  KBHit,
+  KnowledgeBase,
+  Message,
+  ModelConnection,
+  Project,
+  RuntimeProfile,
+  Skill,
+} from '../api/types'
 import { useUI } from '../store/ui'
 
 interface ChatItem {
@@ -17,14 +36,19 @@ interface ChatItem {
   eventErr?: boolean
   streaming?: boolean
   // 执行细节增强（06 §4 执行可观测）
-  evType?: string // reasoning | run.started | run.finished | run.error | tool.call | tool.result | skill.loaded
+  evType?: string // reasoning | run.started | run.finished | run.error | tool.call | tool.result | skill.loaded | subagent.enter | subagent.exit | retrieval | ontology.query | ontology.unavailable
   evData?: any // 事件 data（解析后，供详情展开与调试面板）
   reasoning?: string // 深度思考累积内容
   evKey?: string // 稳定卡片键（深度思考展开状态按它记录，历史/实时各自生成）
   streamKey?: string // 运行中的 reasoning 卡合并键；运行结束置空收起
 }
 
-// 事件卡文案（实时流与历史回放共用）
+// 子 Agent 名（§6.5 subagent.enter/exit payload = 子 Agent 名；字段名做兼容取值）
+function subagentName(d: any): string {
+  return String(d?.name ?? d?.agent_name ?? d?.sub_agent ?? d?.agent ?? '').trim()
+}
+
+// 事件卡文案（实时流与历史回放共用：新增事件必须在此登记，两条路径才一致）
 function describeEvent(type: string, d: any): { text: string; err?: boolean } {
   switch (type) {
     case 'run.started':
@@ -37,8 +61,31 @@ function describeEvent(type: string, d: any): { text: string; err?: boolean } {
       return { text: `⚙ 调用工具 ${d?.tool_name ?? ''}` }
     case 'tool.result':
       return { text: `⚙ 工具结果 ${d?.tool_name ?? ''}` }
-    case 'skill.loaded':
-      return { text: `📚 技能 ${d?.skill_name ?? d?.name ?? ''}`.replace(/ $/, '') }
+    case 'skill.loaded': {
+      // §6.5 v0.6 payload 为 skills[{id,name}]；兼容旧的 skill_name/name 单值写法
+      const many = Array.isArray(d?.skills) ? d.skills.map((s: any) => s?.name).filter(Boolean).join('、') : ''
+      const one = d?.skill_name ?? d?.name ?? ''
+      return { text: `📚 技能 ${many || one}`.replace(/ $/, '') }
+    }
+    // M4：多智能体协作（AgentAsTool / Transfer）
+    case 'subagent.enter': {
+      const n = subagentName(d)
+      return { text: n ? `↳ 进入子智能体 ${n}` : '↳ 进入子智能体' }
+    }
+    case 'subagent.exit': {
+      const n = subagentName(d)
+      return { text: n ? `↳ 子智能体 ${n} 完成` : '↳ 子智能体已完成' }
+    }
+    // M6：知识召回（引用块展开由 renderEventCard 处理）
+    case 'retrieval': {
+      const n = Array.isArray(d?.hits) ? d.hits.length : 0
+      return { text: `📚 知识召回 · ${n} 条` }
+    }
+    // M8：本体（经 facade，via=mcp）
+    case 'ontology.query':
+      return { text: `🔗 本体查询${d?.profile_id ? ` · ${d.profile_id}` : ''}` }
+    case 'ontology.unavailable':
+      return { text: '⚠ 本体方案不可用 · 已降级', err: true }
     default:
       return { text: `· ${type}` }
   }
@@ -58,16 +105,50 @@ function finishSummary(d: any): string {
   return parts.join(' · ')
 }
 
+type EventSource = 'builtin' | 'skill' | 'mcp' | 'onto' | 'subagent' | 'retrieval'
+
 /**
- * 事件来源分类（原型 06 §10 色彩语义：内置 灰 / 技能 绿 / MCP 紫 / 本体 青 / 异常 红）。
- * 后端事件仅携带 tool_name，按命名约定推断：onto_* → 本体；mcp_ 前缀或 server__tool 双下划线 → MCP。
+ * 事件来源分类（原型 06 §10 色彩语义：内置 灰 / 技能 绿 / MCP 紫 / 本体 青 / 异常 红；
+ * 子智能体取紫族、知识召回取绿族）。
+ * §6.5 v0.6：tool.call/result 已带 source（builtin/skill/mcp/{profile_id}），优先采信；
+ * 缺失时回退到 tool_name 命名约定：onto_* → 本体；mcp_ 前缀或 server__tool 双下划线 → MCP。
  */
-function eventSource(evType: string | undefined, evData: any): 'skill' | 'mcp' | 'onto' | 'builtin' {
+function eventSource(evType: string | undefined, evData: any): EventSource {
   if (evType === 'skill.loaded') return 'skill'
+  if (evType === 'subagent.enter' || evType === 'subagent.exit') return 'subagent'
+  if (evType === 'retrieval') return 'retrieval'
+  if (evType === 'ontology.query' || evType === 'ontology.unavailable') return 'onto'
+  const src = evData?.source
+  if (typeof src === 'string' && src) {
+    if (src === 'builtin' || src === 'skill' || src === 'mcp') return src
+    return 'onto' // 其余 source 视为本体运行方案 profile_id（§6.5）
+  }
   const name = String(evData?.tool_name ?? '')
   if (name.startsWith('onto_')) return 'onto'
   if (name.startsWith('mcp_') || name.includes('__')) return 'mcp'
   return 'builtin'
+}
+
+// M8：本体运行方案状态 → 状态点（Badge）/ 文案；仅 running 可选（draft 禁选，PRD FR-11）
+function profileBadge(status?: string): 'success' | 'processing' | 'error' | 'default' | 'warning' {
+  if (status === 'running') return 'success'
+  if (status === 'error') return 'error'
+  if (status === 'draft') return 'warning'
+  return 'default'
+}
+function profileStatusText(status?: string): string {
+  switch (status) {
+    case 'running':
+      return '运行中'
+    case 'stopped':
+      return '已停止'
+    case 'draft':
+      return '草稿'
+    case 'error':
+      return '异常'
+    default:
+      return ''
+  }
 }
 
 // Bubble 角色映射（X 2.x：role 单数；条目 role 必须命中此处定义的 key）
@@ -109,6 +190,8 @@ const BUBBLE_ROLES: BubbleListProps['role'] = {
  * - agent 直聊：头部显示智能体名，「配置」打开智能体弹窗；
  * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」；
  * - 执行细节：历史事件回放、token 用量与耗时、深度思考 ThoughtChain、工具调用 JSON、原始事件调试开关
+ * - M4-M8：子智能体 / 知识召回 / 本体事件卡（实时与回放共用 describeEvent）；「对话配置」抽屉管理
+ *   本体运行方案（仅 running 可选）、知识库（kb_id/enable_kb/top_k/min_score）与已挂技能展示
  */
 export default function ChatWindow({
   conversation,
@@ -222,6 +305,35 @@ export default function ChatWindow({
         : '默认模型'
   })()
 
+  // ---- M8 对话配置 + M5/M6/M7 选项数据 ----
+  const [cfgOpen, setCfgOpen] = useState(false)
+  const [profiles, setProfiles] = useState<RuntimeProfile[]>([])
+  const [kbs, setKbs] = useState<KnowledgeBase[]>([])
+  const [skills, setSkills] = useState<Skill[]>([])
+  const [profilesErr, setProfilesErr] = useState(false)
+  const [kbsErr, setKbsErr] = useState(false)
+
+  // 选项列表（本体运行方案 / 知识库 / 技能）：挂载与打开抽屉时拉取；失败降级为空 + 提示
+  const loadCfgOptions = () => {
+    api.listRuntimeProfiles().then((ps) => { setProfiles(ps); setProfilesErr(false) }).catch(() => setProfilesErr(true))
+    api.listKBs().then((ks) => { setKbs(ks); setKbsErr(false) }).catch(() => setKbsErr(true))
+    api.listSkills().then(setSkills).catch(() => {})
+  }
+  useEffect(loadCfgOptions, [])
+
+  const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id
+
+  // 对话级配置落库（M8）：仅 conversation 字段；成功后由父级刷新会话数据
+  const patchConv = async (patch: Partial<Conversation>) => {
+    try {
+      await api.updateConversation(conversation.id, patch)
+      showToast('对话配置已更新')
+      onConversationUpdated()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
+  }
+
   // 事件卡渲染（ThoughtChain 深度思考 / 工具详情 / 终态摘要）：
   // 紧凑、左侧色条区分来源、与助手文本列对齐（margin-left 44 = 头像 32 + 间距 12）
   const renderEventCard = (it: ChatItem, i: number) => {
@@ -250,16 +362,55 @@ export default function ChatWindow({
       )
     }
     const isTool = it.evType === 'tool.call' || it.evType === 'tool.result'
+
+    // M6：知识召回引用块（可展开命中片段，绿族强调）
+    if (it.evType === 'retrieval') {
+      const hits: KBHit[] = Array.isArray(it.evData?.hits) ? it.evData.hits : []
+      return (
+        <div key={i} className="event-card src-retrieval retrieval-card">
+          <span>{it.eventText}</span>
+          {hits.length > 0 && (
+            <Collapse
+              ghost
+              size="small"
+              items={[{
+                key: 'hits',
+                label: <span className="event-link">展开命中片段</span>,
+                children: (
+                  <ul className="retrieval-hits">
+                    {hits.map((h, hi) => (
+                      <li key={hi} className="retrieval-hit">
+                        <div className="retrieval-meta">
+                          <span className="retrieval-doc" title={h.doc}>{h.doc}</span>
+                          <span className="retrieval-seq">#{h.seq}</span>
+                          <span className="retrieval-score">{typeof h.score === 'number' ? h.score.toFixed(3) : '—'}</span>
+                        </div>
+                        <div className="retrieval-excerpt">{h.excerpt}</div>
+                      </li>
+                    ))}
+                  </ul>
+                ),
+              }]}
+            />
+          )}
+          {showRaw && it.evData && <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>}
+        </div>
+      )
+    }
+
     return (
       <div key={i} className={`event-card src-${eventSource(it.evType, it.evData)}${it.eventErr ? ' err' : ''}`}>
         <span>{it.eventText}</span>
+        {it.evType === 'ontology.unavailable' && it.evData?.detail != null && (
+          <div className="event-detail">{String(it.evData.detail)}</div>
+        )}
         {isTool && it.evData && (
           <Collapse
             ghost
             size="small"
             items={[{
               key: 'detail',
-              label: <span style={{ fontSize: 11.5, color: 'var(--ant-color-primary, #4f46e5)' }}>详情</span>,
+              label: <span className="event-link">详情</span>,
               children: <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>,
             }]}
           />
@@ -363,11 +514,16 @@ export default function ChatWindow({
           break
         }
         default:
-          if (event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded') {
+          // 过程类事件（工具/技能/子智能体/知识召回/本体）：统一插到流式助手消息之前
+          if (
+            event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded' ||
+            event === 'subagent.enter' || event === 'subagent.exit' ||
+            event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable'
+          ) {
             const desc = describeEvent(event, payload)
             setItems((prev) => {
               const next = [...prev]
-              const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
+              const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, eventErr: desc.err, evData: payload }
               next.splice(next.length - 1, 0, ev) // 流式助手消息存在时插到其前
               return next
             })
@@ -423,6 +579,9 @@ export default function ChatWindow({
           <BugOutlined style={{ color: showRaw ? 'var(--ant-color-primary, #4f46e5)' : undefined }} />
           <span style={{ fontSize: 12 }}>调试</span>
           <Switch size="small" checked={showRaw} onChange={setShowRaw} />
+          <Button size="small" icon={<SlidersOutlined />} onClick={() => { setCfgOpen(true); loadCfgOptions() }}>
+            对话配置
+          </Button>
           <Button
             size="small"
             onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
@@ -476,6 +635,92 @@ export default function ChatWindow({
           </div>
         </div>
       </div>
+
+      {/* M8 对话配置：紧凑抽屉（保持头部单行），本体运行方案 / 知识库 / 已挂技能 */}
+      <Drawer
+        open={cfgOpen}
+        onClose={() => setCfgOpen(false)}
+        title="对话配置"
+        width={380}
+        styles={{ body: { padding: '16px 20px 28px' } }}
+      >
+        <section className="cfg-section">
+          <div className="cfg-title"><ApartmentOutlined /> 本体运行方案</div>
+          <Select
+            style={{ width: '100%' }}
+            allowClear
+            placeholder="未挂载（不启用本体）"
+            value={conversation.runtime_profile_id ?? undefined}
+            onChange={(v) => patchConv({ runtime_profile_id: v ?? null })}
+            options={profiles.map((p) => ({ value: p.id, label: p.name, disabled: p.status !== 'running', status: p.status }))}
+            optionRender={(opt) => (
+              <Space size={8} style={{ width: '100%' }}>
+                <Badge status={profileBadge(opt.data?.status)} />
+                <span>{opt.data?.label}</span>
+                <span className="cfg-opt-status">{profileStatusText(opt.data?.status)}</span>
+              </Space>
+            )}
+          />
+          {profilesErr
+            ? <div className="cfg-hint warn">本体运行方案列表暂不可用</div>
+            : <div className="cfg-hint">仅 running 方案可选；draft / stopped / error 禁选（FR-11）。</div>}
+        </section>
+
+        <section className="cfg-section">
+          <div className="cfg-title"><DatabaseOutlined /> 知识库</div>
+          <Select
+            style={{ width: '100%' }}
+            allowClear
+            placeholder="未选择知识库"
+            value={conversation.kb_id ?? undefined}
+            onChange={(v) => patchConv({ kb_id: v ?? null })}
+            options={kbs.map((k) => ({ value: k.id, label: k.name }))}
+            notFoundContent={kbsErr ? '知识库列表暂不可用' : undefined}
+          />
+          <div className="cfg-row">
+            <span className="cfg-row-label">启用检索</span>
+            <Switch
+              size="small"
+              checked={conversation.enable_kb}
+              disabled={!conversation.kb_id}
+              onChange={(v) => patchConv({ enable_kb: v })}
+            />
+          </div>
+          <div className="cfg-row">
+            <span className="cfg-row-label">召回条数 top_k</span>
+            <InputNumber
+              size="small"
+              min={1}
+              max={20}
+              value={conversation.top_k}
+              onChange={(v) => patchConv({ top_k: typeof v === 'number' ? v : conversation.top_k })}
+            />
+          </div>
+          <div className="cfg-row">
+            <span className="cfg-row-label">最低分 min_score</span>
+            <InputNumber
+              size="small"
+              min={0}
+              max={1}
+              step={0.05}
+              value={conversation.min_score}
+              onChange={(v) => patchConv({ min_score: typeof v === 'number' ? v : conversation.min_score })}
+            />
+          </div>
+          <div className="cfg-hint">「启用检索」开启且已选知识库时，召回片段随回答注入并显示为「知识召回」卡片。</div>
+        </section>
+
+        <section className="cfg-section">
+          <div className="cfg-title"><ThunderboltOutlined /> 已挂技能</div>
+          {agent?.skills?.length
+            ? (
+              <Space size={[6, 6]} wrap>
+                {agent.skills.map((id) => <Tag key={id} color="green" style={{ marginInlineEnd: 0 }}>{skillName(id)}</Tag>)}
+              </Space>
+            )
+            : <div className="cfg-hint">当前智能体未挂载技能</div>}
+        </section>
+      </Drawer>
     </div>
   )
 }
