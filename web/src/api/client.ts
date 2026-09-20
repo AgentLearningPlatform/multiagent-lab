@@ -1,4 +1,19 @@
-import type { Agent, Conversation, Message, ModelConnection, Project, RunEventDTO } from './types'
+import type {
+  Agent,
+  Conversation,
+  KBHit,
+  KBDoc,
+  KnowledgeBase,
+  Message,
+  ModelConnection,
+  OntologyDetail,
+  OntologySummary,
+  Project,
+  RunEventDTO,
+  RuntimeProfile,
+  Skill,
+  ToolInfo,
+} from './types'
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -52,6 +67,34 @@ export const api = {
   deleteConnection: (id: string) => req<{ deleted: string }>(`/api/model-connections/${id}`, { method: 'DELETE' }),
   setDefaultConnection: (id: string) => req<ModelConnection>(`/api/model-connections/${id}/default`, { method: 'PUT' }),
   testConnection: (input: any) => req<{ ok: boolean; error?: string; elapsed_ms: number }>('/api/model-connections/test', { method: 'POST', body: JSON.stringify(input) }),
+
+  // ---- M6 知识库（§8：/api/kb 系列） ----
+  listKBs: () => req<KnowledgeBase[]>('/api/kb'),
+  createKB: (k: Partial<KnowledgeBase>) => req<KnowledgeBase>('/api/kb', { method: 'POST', body: JSON.stringify(k) }),
+  updateKB: (id: string, k: Partial<KnowledgeBase>) => req<KnowledgeBase>(`/api/kb/${id}`, { method: 'PUT', body: JSON.stringify(k) }),
+  deleteKB: (id: string) => req<{ deleted: string }>(`/api/kb/${id}`, { method: 'DELETE' }),
+  listKBDocs: (kbId: string) => req<KBDoc[]>(`/api/kb/${kbId}/docs`),
+  uploadKBDoc: (kbId: string, doc: { name: string; content: string }) =>
+    req<KBDoc>(`/api/kb/${kbId}/docs`, { method: 'POST', body: JSON.stringify(doc) }),
+  deleteKBDoc: (kbId: string, docId: string) => req<{ deleted: string }>(`/api/kb/${kbId}/docs/${docId}`, { method: 'DELETE' }),
+  reindexKBDoc: (kbId: string, docId: string) => req<KBDoc>(`/api/kb/${kbId}/docs/${docId}/reindex`, { method: 'POST' }),
+  searchPreview: (kbId: string, q: string, topK?: number) =>
+    req<{ hits: KBHit[] }>(`/api/kb/${kbId}/search-preview`, { method: 'POST', body: JSON.stringify({ q, top_k: topK }) }),
+
+  // ---- M7 技能（§8：/api/skills 系列 + 注入预览） ----
+  listSkills: () => req<Skill[]>('/api/skills'),
+  createSkill: (s: Partial<Skill>) => req<Skill>('/api/skills', { method: 'POST', body: JSON.stringify(s) }),
+  updateSkill: (id: string, s: Partial<Skill>) => req<Skill>(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(s) }),
+  deleteSkill: (id: string) => req<{ deleted: string }>(`/api/skills/${id}`, { method: 'DELETE' }),
+  skillPreview: (id: string) => req<{ instruction: string }>(`/api/skills/${id}/preview`),
+
+  // ---- M5 工具注册表（§6.8：前端勾选落 agent.tools） ----
+  listTools: () => req<ToolInfo[]>('/api/tools'),
+
+  // ---- M8 本体对接（§6.10：双反代只读展示） ----
+  listRuntimeProfiles: () => req<RuntimeProfile[]>('/api/runtime-profiles'),
+  listOntologies: () => req<OntologySummary[]>('/api/ontologies'),
+  getOntology: (id: string) => req<OntologyDetail>(`/api/ontologies/${id}`),
 }
 
 /**
