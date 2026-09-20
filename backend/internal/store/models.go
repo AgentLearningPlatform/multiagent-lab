@@ -92,5 +92,9 @@ type ModelConnection struct {
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 	// 请求体携带、不落库不回显
+	// ---- write-only 字段（请求可携带，响应不回传明文） ----
 	APIKey string `json:"api_key,omitempty"`
+	// CopyKeyFrom 指定源连接 ID：创建/更新时若未携带明文 api_key，则复用源连接已存密文。
+	// 支撑「供应商 → 多模型」语义：Key 归属供应商，组内模型连接经此共享同一密文。
+	CopyKeyFrom string `json:"copy_key_from,omitempty"`
 }

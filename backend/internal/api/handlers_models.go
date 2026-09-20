@@ -32,15 +32,10 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var enc []byte
-	if c.APIKey != "" {
-		b, err := s.Box.Encrypt(c.APIKey)
-		if err != nil {
-			writeErr(w, err)
-			return
-		}
-		enc = b
-		c.APIKeyHint = secrets.MaskKey(c.APIKey)
+	enc, err := s.resolveConnKey(&c)
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
 	created, err := s.Store.CreateConnection(&c, enc)
 	if err != nil {
@@ -48,6 +43,31 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+// resolveConnKey 解析连接写入的 Key 密文：
+//  1. 携带明文 api_key → 加密；
+//  2. 未携带明文但指定 copy_key_from → 复用源连接已存密文（供应商 → 多模型共享 Key）；
+//  3. 两者皆空 → 返回 nil（创建 = 无 Key；更新 = 保留原 Key）。
+func (s *Server) resolveConnKey(c *store.ModelConnection) ([]byte, error) {
+	switch {
+	case c.APIKey != "":
+		b, err := s.Box.Encrypt(c.APIKey)
+		if err != nil {
+			return nil, err
+		}
+		c.APIKeyHint = secrets.MaskKey(c.APIKey)
+		return b, nil
+	case c.CopyKeyFrom != "":
+		src, err := s.Store.GetConnectionRecord(c.CopyKeyFrom)
+		if err != nil {
+			return nil, err
+		}
+		c.APIKeyHint = src.Conn.APIKeyHint
+		return src.Encrypted, nil
+	default:
+		return nil, nil
+	}
 }
 
 func (s *Server) getConnection(w http.ResponseWriter, r *http.Request) {
@@ -66,15 +86,10 @@ func (s *Server) updateConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	var enc []byte
-	if c.APIKey != "" {
-		b, err := s.Box.Encrypt(c.APIKey)
-		if err != nil {
-			writeErr(w, err)
-			return
-		}
-		enc = b
-		c.APIKeyHint = secrets.MaskKey(c.APIKey)
+	enc, err := s.resolveConnKey(&c)
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
 	c.ID = id
 	updated, err := s.Store.UpdateConnection(&c, enc)
