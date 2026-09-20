@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
@@ -19,19 +20,22 @@ type Server struct {
 	Box   *secrets.Box
 	Chat  *chat.Service
 	Tools *tool.Registry
+	KB    *kb.Service
 	Mux   *http.ServeMux
 }
 
 // NewServer 构造并注册全部路由。
-func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry) *Server {
-	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, Mux: http.NewServeMux()}
+func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service) *Server {
+	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
 
 func (s *Server) routes() {
 	m := s.Mux
-	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]string{"status": "ok"}) })
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
 
 	// Agents
 	m.HandleFunc("GET /api/agents", s.listAgents)
@@ -72,6 +76,18 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/tools", s.listTools)
 
 	// 技能库（M7，§6.12）
+	// Knowledge base（M6，§450）
+	m.HandleFunc("GET /api/kb", s.listKB)
+	m.HandleFunc("POST /api/kb", s.createKB)
+	m.HandleFunc("GET /api/kb/{id}", s.getKB)
+	m.HandleFunc("PUT /api/kb/{id}", s.updateKB)
+	m.HandleFunc("DELETE /api/kb/{id}", s.deleteKB)
+	m.HandleFunc("GET /api/kb/{id}/docs", s.listKBDocs)
+	m.HandleFunc("POST /api/kb/{id}/docs", s.importKBDoc)
+	m.HandleFunc("DELETE /api/kb/{id}/docs/{did}", s.deleteKBDoc)
+	m.HandleFunc("POST /api/kb/{id}/docs/{did}/reindex", s.reindexKBDoc)
+	m.HandleFunc("POST /api/kb/{id}/search-preview", s.previewKBSearch)
+
 	m.HandleFunc("GET /api/skills", s.listSkills)
 	m.HandleFunc("POST /api/skills", s.createSkill)
 	m.HandleFunc("GET /api/skills/{id}", s.getSkill)

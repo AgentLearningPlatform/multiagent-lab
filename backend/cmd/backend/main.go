@@ -15,6 +15,7 @@ import (
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/api"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/skill"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
@@ -49,8 +50,16 @@ func main() {
 		Tools:    reg,
 		Composer: &skill.Composer{Store: st}, // M9：技能注入
 	}
-	svc := chat.NewService(st, asm)
-	srv := api.NewServer(st, box, svc, reg)
+	// 知识库服务（M6，§6.9）：向量后端按 KB_VECTOR_BACKEND（qdrant|sqlite），Qdrant 走 REST（QDRANT_URL）
+	kbSvc, err := kb.NewService(st, box,
+		getenv("KB_VECTOR_BACKEND", "qdrant"),
+		getenv("QDRANT_URL", "http://127.0.0.1:6333"))
+	if err != nil {
+		log.Fatalf("init knowledge base service: %v", err)
+	}
+
+	svc := chat.NewService(st, asm, kbSvc)
+	srv := api.NewServer(st, box, svc, reg, kbSvc)
 
 	httpSrv := &http.Server{
 		Addr:              addr,

@@ -97,10 +97,10 @@ func (s *Server) previewSkill(w http.ResponseWriter, r *http.Request) {
 		block = "<skill name=\"" + sk.Name + "\">" + sk.Instruction + "</skill>"
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":               sk.ID,
-		"name":             sk.Name,
-		"enabled":          sk.Enabled,
+		"id":                sk.ID,
+		"name":              sk.Name,
+		"enabled":           sk.Enabled,
 		"instruction_block": block,
-		"tools":            sk.Tools,
+		"tools":             sk.Tools,
 	})
 }

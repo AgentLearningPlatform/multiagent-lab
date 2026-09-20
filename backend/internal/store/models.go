@@ -79,18 +79,18 @@ type RunEvent struct {
 
 // ModelConnection 模型连接（chat / embedding）。
 type ModelConnection struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	ConnType    string  `json:"conn_type"` // chat | embedding
-	Protocol    string  `json:"protocol"`  // openai_compat
-	BaseURL     string  `json:"base_url"`
-	ModelName   string  `json:"model_name"`
-	APIKeyHint  string  `json:"api_key_hint"` // 掩码，如 sk-****ab12
-	HasKey      bool    `json:"has_key"`      // 是否已存 key（不回传明文）
-	Enabled     bool    `json:"enabled"`
-	IsDefault   bool    `json:"is_default"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	ConnType   string `json:"conn_type"` // chat | embedding
+	Protocol   string `json:"protocol"`  // openai_compat
+	BaseURL    string `json:"base_url"`
+	ModelName  string `json:"model_name"`
+	APIKeyHint string `json:"api_key_hint"` // 掩码，如 sk-****ab12
+	HasKey     bool   `json:"has_key"`      // 是否已存 key（不回传明文）
+	Enabled    bool   `json:"enabled"`
+	IsDefault  bool   `json:"is_default"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 	// 请求体携带、不落库不回显
 	// ---- write-only 字段（请求可携带，响应不回传明文） ----
 	APIKey string `json:"api_key,omitempty"`

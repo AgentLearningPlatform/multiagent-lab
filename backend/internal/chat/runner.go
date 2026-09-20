@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
@@ -20,14 +21,15 @@ import (
 type Service struct {
 	Store     *store.Store
 	Assembler *Assembler
+	KB        *kb.Service // M6：对话知识库召回（nil 时禁用）
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // conversationID -> cancel
 }
 
 // NewService 构造。
-func NewService(st *store.Store, asm *Assembler) *Service {
-	return &Service{Store: st, Assembler: asm, cancels: map[string]context.CancelFunc{}}
+func NewService(st *store.Store, asm *Assembler, kbSvc *kb.Service) *Service {
+	return &Service{Store: st, Assembler: asm, KB: kbSvc, cancels: map[string]context.CancelFunc{}}
 }
 
 // EmitFn 平台 SSE 事件输出函数（由 API 层注入）。
@@ -131,6 +133,29 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 			skills = append(skills, map[string]string{"id": sk.ID, "name": sk.Name})
 		}
 		s.emitAndRecord(runCtx, conv, runID, newEvent("skill.loaded", runID, map[string]any{"skills": skills}), emit)
+	}
+
+	// 知识库召回（M6，§11/§6.9：提问先检索 → retrieval 事件 → 上下文注入；失败降级不阻断）
+	if conv.EnableKB && conv.KBID != nil && *conv.KBID != "" && s.KB != nil {
+		kbcfg, kerr := s.Store.GetKnowledgeBase(*conv.KBID)
+		if kerr != nil {
+			s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库加载失败，本次回答未注入知识库内容: " + kerr.Error()}), emit)
+		} else {
+			hits, serr := s.KB.Search(runCtx, kbcfg, input, conv.TopK, conv.MinScore)
+			switch {
+			case serr != nil:
+				s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库检索失败，本次回答未注入知识库内容: " + serr.Error()}), emit)
+			case len(hits) > 0:
+				hd := make([]map[string]any, 0, len(hits))
+				for _, h := range hits {
+					hd = append(hd, map[string]any{"doc": h.Doc, "seq": h.Seq, "score": h.Score, "excerpt": h.Excerpt})
+				}
+				s.emitAndRecord(runCtx, conv, runID, newEvent("retrieval", runID, map[string]any{"kb_id": kbcfg.ID, "hits": hd}), emit)
+				if ctxText := kb.RenderContext(kbcfg.Name, hits); ctxText != "" {
+					histMsgs = append(histMsgs, schema.SystemMessage(ctxText))
+				}
+			}
+		}
 	}
 
 	var (
