@@ -1,27 +1,32 @@
-import { useUI } from '../store/ui'
+import type { ReactNode } from 'react'
+import { Menu } from 'antd'
+import { RobotOutlined, ProjectOutlined, ApartmentOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons'
+import { useUI, type PageKey } from '../store/ui'
 
-const PAGES: { key: string; label: string }[] = [
-  { key: 'agents', label: '智能体' },
-  { key: 'projects', label: '项目' },
-  { key: 'ontology', label: '本体' },
-  { key: 'knowledge', label: '知识库' },
-  { key: 'skills', label: '技能' },
+const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
+  { key: 'agents', label: '智能体', icon: <RobotOutlined /> },
+  { key: 'projects', label: '项目', icon: <ProjectOutlined /> },
+  { key: 'ontology', label: '本体', icon: <ApartmentOutlined /> },
+  { key: 'knowledge', label: '知识库', icon: <DatabaseOutlined /> },
+  { key: 'skills', label: '技能', icon: <ThunderboltOutlined /> },
 ]
 
+/** 顶部导航（蚂蚁 Menu horizontal） */
 export default function TopNav() {
   const { page, setPage } = useUI()
   return (
     <div className="topnav">
       <span className="logo">◆ Eino 多智能体学习平台</span>
-      {PAGES.map((p) => (
-        <button key={p.key} className={`nav-item ${page === p.key ? 'active' : ''}`} onClick={() => setPage(p.key as any)}>
-          {p.label}
-        </button>
-      ))}
-      <span className="spacer" />
-      <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
-        设置
-      </button>
+      <Menu
+        mode="horizontal"
+        selectedKeys={[page]}
+        onClick={({ key }) => setPage(key as PageKey)}
+        style={{ flex: 1, minWidth: 0, borderBottom: 'none', background: 'transparent' }}
+        items={[
+          ...PAGES.map((p) => ({ key: p.key, label: p.label, icon: p.icon })),
+          { key: 'settings', label: '设置', icon: <SettingOutlined /> },
+        ]}
+      />
     </div>
   )
 }

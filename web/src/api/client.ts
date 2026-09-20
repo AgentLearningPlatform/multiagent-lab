@@ -43,6 +43,7 @@ export const api = {
   deleteConversation: (id: string) => req<{ deleted: string }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   listMessages: (id: string) => req<Message[]>(`/api/conversations/${id}/messages`),
   listEvents: (id: string) => req<RunEventDTO[]>(`/api/conversations/${id}/events`),
+  stopConversation: (id: string) => req<{ stopped: boolean }>(`/api/conversations/${id}/stop`, { method: 'POST' }),
 
   // model connections
   listConnections: () => req<ModelConnection[]>('/api/model-connections'),

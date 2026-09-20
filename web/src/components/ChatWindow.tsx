@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Collapse, Space, Switch, Tag, Typography, Avatar } from 'antd'
+import { RobotOutlined, UserOutlined, BulbOutlined, BugOutlined } from '@ant-design/icons'
+import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import { api, runConversation } from '../api/client'
 import type { Agent, Conversation, Message, ModelConnection, Project } from '../api/types'
 import { useUI } from '../store/ui'
@@ -53,10 +56,10 @@ function finishSummary(d: any): string {
 }
 
 /**
- * 中间对话窗口（原型 06 §3.1 / §3.2）：
- * - agent 直聊：头部显示智能体名，「属性」打开智能体配置
- * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」，「属性」打开项目配置
- * - 执行细节：历史事件回放、token 用量与耗时、深度思考折叠卡、工具调用入参/出参 JSON、原始事件调试开关
+ * 中间对话窗口（原型 06 §3.1 / §3.2，Ant Design X Bubble/Sender/ThoughtChain）：
+ * - agent 直聊：头部显示智能体名，「配置」打开智能体抽屉
+ * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」
+ * - 执行细节：历史事件回放、token 用量与耗时、深度思考 ThoughtChain、工具调用 JSON、原始事件调试开关
  */
 export default function ChatWindow({
   conversation,
@@ -164,6 +167,73 @@ export default function ChatWindow({
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
   }, [items])
 
+  // 事件卡渲染（ThoughtChain 深度思考 / 工具详情 / 终态摘要）
+  const renderEventCard = (it: ChatItem, i: number) => {
+    if (it.evType === 'reasoning') {
+      const len = it.reasoning?.length ?? 0
+      return (
+        <ThoughtChain
+          key={i}
+          style={{ marginLeft: 34, maxWidth: '80%' }}
+          items={[
+            {
+              key: 'think',
+              title: `深度思考${len ? `（${len} 字）` : ''}`,
+              status: it.streamKey ? 'loading' : 'success',
+              icon: <BulbOutlined />,
+              content: len ? <pre className="thinking">{it.reasoning}</pre> : undefined,
+            },
+          ]}
+        />
+      )
+    }
+    const isTool = it.evType === 'tool.call' || it.evType === 'tool.result'
+    return (
+      <div
+        key={i}
+        className={`event-card ${it.eventErr ? 'err' : ''}`}
+        style={{ marginLeft: 34, maxWidth: '80%' }}
+      >
+        <span>{it.eventText}</span>
+        {isTool && it.evData && (
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'detail',
+              label: <span style={{ fontSize: 11.5, color: 'var(--ant-color-primary, #4f46e5)' }}>详情</span>,
+              children: <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>,
+            }]}
+          />
+        )}
+        {showRaw && it.evData && !isTool && (
+          <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>
+        )}
+      </div>
+    )
+  }
+
+  // Bubble.List 数据（消息走 user/assistant 角色，事件卡为无边框自定义内容）
+  const listItems = useMemo(
+    () =>
+      items.map((it, i) => {
+        if (it.kind === 'msg') {
+          return {
+            key: `m${i}`,
+            role: it.role === 'user' ? 'user' : 'assistant',
+            content: it.content ?? '',
+            loading: !!it.streaming && !it.content,
+          }
+        }
+        return {
+          key: `e${i}`,
+          role: 'event',
+          content: renderEventCard(it, i),
+        }
+      }),
+    [items, showRaw],
+  )
+
   const send = async () => {
     const text = input.trim()
     if (!text || running) return
@@ -259,126 +329,99 @@ export default function ChatWindow({
 
   const stop = () => {
     runRef.current?.abort()
-    api.updateConversation(conversation.id, conversation).catch(() => {})
-    fetch(`/api/conversations/${conversation.id}/stop`, { method: 'POST' }).catch(() => {})
+    api.stopConversation(conversation.id).catch(() => {})
   }
 
-  const emptyState = items.length === 0
   const subjectName = isProjectScope ? project?.name : agent?.name
   const canSend = isProjectScope ? !!project : !!agent
+  const placeholder = canSend
+    ? `给「${subjectName}」发消息…`
+    : isProjectScope
+      ? '项目尚未配置成员智能体'
+      : '请先创建智能体'
 
   return (
     <div className="chat">
       <div className="chat-header">
         {isProjectScope && project ? (
           <>
-            <span className="agent-name">项目：{project.name}</span>
-            <span className="badge gray">会话使用的智能体：{agent ? agent.name : '未配置成员'}</span>
+            <Typography.Text strong>项目：{project.name}</Typography.Text>
+            <Tag>会话使用的智能体：{agent ? agent.name : '未配置成员'}</Tag>
           </>
         ) : (
-          <span className="agent-name">{agent ? agent.name : '对话'}</span>
+          <Typography.Text strong>{agent ? agent.name : '对话'}</Typography.Text>
         )}
-        <span className="badge">{modelLabel}</span>
-        {isProjectScope && project && <span className="badge gray">{project.collab_mode}</span>}
+        <Tag color="purple">{modelLabel}</Tag>
+        {isProjectScope && project && <Tag>{project.collab_mode}</Tag>}
         {!isProjectScope && agent && (
           <>
-            <span className="badge gray">{agent.runtime_backend}</span>
-            <span className="badge gray">最大迭代 {agent.max_iteration}</span>
+            <Tag>{agent.runtime_backend}</Tag>
+            <Tag>最大迭代 {agent.max_iteration}</Tag>
           </>
         )}
         <span className="spacer" />
-        <button
-          className={`btn-ghost ${showRaw ? 'on' : ''}`}
-          onClick={() => setShowRaw((v) => !v)}
-          title="显示运行事件的原始 JSON（调试用）"
-        >
-          {showRaw ? '调试：开' : '调试'}
-        </button>
-        <button
-          className="btn-ghost"
-          onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
-          disabled={isProjectScope ? !project : !agent}
-        >
-          配置
-        </button>
+        <Space size={4}>
+          <BugOutlined style={{ color: showRaw ? 'var(--ant-color-primary, #4f46e5)' : undefined }} />
+          <span style={{ fontSize: 12 }}>调试</span>
+          <Switch size="small" checked={showRaw} onChange={setShowRaw} />
+          <Button
+            size="small"
+            onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
+            disabled={isProjectScope ? !project : !agent}
+          >
+            配置
+          </Button>
+        </Space>
       </div>
 
       <div className="msg-list" ref={listRef}>
-        {emptyState && (
-          <div className="placeholder" style={{ marginTop: 60 }}>
-            <b>
-              开始与「{subjectName ?? '智能体'}」对话
-            </b>
-            <p style={{ fontSize: 13 }}>
-              {isProjectScope
-                ? '项目会话由成员智能体协作处理；「配置」中可维护项目成员与协作模式（M4 起生效）。'
-                : '消息将流式返回；「配置」中可调整系统提示词、模型与采样参数（下次运行生效）。'}
-            </p>
+        {items.length === 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            <Welcome
+              variant="borderless"
+              icon={<RobotOutlined style={{ fontSize: 36, color: 'var(--ant-color-primary, #4f46e5)' }} />}
+              title={`开始与「${subjectName ?? '智能体'}」对话`}
+              description={
+                isProjectScope
+                  ? '项目会话由成员智能体协作处理；「配置」中可维护项目成员与协作模式（M4 起生效）。'
+                  : '消息将流式返回；「配置」中可调整系统提示词、模型与采样参数（下次运行生效）。'
+              }
+            />
           </div>
         )}
-        {items.map((it, i) =>
-          it.kind === 'msg' ? (
-            <div key={i} className={`msg ${it.role === 'user' ? 'user' : 'assistant'}`}>
-              <div className="bubble">
-                {it.role === 'assistant' && <div className="meta">助手</div>}
-                {it.content}
-                {it.streaming && <span className="cursor-blink" />}
-              </div>
-            </div>
-          ) : it.evType === 'reasoning' ? (
-            <div key={i} className="event-card reasoning">
-              <details open={!!it.streamKey}>
-                <summary>💭 深度思考{it.reasoning ? `（${it.reasoning.length} 字）` : ''}</summary>
-                <pre className="thinking">{it.reasoning}</pre>
-              </details>
-              {showRaw && it.evData && <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>}
-            </div>
-          ) : (
-            <div key={i} className={`event-card ${it.eventErr ? 'err' : ''}`}>
-              <span>{it.eventText}</span>
-              {(it.evType === 'tool.call' || it.evType === 'tool.result') && it.evData && (
-                <details className="tool-detail">
-                  <summary>详情</summary>
-                  <pre>{JSON.stringify(it.evData, null, 2)}</pre>
-                </details>
-              )}
-              {showRaw && it.evData && <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>}
-            </div>
-          ),
+        {items.length > 0 && (
+          <Bubble.List
+            items={listItems}
+            role={{
+              user: {
+                placement: 'end',
+                avatar: <Avatar icon={<UserOutlined />} style={{ background: '#4f46e5', color: '#fff' }} />,
+                styles: { content: { background: '#4f46e5', color: '#fff', borderRadius: 12, borderBottomRightRadius: 4 } },
+              },
+              ai: {
+                placement: 'start',
+                avatar: <Avatar icon={<RobotOutlined />} style={{ background: '#eef0fe', color: '#4f46e5' }} />,
+                styles: { content: { background: '#fff', border: '1px solid var(--c-line)', borderRadius: 12, borderBottomLeftRadius: 4 } },
+              },
+              event: {
+                variant: 'borderless',
+                styles: { content: { padding: 0, background: 'transparent', width: '100%', maxWidth: '100%' } },
+              },
+            }}
+          />
         )}
       </div>
 
       <div className="composer">
-        <div className="box">
-          <textarea
-            rows={2}
-            placeholder={
-              canSend
-                ? `给「${subjectName}」发消息…（Enter 发送，Shift+Enter 换行）`
-                : isProjectScope
-                  ? '项目尚未配置成员智能体'
-                  : '请先创建智能体'
-            }
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send()
-              }
-            }}
-            disabled={!canSend}
-          />
-          {running ? (
-            <button className="btn-primary btn-stop" onClick={stop}>
-              停止
-            </button>
-          ) : (
-            <button className="btn-primary" onClick={send} disabled={!input.trim() || !canSend}>
-              发送
-            </button>
-          )}
-        </div>
+        <Sender
+          value={input}
+          onChange={setInput}
+          onSubmit={() => send()}
+          onCancel={stop}
+          loading={running}
+          placeholder={placeholder}
+          disabled={!canSend}
+        />
         <div className="tips">
           Enter 发送 · Shift+Enter 换行 · 运行过程（开始/思考/工具/用量/完成）以卡片显示，「调试」可查看原始事件
         </div>

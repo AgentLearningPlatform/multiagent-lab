@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { api } from '../api/client'
 import type { ModelConnection } from '../api/types'
 import { useUI } from '../store/ui'
@@ -35,7 +37,6 @@ export default function SettingsPage() {
   }
 
   const remove = async (c: ModelConnection) => {
-    if (!confirm(`删除连接「${c.name}」？`)) return
     try {
       await api.deleteConnection(c.id)
       showToast('已删除')
@@ -57,76 +58,73 @@ export default function SettingsPage() {
     }
   }
 
+  const columns: ColumnsType<ModelConnection> = [
+    {
+      title: '名称',
+      dataIndex: 'name',
+      render: (_, c) => (
+        <Space size={6}>
+          <Typography.Text strong>{c.name}</Typography.Text>
+          {c.is_default && <Tag color="purple">默认</Tag>}
+        </Space>
+      ),
+    },
+    { title: '类型', dataIndex: 'conn_type', width: 80, render: (t: string) => (t === 'chat' ? '对话' : '向量') },
+    { title: 'Base URL', dataIndex: 'base_url', render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
+    { title: '模型', dataIndex: 'model_name', render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
+    { title: 'API Key', dataIndex: 'has_key', render: (_, c) => <Typography.Text type={c.has_key ? 'secondary' : 'warning'} style={{ fontSize: 12 }}>{c.has_key ? c.api_key_hint : '未设置'}</Typography.Text> },
+    { title: '状态', dataIndex: 'enabled', width: 80, render: (on: boolean) => <Tag color={on ? 'green' : 'default'}>{on ? '启用' : '停用'}</Tag> },
+    {
+      title: '操作',
+      key: 'ops',
+      width: 300,
+      render: (_, c) => (
+        <Space size={0} wrap>
+          <Button type="link" size="small" loading={testing === c.id} onClick={() => test(c)}>测试</Button>
+          {c.is_default ? (
+            <Tag style={{ margin: 0 }}>默认</Tag>
+          ) : (
+            <Button type="link" size="small" onClick={() => setDefault(c)}>设默认</Button>
+          )}
+          <Button type="link" size="small" onClick={() => toggleEnabled(c)}>{c.enabled ? '停用' : '启用'}</Button>
+          <Button type="link" size="small" onClick={() => setEditing(c)}>编辑</Button>
+          <Popconfirm title={`删除连接「${c.name}」？`} okText="删除" okButtonProps={{ danger: true }} cancelText="取消" onConfirm={() => remove(c)}>
+            <Button type="link" size="small" danger>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
+
   return (
     <div className="page">
-      <h2>设置 · 模型连接</h2>
-      <div className="sub">
+      <Typography.Title level={4} style={{ marginTop: 0 }}>设置 · 模型连接</Typography.Title>
+      <Typography.Paragraph type="secondary">
         通过 OpenAI 兼容协议接入对话/向量模型；API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。
-      </div>
+      </Typography.Paragraph>
 
       {!hasChat && (
-        <div className="placeholder" style={{ marginBottom: 16, textAlign: 'left' }}>
-          <b>⚠ 尚未配置可用的对话模型</b>
-          <p style={{ margin: '6px 0 0' }}>
-            预置了「DeepSeek（预置）」连接：填入 API Key 并启用、设为默认，即可开始对话。
-          </p>
-        </div>
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="尚未配置可用的对话模型"
+          description="预置了「DeepSeek（预置）」连接：填入 API Key 并启用、设为默认，即可开始对话。"
+        />
       )}
 
-      <button className="btn-primary" style={{ marginBottom: 16 }} onClick={() => setEditing('new')}>
+      <Button type="primary" style={{ marginBottom: 16 }} onClick={() => setEditing('new')}>
         ＋ 新建连接
-      </button>
+      </Button>
 
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>类型</th>
-            <th>Base URL</th>
-            <th>模型</th>
-            <th>API Key</th>
-            <th>状态</th>
-            <th style={{ width: 240 }}>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {conns.map((c) => (
-            <tr key={c.id}>
-              <td>
-                <b>{c.name}</b>
-                {c.is_default && <span className="badge" style={{ marginLeft: 8 }}>默认</span>}
-              </td>
-              <td>{c.conn_type === 'chat' ? '对话' : '向量'}</td>
-              <td className="mono">{c.base_url}</td>
-              <td className="mono">{c.model_name}</td>
-              <td className="mono">{c.has_key ? c.api_key_hint : '未设置'}</td>
-              <td>
-                <span className={`badge ${c.enabled ? 'ok' : 'gray'}`}>{c.enabled ? '启用' : '停用'}</span>
-              </td>
-              <td>
-                <button className="btn-ghost" style={{ marginRight: 6 }} onClick={() => test(c)} disabled={testing === c.id}>
-                  {testing === c.id ? '测试中…' : '测试'}
-                </button>
-                {c.is_default ? (
-                  <span className="badge gray" style={{ marginRight: 6 }}>默认</span>
-                ) : (
-                  <button className="btn-ghost" style={{ marginRight: 6 }} onClick={() => setDefault(c)}>设默认</button>
-                )}
-                <button className="btn-ghost" style={{ marginRight: 6 }} onClick={() => toggleEnabled(c)}>
-                  {c.enabled ? '停用' : '启用'}
-                </button>
-                <button className="btn-ghost" style={{ marginRight: 6 }} onClick={() => setEditing(c)}>编辑</button>
-                <button className="btn-danger-ghost" onClick={() => remove(c)}>删除</button>
-              </td>
-            </tr>
-          ))}
-          {conns.length === 0 && (
-            <tr>
-              <td colSpan={7} style={{ textAlign: 'center', color: 'var(--c-ink-3)' }}>暂无连接</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <Table<ModelConnection>
+        rowKey="id"
+        columns={columns}
+        dataSource={conns}
+        pagination={false}
+        size="middle"
+        locale={{ emptyText: '暂无连接' }}
+      />
 
       {editing && (
         <ConnModal
@@ -141,28 +139,26 @@ export default function SettingsPage() {
 
 function ConnModal({ conn, onClose, onSaved }: { conn: ModelConnection | null; onClose: () => void; onSaved: () => void }) {
   const { showToast } = useUI()
-  const [form, setForm] = useState<Partial<ModelConnection> & { api_key?: string }>(
-    conn ?? { name: '', conn_type: 'chat', base_url: 'https://api.deepseek.com/v1', model_name: 'deepseek-chat', api_key: '' },
-  )
+  const [form] = Form.useForm()
   const [busy, setBusy] = useState(false)
-  const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }))
 
-  // Esc 关闭弹窗（原型 06 §5 dialog 约定）
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
+    form.setFieldsValue(
+      conn ?? { name: '', conn_type: 'chat', base_url: 'https://api.deepseek.com/v1', model_name: 'deepseek-chat', api_key: '' },
+    )
+  }, [conn, form])
 
   const save = async () => {
-    if (!form.name?.trim() || !form.base_url?.trim() || !form.model_name?.trim()) {
-      showToast('名称、Base URL、模型必填', 'err')
+    let v: any
+    try {
+      v = await form.validateFields()
+    } catch {
       return
     }
     setBusy(true)
     try {
-      if (conn) await api.updateConnection(conn.id, form)
-      else await api.createConnection(form)
+      if (conn) await api.updateConnection(conn.id, { ...conn, ...v })
+      else await api.createConnection(v)
       showToast('已保存')
       onSaved()
     } catch (e: any) {
@@ -173,11 +169,12 @@ function ConnModal({ conn, onClose, onSaved }: { conn: ModelConnection | null; o
   }
 
   const testNow = async () => {
+    const v = form.getFieldsValue()
     setBusy(true)
     try {
       const payload = conn
         ? { id: conn.id }
-        : { conn_type: form.conn_type, base_url: form.base_url, model_name: form.model_name, api_key: form.api_key }
+        : { conn_type: v.conn_type, base_url: v.base_url, model_name: v.model_name, api_key: v.api_key }
       const r = await api.testConnection(payload)
       showToast(r.ok ? `连接成功（${r.elapsed_ms}ms）` : `失败：${r.error}`, r.ok ? 'ok' : 'err')
     } catch (e: any) {
@@ -188,48 +185,50 @@ function ConnModal({ conn, onClose, onSaved }: { conn: ModelConnection | null; o
   }
 
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{conn ? '编辑连接' : '新建连接'}</h3>
-        <div className="row2">
-          <div className="field">
-            <label>名称</label>
-            <input value={form.name ?? ''} onChange={(e) => set('name', e.target.value)} placeholder="DeepSeek 官方" />
-          </div>
-          <div className="field">
-            <label>类型</label>
-            <select value={form.conn_type ?? 'chat'} onChange={(e) => set('conn_type', e.target.value)}>
-              <option value="chat">对话模型</option>
-              <option value="embedding">向量模型</option>
-            </select>
-          </div>
-        </div>
-        <div className="field">
-          <label>Base URL（OpenAI 兼容）</label>
-          <input value={form.base_url ?? ''} onChange={(e) => set('base_url', e.target.value)} placeholder="https://api.deepseek.com/v1" />
-        </div>
-        <div className="row2">
-          <div className="field">
-            <label>模型名</label>
-            <input value={form.model_name ?? ''} onChange={(e) => set('model_name', e.target.value)} placeholder="deepseek-chat" />
-          </div>
-          <div className="field">
-            <label>API Key {conn?.has_key && <span className="badge ok" style={{ marginLeft: 6 }}>已存 {conn.api_key_hint}</span>}</label>
-            <input
-              type="password"
-              value={form.api_key ?? ''}
-              onChange={(e) => set('api_key', e.target.value)}
-              placeholder={conn?.has_key ? '不修改请留空' : 'sk-…'}
+    <Modal
+      open
+      title={conn ? '编辑连接' : '新建连接'}
+      onCancel={onClose}
+      width={520}
+      footer={
+        <Space>
+          <Button onClick={testNow} disabled={busy}>先测试</Button>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={busy} onClick={save}>保存</Button>
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical" requiredMark={false}>
+        <Space size={12} style={{ display: 'flex' }}>
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]} style={{ flex: 1 }}>
+            <Input placeholder="DeepSeek 官方" />
+          </Form.Item>
+          <Form.Item name="conn_type" label="类型" initialValue="chat" style={{ width: 150 }}>
+            <Select
+              options={[
+                { value: 'chat', label: '对话模型' },
+                { value: 'embedding', label: '向量模型' },
+              ]}
             />
-            <div className="hint">保存后 AES-256-GCM 加密，仅显示掩码</div>
-          </div>
-        </div>
-        <div className="actions">
-          <button className="btn-primary" onClick={save} disabled={busy}>保存</button>
-          <button className="btn-ghost" onClick={testNow} disabled={busy}>先测试</button>
-          <button className="btn-ghost" onClick={onClose}>取消</button>
-        </div>
-      </div>
-    </div>
+          </Form.Item>
+        </Space>
+        <Form.Item name="base_url" label="Base URL（OpenAI 兼容）" rules={[{ required: true, message: 'Base URL 必填' }]}>
+          <Input placeholder="https://api.deepseek.com/v1" />
+        </Form.Item>
+        <Space size={12} style={{ display: 'flex' }}>
+          <Form.Item name="model_name" label="模型名" rules={[{ required: true, message: '模型名必填' }]} style={{ flex: 1 }}>
+            <Input placeholder="deepseek-chat" />
+          </Form.Item>
+          <Form.Item
+            name="api_key"
+            label={conn?.has_key ? <span>API Key <Tag color="green" style={{ marginInlineStart: 6 }}>已存 {conn.api_key_hint}</Tag></span> : 'API Key'}
+            style={{ flex: 1 }}
+            extra="保存后 AES-256-GCM 加密，仅显示掩码"
+          >
+            <Input.Password placeholder={conn?.has_key ? '不修改请留空' : 'sk-…'} autoComplete="new-password" />
+          </Form.Item>
+        </Space>
+      </Form>
+    </Modal>
   )
 }

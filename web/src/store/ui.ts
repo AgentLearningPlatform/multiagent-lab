@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { toast } from '../lib/antd'
 
 export type PageKey = 'agents' | 'projects' | 'ontology' | 'knowledge' | 'skills' | 'settings'
 
@@ -14,7 +15,7 @@ interface UIState {
   dataVersion: number
   bumpData: () => void
 
-  toast: { msg: string; kind: 'ok' | 'err' } | null
+  /** 全局提示（antd message 桥接，见 lib/antd.ts） */
   showToast: (msg: string, kind?: 'ok' | 'err') => void
 }
 
@@ -25,9 +26,5 @@ export const useUI = create<UIState>((set) => ({
   setCurrentConv: (id) => set({ currentConvId: id }),
   dataVersion: 0,
   bumpData: () => set((s) => ({ dataVersion: s.dataVersion + 1 })),
-  toast: null,
-  showToast: (msg, kind = 'ok') => {
-    set({ toast: { msg, kind } })
-    setTimeout(() => set({ toast: null }), 2600)
-  },
+  showToast: (msg, kind = 'ok') => toast(msg, kind),
 }))

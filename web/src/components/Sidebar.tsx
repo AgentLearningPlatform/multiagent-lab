@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Button, Collapse, Empty, Space } from 'antd'
+import { PlusOutlined, SettingOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Conversations } from '@ant-design/x'
 import { api } from '../api/client'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
+import { confirmAction } from '../lib/antd'
 
 interface TreeNode {
   key: string
@@ -10,7 +14,7 @@ interface TreeNode {
 }
 
 /**
- * 左栏树（原型 06 §3.1 / §3.2）：
+ * 左栏树（原型 06 §3.1 / §3.2，Ant Design X Conversations + antd Collapse）：
  * - mode=agent：智能体折叠列表，每个智能体节点常驻「＋新对话」「⚙配置」，其下挂该智能体的对话
  * - mode=project：项目折叠列表，每个项目节点同样入口，其下挂项目对话
  */
@@ -70,20 +74,20 @@ export default function Sidebar({
   }, [activeId])
 
   const selectNode = (id: string) => {
-    setOpen((o) => ({ ...o, [id]: !o[id] }))
     if (mode === 'agent') onSelectAgent(id)
     else onSelectProject(id)
   }
 
-  const removeConversation = async (id: string) => {
-    if (!confirm('删除该对话及其全部消息？')) return
-    try {
-      await api.deleteConversation(id)
-      if (currentConvId === id) setCurrentConv(null)
-      bumpData()
-    } catch (e: any) {
-      showToast(e.message, 'err')
-    }
+  const removeConversation = (id: string) => {
+    confirmAction('删除该对话及其全部消息？', '删除后不可恢复。', async () => {
+      try {
+        await api.deleteConversation(id)
+        if (currentConvId === id) setCurrentConv(null)
+        bumpData()
+      } catch (e: any) {
+        showToast(e.message, 'err')
+      }
+    })
   }
 
   const isAgent = mode === 'agent'
@@ -96,76 +100,61 @@ export default function Sidebar({
     <div className="sidebar">
       <div className="side-head">
         <span className="side-title">{isAgent ? '智能体' : '项目'}</span>
-        <button className="btn-mini" onClick={isAgent ? onNewAgent : onNewProject}>
-          ＋ 新建{isAgent ? '智能体' : '项目'}
-        </button>
       </div>
+      <Button block type="dashed" icon={<PlusOutlined />} onClick={isAgent ? onNewAgent : onNewProject} style={{ margin: '0 12px 8px', width: 'calc(100% - 24px)' }}>
+        新建{isAgent ? '智能体' : '项目'}
+      </Button>
       <div className="conv-list">
         {nodes.length === 0 && (
-          <div className="empty-hint">
-            {isAgent ? '还没有智能体，点右上角创建' : '还没有项目，点右上角创建'}
-          </div>
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={isAgent ? '还没有智能体，点击上方创建' : '还没有项目，点击上方创建'}
+            style={{ marginTop: 40 }}
+          />
         )}
-        {nodes.map((n) => (
-          <div className={`tree-node ${activeId === n.key ? 'selected' : ''}`} key={n.key}>
-            <div
-              className={`tree-node-head ${activeId === n.key ? 'active' : ''}`}
-              onClick={() => selectNode(n.key)}
-              role="button"
-              aria-current={activeId === n.key ? 'true' : undefined}
-            >
-              <span className={`caret ${open[n.key] ? 'open' : ''}`}>▸</span>
-              <span className="title">{n.name}</span>
-              <span className="node-actions">
-                <button
-                  className="na-btn"
-                  title="＋ 新对话"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onNewConversation(n.key)
-                  }}
-                >
-                  ＋
-                </button>
-                <button
-                  className="na-btn"
-                  title="⚙ 配置"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    configure(n.key)
-                  }}
-                >
-                  ⚙
-                </button>
+        <Collapse
+          ghost
+          size="small"
+          activeKey={nodes.filter((n) => open[n.key]).map((n) => n.key)}
+          onChange={(keys) => {
+            const arr = Array.isArray(keys) ? keys : [keys]
+            setOpen(Object.fromEntries(nodes.map((n) => [n.key, arr.includes(n.key)])))
+            // 点击标题即选中该智能体/项目
+            const last = arr[arr.length - 1]
+            if (last) selectNode(last)
+          }}
+          items={nodes.map((n) => ({
+            key: n.key,
+            label: (
+              <span className="node-title" aria-current={activeId === n.key ? 'true' : undefined}>
+                {n.name}
               </span>
-            </div>
-            {open[n.key] && (
-              <div className="node-convs">
-                {n.convs.map((c) => (
-                  <div
-                    key={c.id}
-                    className={`conv-item ${currentConvId === c.id ? 'active' : ''}`}
-                    aria-current={currentConvId === c.id ? 'true' : undefined}
-                    onClick={() => setCurrentConv(c.id)}
-                  >
-                    <span className="title">{c.title || '未命名对话'}</span>
-                    <button
-                      className="del"
-                      title="删除对话"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        removeConversation(c.id)
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-                {n.convs.length === 0 && <div className="empty-hint">暂无对话，点节点上的 ＋ 开始</div>}
-              </div>
-            )}
-          </div>
-        ))}
+            ),
+            extra: (
+              <Space size={0} onClick={(e) => e.stopPropagation()}>
+                <Button type="text" size="small" icon={<PlusOutlined />} title="新建对话" onClick={() => onNewConversation(n.key)} />
+                <Button type="text" size="small" icon={<SettingOutlined />} title="配置" onClick={() => configure(n.key)} />
+              </Space>
+            ),
+            children: (
+              <Conversations
+                items={n.convs.map((c) => ({ key: c.id, label: c.title || '未命名对话' }))}
+                activeKey={currentConvId ?? undefined}
+                onActiveChange={setCurrentConv}
+                menu={(c) => ({
+                  items: [{ key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true }],
+                  onClick: ({ key }) => {
+                    if (key === 'delete') removeConversation(c.key)
+                  },
+                })}
+              />
+            ),
+          }))}
+        />
+        {nodes.some((n) => open[n.key] && n.convs.length === 0) && null}
+        {nodes.length > 0 && (
+          <div className="empty-hint">展开节点后点 ＋ 新建对话</div>
+        )}
       </div>
     </div>
   )

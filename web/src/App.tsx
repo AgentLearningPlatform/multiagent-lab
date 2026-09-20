@@ -1,8 +1,11 @@
+import { Layout, Result, Tag, Typography } from 'antd'
 import { useUI } from './store/ui'
 import TopNav from './components/TopNav'
 import AgentsPage from './pages/AgentsPage'
 import ProjectsPage from './pages/ProjectsPage'
 import SettingsPage from './pages/SettingsPage'
+
+const { Content } = Layout
 
 const PLACEHOLDERS: Record<string, { title: string; desc: string; milestone: string }> = {
   ontology: {
@@ -26,26 +29,30 @@ function Placeholder({ page }: { page: string }) {
   const p = PLACEHOLDERS[page]
   return (
     <div className="page">
-      <h2>{p.title}</h2>
-      <div className="sub">计划里程碑：{p.milestone}</div>
-      <div className="placeholder">
-        <b>该模块将在后续里程碑开放</b>
-        <p style={{ maxWidth: 520, margin: '10px auto 0' }}>{p.desc}</p>
-      </div>
+      <Result
+        icon={<Typography.Title level={3} style={{ marginBottom: 0 }}>{p.title}</Typography.Title>}
+        title={
+          <span>
+            该模块将在后续里程碑开放 <Tag color="purple">{p.milestone}</Tag>
+          </span>
+        }
+        subTitle={<span style={{ maxWidth: 520, display: 'inline-block' }}>{p.desc}</span>}
+      />
     </div>
   )
 }
 
 export default function App() {
-  const { page, toast } = useUI()
+  const { page } = useUI()
   return (
-    <div className="app">
+    <Layout className="app" style={{ minHeight: '100vh' }}>
       <TopNav />
-      {page === 'agents' && <AgentsPage />}
-      {page === 'projects' && <ProjectsPage />}
-      {page === 'settings' && <SettingsPage />}
-      {(page === 'ontology' || page === 'knowledge' || page === 'skills') && <Placeholder page={page} />}
-      {toast && <div className={`toast ${toast.kind}`}>{toast.msg}</div>}
-    </div>
+      <Content style={{ minHeight: 0 }}>
+        {page === 'agents' && <AgentsPage />}
+        {page === 'projects' && <ProjectsPage />}
+        {page === 'settings' && <SettingsPage />}
+        {(page === 'ontology' || page === 'knowledge' || page === 'skills') && <Placeholder page={page} />}
+      </Content>
+    </Layout>
   )
 }

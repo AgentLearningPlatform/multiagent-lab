@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Button, Result } from 'antd'
 import { api } from '../api/client'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import ProjectDrawer from '../components/ProjectDrawer'
+import NameModal from '../components/NameModal'
 
 /**
  * 项目视图（原型 06 §3.2）：
@@ -17,6 +19,7 @@ export default function ProjectsPage() {
   const [convs, setConvs] = useState<Conversation[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [drawerProjectId, setDrawerProjectId] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
 
   const reload = () => {
     api.listProjects().then((ps) => {
@@ -40,12 +43,11 @@ export default function ProjectsPage() {
     }
   }, [activeProjectId, currentConv])
 
-  const createProject = async () => {
-    const name = prompt('项目名称：')
-    if (!name?.trim()) return
+  const createProject = async (name: string) => {
+    setCreateOpen(false)
     try {
       const p = await api.createProject({
-        name: name.trim(),
+        name,
         description: '',
         collab_mode: 'agent_as_tool',
         workflow_mode: 'free',
@@ -88,7 +90,7 @@ export default function ProjectsPage() {
         onSelectAgent={() => {}}
         onSelectProject={setActiveProjectId}
         onNewAgent={() => {}}
-        onNewProject={createProject}
+        onNewProject={() => setCreateOpen(true)}
         onNewConversation={newConversation}
         onConfigureAgent={() => {}}
         onConfigureProject={configureProject}
@@ -105,21 +107,16 @@ export default function ProjectsPage() {
         />
       ) : (
         <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="placeholder" style={{ maxWidth: 440 }}>
-            <b>选择左侧项目，与其开始对话</b>
-            <p style={{ marginTop: 8, fontSize: 13 }}>
-              会话界面与智能体视图一致；项目对话由成员智能体协作处理（M4 起生效）。
-            </p>
-            <p style={{ marginTop: 14 }}>
-              <button
-                className="btn-primary"
-                onClick={() => activeProject && newConversation(activeProject.id)}
-                disabled={!activeProject}
-              >
+          <Result
+            icon={null}
+            title="选择左侧项目，与其开始对话"
+            subTitle="会话界面与智能体视图一致；项目对话由成员智能体协作处理（M4 起生效）。"
+            extra={
+              <Button type="primary" disabled={!activeProject} onClick={() => activeProject && newConversation(activeProject.id)}>
                 ＋ 为「{activeProject?.name ?? '当前项目'}」新建对话
-              </button>
-            </p>
-          </div>
+              </Button>
+            }
+          />
         </div>
       )}
 
@@ -135,6 +132,8 @@ export default function ProjectsPage() {
           }}
         />
       )}
+
+      <NameModal open={createOpen} title="新建项目" placeholder="项目名称" onCancel={() => setCreateOpen(false)} onSubmit={createProject} />
     </div>
   )
 }

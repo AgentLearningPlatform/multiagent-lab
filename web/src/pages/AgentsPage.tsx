@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Button, Result } from 'antd'
 import { api } from '../api/client'
 import type { Agent, Conversation } from '../api/types'
 import { useUI } from '../store/ui'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import AgentDrawer from '../components/AgentDrawer'
+import NameModal from '../components/NameModal'
 
 /**
  * 智能体视图（原型 06 §3.1）：
@@ -16,6 +18,7 @@ export default function AgentsPage() {
   const [convs, setConvs] = useState<Conversation[]>([])
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
 
   const reload = () => {
     api.listAgents().then((as) => {
@@ -37,11 +40,10 @@ export default function AgentsPage() {
     }
   }, [activeAgentId, currentConv])
 
-  const createAgent = async () => {
-    const name = prompt('智能体名称：')
-    if (!name?.trim()) return
+  const createAgent = async (name: string) => {
+    setCreateOpen(false)
     try {
-      const a = await api.createAgent({ name: name.trim(), description: '', instruction: '' })
+      const a = await api.createAgent({ name, description: '', instruction: '' })
       bumpData()
       setActiveAgentId(a.id)
       showToast('智能体已创建，请在配置中完善信息')
@@ -79,7 +81,7 @@ export default function AgentsPage() {
         activeProjectId={null}
         onSelectAgent={setActiveAgentId}
         onSelectProject={() => {}}
-        onNewAgent={createAgent}
+        onNewAgent={() => setCreateOpen(true)}
         onNewProject={() => {}}
         onNewConversation={newConversation}
         onConfigureAgent={configureAgent}
@@ -97,28 +99,24 @@ export default function AgentsPage() {
         />
       ) : (
         <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="placeholder" style={{ maxWidth: 420 }}>
-            <b>选择左侧智能体，与其开始对话</b>
-            <p style={{ marginTop: 14 }}>
-              <button
-                className="btn-primary"
-                onClick={() => activeAgent && newConversation(activeAgent.id)}
-                disabled={!activeAgent}
-              >
+          <Result
+            icon={null}
+            title="选择左侧智能体，与其开始对话"
+            subTitle="每个智能体可挂多个对话；左侧节点上的 ＋ 可直接新建对话。"
+            extra={
+              <Button type="primary" disabled={!activeAgent} onClick={() => activeAgent && newConversation(activeAgent.id)}>
                 ＋ 为「{activeAgent?.name ?? '当前智能体'}」新建对话
-              </button>
-            </p>
-          </div>
+              </Button>
+            }
+          />
         </div>
       )}
 
       {drawerOpen && activeAgent && (
-        <AgentDrawer
-          agent={activeAgent}
-          onClose={() => setDrawerOpen(false)}
-          onChanged={reload}
-        />
+        <AgentDrawer agent={activeAgent} onClose={() => setDrawerOpen(false)} onChanged={reload} />
       )}
+
+      <NameModal open={createOpen} title="新建智能体" placeholder="智能体名称" onCancel={() => setCreateOpen(false)} onSubmit={createAgent} />
     </div>
   )
 }
