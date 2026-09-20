@@ -105,3 +105,43 @@ func (s *Store) DeleteProject(id string) error {
 	}
 	return nil
 }
+
+// ---- 项目文件（M11 §5.2 project_file）----
+
+// InsertProjectFile 写入文件元数据，返回 ID。
+func (s *Store) InsertProjectFile(pf *ProjectFile) (string, error) {
+	if pf.ID == "" {
+		pf.ID = NewID()
+	}
+	_, err := s.DB.Exec(`INSERT INTO project_file (id,project_id,conversation_id,name,path,size,mime,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+		pf.ID, pf.ProjectID, pf.ConversationID, pf.Name, pf.Path, pf.Size, pf.Mime, pf.Source, now())
+	return pf.ID, err
+}
+
+// ListProjectFiles 列出项目文件（产物 + 上传）。
+func (s *Store) ListProjectFiles(projectID string) ([]*ProjectFile, error) {
+	rows, err := s.DB.Query(`SELECT id,project_id,IFNULL(conversation_id,''),name,path,IFNULL(size,0),IFNULL(mime,''),IFNULL(source,'upload'),IFNULL(created_at,'') FROM project_file WHERE project_id = ? ORDER BY created_at, id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*ProjectFile
+	for rows.Next() {
+		pf := &ProjectFile{}
+		if err := rows.Scan(&pf.ID, &pf.ProjectID, &pf.ConversationID, &pf.Name, &pf.Path, &pf.Size, &pf.Mime, &pf.Source, &pf.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pf)
+	}
+	return out, rows.Err()
+}
+
+// GetProjectFile 按 ID 取文件元数据。
+func (s *Store) GetProjectFile(id string) (*ProjectFile, error) {
+	row := s.DB.QueryRow(`SELECT id,project_id,IFNULL(conversation_id,''),name,path,IFNULL(size,0),IFNULL(mime,''),IFNULL(source,'upload'),IFNULL(created_at,'') FROM project_file WHERE id = ?`, id)
+	pf := &ProjectFile{}
+	if err := row.Scan(&pf.ID, &pf.ProjectID, &pf.ConversationID, &pf.Name, &pf.Path, &pf.Size, &pf.Mime, &pf.Source, &pf.CreatedAt); err != nil {
+		return nil, ErrNotFound
+	}
+	return pf, nil
+}

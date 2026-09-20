@@ -26,11 +26,12 @@ const mcpFetchTimeout = 10 * time.Second
 
 // Assembler 从平台配置装配 Eino Agent。
 type Assembler struct {
-	Store    *store.Store
-	Box      *secrets.Box
-	Tools    *tool.Registry
-	Composer *skill.Composer   // M9：技能注入（nil 时技能不生效）
-	Ontology *ontology.Service // M8：本体对接（nil 时本体不生效）
+	Store     *store.Store
+	Box       *secrets.Box
+	Tools     *tool.Registry
+	Composer  *skill.Composer   // M9：技能注入（nil 时技能不生效）
+	Ontology  *ontology.Service // M8：本体对接（nil 时本体不生效）
+	FilesRoot string            // M11：项目文件根目录（空=save_file 不启用），如 ./data/projects
 }
 
 // BuildResult 装配产物。
@@ -49,31 +50,42 @@ type BuildResult struct {
 type Runtime = BuildResult
 
 // Assemble 按会话归属装配 Runner：agent 直聊单 Agent；项目会话按 collab_mode 装配多 Agent（§6.4）。
+// assembleScope 装配期会话范围（M8 mount + M11 项目文件上下文）。
+type assembleScope struct {
+	Mount          string // 本体运行方案 profile id（空=未挂载）
+	ProjectID      string // 项目文件目录归属（M11；空=agent 会话）
+	ConversationID string // 产物归属会话
+}
+
 func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *store.Conversation) (*BuildResult, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent is nil")
 	}
-	// M8：会话挂载的运行方案（O-6；runtime_profile_id + ontology_enabled）
-	mount := ""
+	// M8：会话挂载的运行方案（O-6；runtime_profile_id + ontology_enabled）+ M11 项目上下文
+	sc := assembleScope{}
 	if conv != nil {
-		mount, _ = ontology.MountOf(conv.RuntimeProfileID, conv.OntologyEnabled)
+		sc.Mount, _ = ontology.MountOf(conv.RuntimeProfileID, conv.OntologyEnabled)
+		sc.ConversationID = conv.ID
+		if conv.ProjectID != nil {
+			sc.ProjectID = *conv.ProjectID
+		}
 	}
 	if conv == nil || conv.Scope != "project" {
-		return a.assembleSingle(ctx, agent, mount)
+		return a.assembleSingle(ctx, agent, sc)
 	}
-	if conv.ProjectID == nil || *conv.ProjectID == "" {
+	if sc.ProjectID == "" {
 		return nil, fmt.Errorf("project conversation missing project_id")
 	}
-	p, err := a.Store.GetProject(*conv.ProjectID)
+	p, err := a.Store.GetProject(sc.ProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("load project: %w", err)
 	}
-	return a.assembleProject(ctx, p, mount)
+	return a.assembleProject(ctx, p, sc)
 }
 
 // assembleSingle 单 Agent 装配（agent 直聊 / 项目 single 模式）。
-func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent, mount string) (*BuildResult, error) {
-	b, err := a.buildOne(ctx, ag, mount)
+func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent, sc assembleScope) (*BuildResult, error) {
+	b, err := a.buildOne(ctx, ag, sc)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +104,7 @@ func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent, mount s
 
 // assembleProject 项目多 Agent 装配（§6.4：agent_as_tool 推荐 / transfer 对照 / single）。
 // workflow_mode 非 free 时告警降级为 free（工作流编排 P1 后续）。
-func (a *Assembler) assembleProject(ctx context.Context, p *store.Project, mount string) (*BuildResult, error) {
+func (a *Assembler) assembleProject(ctx context.Context, p *store.Project, sc assembleScope) (*BuildResult, error) {
 	members, err := a.Store.ListProjectAgents(p.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load project members: %w", err)
@@ -148,24 +160,24 @@ func (a *Assembler) assembleProject(ctx context.Context, p *store.Project, mount
 
 	switch mode {
 	case "agent_as_tool":
-		return a.assembleAgentAsTool(ctx, coord, subs, warns, mount)
+		return a.assembleAgentAsTool(ctx, coord, subs, warns, sc)
 	case "transfer":
-		return a.assembleTransfer(ctx, coord, subs, warns, mount)
+		return a.assembleTransfer(ctx, coord, subs, warns, sc)
 	case "single":
-		return a.assembleSingle(ctx, coord, mount)
+		return a.assembleSingle(ctx, coord, sc)
 	default:
 		return nil, fmt.Errorf("不支持的协作模式 %q", p.CollabMode)
 	}
 }
 
 // assembleAgentAsTool 协调者以工具形式调用成员（推荐路径，ADK AgentTool）。
-func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string, mount string) (*BuildResult, error) {
+func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string, sc assembleScope) (*BuildResult, error) {
 	// 协调者基础装配（模型 + 技能 + MCP + 勾选工具）
 	cm, label, connID, err := a.buildModel(ctx, coord)
 	if err != nil {
 		return nil, fmt.Errorf("build coordinator: %w", err)
 	}
-	tbc, err := a.assembleTools(ctx, coord, mount)
+	tbc, err := a.assembleTools(ctx, coord, sc)
 	if err != nil {
 		return nil, fmt.Errorf("compose coordinator tools: %w", err)
 	}
@@ -179,7 +191,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 		if err := requireAgentToolFields(s); err != nil {
 			return nil, err
 		}
-		sb, berr := a.buildOne(ctx, s, mount)
+		sb, berr := a.buildOne(ctx, s, sc)
 		if berr != nil {
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
@@ -207,12 +219,12 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 }
 
 // assembleTransfer 协调者把控制权转移给成员（ADK SetSubAgents，对照路径）。
-func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string, mount string) (*BuildResult, error) {
+func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string, sc assembleScope) (*BuildResult, error) {
 	cm, label, connID, err := a.buildModel(ctx, coord)
 	if err != nil {
 		return nil, fmt.Errorf("build coordinator: %w", err)
 	}
-	tbc, err := a.assembleTools(ctx, coord, mount)
+	tbc, err := a.assembleTools(ctx, coord, sc)
 	if err != nil {
 		return nil, fmt.Errorf("compose coordinator tools: %w", err)
 	}
@@ -226,7 +238,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	}
 	subAgents := make([]adk.Agent, 0, len(subs))
 	for _, s := range subs {
-		sb, berr := a.buildOne(ctx, s, mount)
+		sb, berr := a.buildOne(ctx, s, sc)
 		if berr != nil {
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
@@ -253,25 +265,25 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 }
 
 // buildOne 装配单个 Agent 实例：模型解析（显式>默认，M3）→ 工具合并（§6.8/§6.12/§6.11）→ ChatModelAgent。
-func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent, mount string) (*agentBuild, error) {
+func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent, sc assembleScope) (*agentBuild, error) {
 	cm, label, connID, err := a.buildModel(ctx, ag)
 	if err != nil {
 		return nil, err
 	}
-	tb, err := a.assembleTools(ctx, ag, mount)
+	tb, err := a.assembleTools(ctx, ag, sc)
 	if err != nil {
 		return nil, err
 	}
 	// M8 §6.10-3：guide 注入——装配时取运行方案指引拼进 Agent 指引（失败并入降级）
 	instruction := a.composeInstruction(ag)
-	if mount != "" && a.Ontology != nil {
-		guide, gerr := a.Ontology.FetchGuide(ctx, mount, "")
+	if sc.Mount != "" && a.Ontology != nil {
+		guide, gerr := a.Ontology.FetchGuide(ctx, sc.Mount, "")
 		if gerr != nil {
 			if tb.OntoIssue == nil {
-				tb.OntoIssue = &ontology.Issue{ProfileID: mount, Reason: gerr.Error()}
+				tb.OntoIssue = &ontology.Issue{ProfileID: sc.Mount, Reason: gerr.Error()}
 			}
 		} else if guide != "" {
-			instruction += "\n\n# 本体运行方案指引（runtime_profile: " + mount + "）\n" + guide
+			instruction += "\n\n# 本体运行方案指引（runtime_profile: " + sc.Mount + "）\n" + guide
 		}
 	}
 	inst, err := newChatModelAgent(ctx, ag.Name, ag.Description, instruction, ag.MaxIteration, cm, tb.Tools)
@@ -306,7 +318,7 @@ type toolBundle struct {
 // 3) MCP servers 拉取远端工具，{server}__{tool} 前缀，source=mcp:{server}，失败降级告警；
 // 4) 本体 facade（挂载运行方案时）onto_* 工具，source=ontology:facade，失败 ontology.unavailable 降级；
 // function name 冲突先到先得 + 告警。
-func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, mount string) (*toolBundle, error) {
+func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assembleScope) (*toolBundle, error) {
 	tb := &toolBundle{Tools: []einotool.BaseTool{}, SourceOf: map[string]string{}, Warnings: []string{}}
 
 	// 1) builtin 勾选
@@ -374,10 +386,10 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, mount st
 
 	// 4) 本体 facade（M8 §6.10-1：挂载运行方案时并入 onto_* 工具；
 	// 单次失败即降级——ontology.unavailable 事件，不重试风暴，普通对话/知识库不受影响）
-	if mount != "" && a.Ontology != nil {
+	if sc.Mount != "" && a.Ontology != nil {
 		bts, ferr := a.Ontology.FetchTools(ctx)
 		if ferr != nil {
-			tb.OntoIssue = &ontology.Issue{ProfileID: mount, Reason: ferr.Error()}
+			tb.OntoIssue = &ontology.Issue{ProfileID: sc.Mount, Reason: ferr.Error()}
 		} else {
 			for _, bt := range bts {
 				ti, ierr := bt.Info(ctx)
@@ -391,6 +403,19 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, mount st
 				tb.Tools = append(tb.Tools, bt)
 				tb.SourceOf[ti.Name] = "ontology:facade"
 			}
+		}
+	}
+
+	// 5) save_file 产物工具（M11 §6.13：项目会话且文件根目录已配置时启用；
+	// 写盘成功由 runner 依 tool.result 发 artifact.saved 事件）
+	if sc.ProjectID != "" && a.FilesRoot != "" && a.Store != nil {
+		if sf, serr := tool.NewSaveFileTool(tool.SaveFileDeps{
+			Store: a.Store, ProjectID: sc.ProjectID, ConversationID: sc.ConversationID, Root: a.FilesRoot,
+		}); serr != nil {
+			tb.Warnings = append(tb.Warnings, "save_file 工具实例化失败: "+serr.Error())
+		} else if _, dup := tb.SourceOf["save_file"]; !dup {
+			tb.Tools = append(tb.Tools, sf)
+			tb.SourceOf["save_file"] = "builtin"
 		}
 	}
 	return tb, nil

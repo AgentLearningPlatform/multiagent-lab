@@ -19,6 +19,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 )
 
 // Service 运行服务：装配、执行、停止。
@@ -300,6 +301,14 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 			}
 			if src := rt.SourceOf[mo.Message.ToolName]; src != "" {
 				data["source"] = src
+			}
+			// M11 §6.13：save_file 成功 → artifact.saved 事件（对话产物面板数据源）
+			if mo.Message.ToolName == "save_file" {
+				if fid, name, path, ok := tool.ParseSaveFileResult(mo.Message.Content); ok {
+					s.emitAndRecord(runCtx, conv, runID, newEvent("artifact.saved", runID, map[string]any{
+						"file_id": fid, "name": name, "path": path,
+					}), emit)
+				}
 			}
 			s.emitAndRecord(runCtx, conv, runID, newEvent("tool.result", runID, data), emit)
 		case mo.Message != nil && mo.Role == schema.Assistant && !mo.IsStreaming:

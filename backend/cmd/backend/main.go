@@ -47,11 +47,12 @@ func main() {
 	}
 
 	asm := &chat.Assembler{
-		Store:    st,
-		Box:      box,
-		Tools:    reg,
-		Composer: &skill.Composer{Store: st}, // M9：技能注入
-		Ontology: ontology.NewService(),      // M8：本体对接（facade/双反代/guide）
+		Store:     st,
+		Box:       box,
+		Tools:     reg,
+		Composer:  &skill.Composer{Store: st},              // M9：技能注入
+		Ontology:  ontology.NewService(),                   // M8：本体对接（facade/双反代/guide）
+		FilesRoot: getenv("FILES_ROOT", "./data/projects"), // M11：项目文件根目录
 	}
 	// 知识库服务（M6，§6.9）：向量后端按 KB_VECTOR_BACKEND（qdrant|sqlite），Qdrant 走 REST（QDRANT_URL）
 	kbSvc, err := kb.NewService(st, box,

@@ -26,6 +26,19 @@ type MCPServer struct {
 	URL  string `json:"url"`
 }
 
+// ProjectFile 项目文件与对话产物元数据（M11 §5.2 project_file）。
+type ProjectFile struct {
+	ID             string `json:"id"`
+	ProjectID      string `json:"project_id"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	Name           string `json:"name"`
+	Path           string `json:"path"` // 项目目录内相对路径
+	Size           int64  `json:"size"`
+	Mime           string `json:"mime,omitempty"`
+	Source         string `json:"source"` // upload | artifact
+	CreatedAt      string `json:"created_at,omitempty"`
+}
+
 // Project 多 Agent 项目。
 type Project struct {
 	ID           string   `json:"id"`

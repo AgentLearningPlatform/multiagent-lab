@@ -18,13 +18,14 @@ import (
 
 // Server 聚合依赖并持有路由。
 type Server struct {
-	Store    *store.Store
-	Box      *secrets.Box
-	Chat     *chat.Service
-	Tools    *tool.Registry
-	KB       *kb.Service
-	Ontology *ontology.Service // M8：本体对接（反代/facade 探测）
-	Mux      *http.ServeMux
+	Store     *store.Store
+	Box       *secrets.Box
+	Chat      *chat.Service
+	Tools     *tool.Registry
+	KB        *kb.Service
+	Ontology  *ontology.Service // M8：本体对接（反代/facade 探测）
+	FilesRoot string            // M11：项目文件根目录（上传/下载落盘）
+	Mux       *http.ServeMux
 }
 
 // NewServer 构造并注册全部路由。
@@ -44,6 +45,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/agents", s.listAgents)
 	// M10 §6.3：沙箱配置下发（内部端点，一次性 token）
 	m.HandleFunc("GET /api/internal/agents/{id}/manifest", s.getManifest)
+	// M11 §6.13：项目文件（上传/列表/下载）
+	m.HandleFunc("GET /api/projects/{id}/files", s.listProjectFiles)
+	m.HandleFunc("POST /api/projects/{id}/files", s.uploadProjectFile)
+	m.HandleFunc("GET /api/projects/{id}/files/{fid}/content", s.downloadProjectFile)
 	m.HandleFunc("POST /api/agents", s.createAgent)
 	m.HandleFunc("GET /api/agents/{id}", s.getAgent)
 	m.HandleFunc("PUT /api/agents/{id}", s.updateAgent)
