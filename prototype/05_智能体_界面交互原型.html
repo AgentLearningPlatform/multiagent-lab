@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>eino-multiagent-lab · 智能体平台 界面交互原型 v0.4</title>
+<title>eino-multiagent-lab · 智能体平台 界面交互原型 v0.6</title>
 <style>
 :root{
   --c-bg:#f6f7fb; --c-surface:#ffffff; --c-line:#e6e8f0; --c-line-strong:#d3d7e4;
@@ -150,6 +150,25 @@ select{appearance:none;-webkit-appearance:none;border:1px solid var(--c-line-str
 .btn.ghost:hover{color:var(--c-ink);background:#eef0f6}
 .replay-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 18px 14px}
 .replay-row .note{font-size:12px;color:var(--c-ink-3)}
+/* 对比模式（v0.6）：横向等分窗格 + 每列独立配置（范式对齐 AntD Switch/Select/Grid，实现映射见 06） */
+.cmp-toggle[aria-pressed="true"]{background:var(--c-brand-weak);border-color:var(--c-brand-line);color:var(--c-brand-ink)}
+.cmp-grid{display:none;grid-template-columns:repeat(3,1fr);gap:10px;flex:1;min-height:0;margin:0 18px 10px}
+body.comparing .cmp-grid{display:grid}
+body.comparing #stream{display:none}
+.cmp-col{display:flex;flex-direction:column;min-width:0;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius-s);overflow:hidden}
+.cmp-head{display:flex;align-items:center;gap:7px;padding:7px 10px;border-bottom:1px solid var(--c-line);background:#fafafc}
+.cmp-head .cdot{width:8px;height:8px;border-radius:50%;flex:none}
+.cmp-head .ttl{font-size:12.5px;font-weight:600;color:var(--c-ink)}
+.cmp-head .x{margin-left:auto;border:0;background:none;color:var(--c-ink-3);cursor:pointer;font-size:15px;line-height:1;padding:1px 5px}
+.cmp-head .x:hover{color:var(--c-warn)}
+.cmp-msgs{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.cmp-msgs .msg .bubble p{margin:0}
+.cmp-cfg{border-top:1px solid var(--c-line);padding:8px 10px;display:flex;flex-direction:column;gap:6px;background:#fcfcfd}
+.cmp-cfg .row{display:flex;align-items:center;gap:6px}
+.cmp-cfg .lab{font-size:11.5px;color:var(--c-ink-3);width:52px;flex:none}
+.cmp-cfg select{flex:1;min-width:0;font-size:12px}
+.cmp-note{padding:0 18px 4px;font-size:11.5px;color:var(--c-ink-3)}
+@media (max-width:960px){.cmp-grid{grid-template-columns:1fr}}
 
 /* 右侧文件面板 */
 .files{width:264px;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;margin:14px 18px 14px 0;max-height:100%}
@@ -327,7 +346,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
     <button class="tnav" data-view="kb" aria-controls="view-kb">知识库</button>
     <button class="tnav" data-view="skills" aria-controls="view-skills">技能</button>
   </nav>
-  <span class="badge-proto">界面原型 v0.4 · 待确认</span>
+  <span class="badge-proto">界面原型 v0.6 · 待确认</span>
   <button class="topbar-gear" data-view="settings" aria-controls="view-settings" aria-label="设置" title="设置（模型管理等）"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
 </header>
 
@@ -387,6 +406,7 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
               </span>
               <span class="lab">已挂技能</span>
               <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>K8s 故障排查</span>
+              <button class="btn cmp-toggle" id="btn-compare" aria-pressed="false" aria-controls="cmp-grid">⇄ 对比</button>
               <span class="hint">挂载后经统一 MCP facade 查询本体</span>
             </div>
             <div class="stream" id="stream" aria-live="polite">
@@ -430,6 +450,45 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
                 <div class="msg assistant"><div class="who">K8s 运维助手 · 10:23</div><div class="bubble"><p>故障诊断本体当前不可用，我基于知识库与已加载技能继续回答：OOM 处置优先检查内存 limit 与实际用量的差值…</p></div></div>
               </div>
             </div>
+            <div class="cmp-grid" id="cmp-grid" role="group" aria-label="对比窗格：按列数横向等分，每列独立配置，共用下方输入框">
+              <article class="cmp-col">
+                <div class="cmp-head"><span class="cdot" style="background:var(--c-brand)"></span><span class="ttl">对比列 1</span><span class="tag">DeepSeek-V3</span><button class="x" data-cmp-remove aria-label="移除对比列 1">×</button></div>
+                <div class="cmp-msgs">
+                  <div class="msg user"><div class="who">董奎 · 10:23</div><div class="bubble">nginx-7d9f 为什么一直重启？</div></div>
+                  <div class="msg assistant"><div class="who">DeepSeek-V3 · 10:23</div><div class="bubble"><p>CrashLoopBackOff 通常是容器启动即退出：先看 describe 的 Last State 与退出码，若是 OOMKilled 调大 memory limit，若是应用报错则查日志首屏堆栈…</p></div></div>
+                </div>
+                <div class="cmp-cfg">
+                  <div class="row"><span class="lab">模型</span><select aria-label="对比列 1 模型"><option selected>DeepSeek-V3 · DeepSeek</option><option>DeepSeek-R1 · DeepSeek</option><option>Qwen2.5-72B · DashScope</option></select></div>
+                  <div class="row"><span class="lab">知识库</span><select aria-label="对比列 1 知识库"><option selected>K8s 运维知识库</option><option>不使用知识库</option></select></div>
+                  <div class="row"><span class="lab">本体方案</span><select aria-label="对比列 1 本体方案"><option selected>运维本体 · 内存图 v3（running）</option><option>运维本体 · Oxigraph v2（running）</option><option>不挂载</option></select></div>
+                </div>
+              </article>
+              <article class="cmp-col">
+                <div class="cmp-head"><span class="cdot" style="background:var(--c-onto)"></span><span class="ttl">对比列 2</span><span class="tag">DeepSeek-R1</span><button class="x" data-cmp-remove aria-label="移除对比列 2">×</button></div>
+                <div class="cmp-msgs">
+                  <div class="msg user"><div class="who">董奎 · 10:23</div><div class="bubble">nginx-7d9f 为什么一直重启？</div></div>
+                  <div class="msg assistant"><div class="who">DeepSeek-R1 · 10:23</div><div class="bubble"><p>推理：重启循环 + 退出码 137 → 先排除 OOMKilled；再检查 liveness 探针初始延迟是否小于启动耗时…结论：探针配置过早，探活失败被 kill 重启。</p></div></div>
+                </div>
+                <div class="cmp-cfg">
+                  <div class="row"><span class="lab">模型</span><select aria-label="对比列 2 模型"><option>DeepSeek-V3 · DeepSeek</option><option selected>DeepSeek-R1 · DeepSeek</option><option>Qwen2.5-72B · DashScope</option></select></div>
+                  <div class="row"><span class="lab">知识库</span><select aria-label="对比列 2 知识库"><option>K8s 运维知识库</option><option selected>不使用知识库</option></select></div>
+                  <div class="row"><span class="lab">本体方案</span><select aria-label="对比列 2 本体方案"><option selected>运维本体 · Oxigraph v2（running）</option><option>运维本体 · 内存图 v3（running）</option><option>不挂载</option></select></div>
+                </div>
+              </article>
+              <article class="cmp-col">
+                <div class="cmp-head"><span class="cdot" style="background:var(--c-skill)"></span><span class="ttl">对比列 3</span><span class="tag">Qwen2.5-72B</span><button class="x" data-cmp-remove aria-label="移除对比列 3">×</button></div>
+                <div class="cmp-msgs">
+                  <div class="msg user"><div class="who">董奎 · 10:23</div><div class="bubble">nginx-7d9f 为什么一直重启？</div></div>
+                  <div class="msg assistant"><div class="who">Qwen2.5-72B · 10:23</div><div class="bubble"><p>结合知识库《Pod 排查手册》：重启策略 Always + 探针失败会进入重启循环；建议先执行 kubectl logs --previous 确认上次退出原因…</p></div></div>
+                </div>
+                <div class="cmp-cfg">
+                  <div class="row"><span class="lab">模型</span><select aria-label="对比列 3 模型"><option>DeepSeek-V3 · DeepSeek</option><option>DeepSeek-R1 · DeepSeek</option><option selected>Qwen2.5-72B · DashScope</option></select></div>
+                  <div class="row"><span class="lab">知识库</span><select aria-label="对比列 3 知识库"><option selected>K8s 运维知识库</option><option>不使用知识库</option></select></div>
+                  <div class="row"><span class="lab">本体方案</span><select aria-label="对比列 3 本体方案"><option>运维本体 · 内存图 v3（running）</option><option>不挂载</option><option value="" disabled>故障诊断本体 v1（draft · 不可选）</option></select></div>
+                </div>
+              </article>
+            </div>
+            <p class="cmp-note">对比列 2~4 个：各列独立选择模型 / 知识库 / 本体运行方案（未设置的项继承对话当前配置），共用下方输入框；发送一次提问，各列并行生成（对应 REQ-19e/19f）。</p>
             <div class="composer">
               <label for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">消息输入</label>
               <textarea id="input" placeholder="输入消息，Enter 发送（原型内为模拟回复）…"></textarea>
@@ -1112,6 +1171,18 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
     var btnReplay=$('#btn-replay');
     if(btnReplay){btnReplay.addEventListener('click',replay)}
 
+    /* 对比模式（v0.6，REQ-19e/19f）：开关切换横向等分窗格 */
+    var btnCmp=$('#btn-compare');
+    if(btnCmp){btnCmp.addEventListener('click',function(){
+      var on=btnCmp.getAttribute('aria-pressed')!=='true';
+      btnCmp.setAttribute('aria-pressed',on?'true':'false');
+      document.body.classList.toggle('comparing',on);
+      toast(on?'对比已开启：输入框上方按列等分，每列可独立选择模型 / 知识库 / 本体方案':'已退出对比，回到单流视图');
+    });}
+    $$('[data-cmp-remove]').forEach(function(b){
+      b.addEventListener('click',function(){toast('移除对比列（演示）：实现时同步重算等分布局，最少保留 2 列')});
+    });
+
     /* 发送模拟 */
     var input=$('#input'), btnSend=$('#btn-send'), stream=$('#stream');
     if(input&&btnSend&&stream){
@@ -1119,6 +1190,9 @@ textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(-
       btnSend.addEventListener('click',function(){
         var text=input.value.trim(); if(!text) return;
         input.value=''; btnSend.disabled=true;
+        if(document.body.classList.contains('comparing')){
+          toast('已发送：各对比列按各自配置并行生成（演示）'); return;
+        }
         var u=document.createElement('div');
         u.className='msg user';
         u.innerHTML='<div class="who">董奎 · 刚刚</div><div class="bubble"></div>';
