@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/skill"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
@@ -28,18 +29,20 @@ type Assembler struct {
 	Store    *store.Store
 	Box      *secrets.Box
 	Tools    *tool.Registry
-	Composer *skill.Composer // M9：技能注入（nil 时技能不生效）
+	Composer *skill.Composer   // M9：技能注入（nil 时技能不生效）
+	Ontology *ontology.Service // M8：本体对接（nil 时本体不生效）
 }
 
 // BuildResult 装配产物。
 type BuildResult struct {
-	Runner       *adk.Runner
-	AgentName    string            // 根 Agent 名
-	ModelLabel   string            // 根 Agent 的连接名@模型名
-	ConnID       string            // 根 Agent 使用的连接
-	SourceOf     map[string]string // 工具 function name -> 来源（tool.call 事件 source 标注）
-	Warnings     []string          // 装配期告警（并入 run.started data）
-	LoadedSkills []*store.Skill    // 本次运行生效的技能（skill.loaded 事件，M9）
+	Runner          *adk.Runner
+	AgentName       string            // 根 Agent 名
+	ModelLabel      string            // 根 Agent 的连接名@模型名
+	ConnID          string            // 根 Agent 使用的连接
+	SourceOf        map[string]string // 工具 function name -> 来源（tool.call 事件 source 标注）
+	Warnings        []string          // 装配期告警（并入 run.started data）
+	LoadedSkills    []*store.Skill    // 本次运行生效的技能（skill.loaded 事件，M9）
+	OntoUnavailable *ontology.Issue   // M8：本体挂载降级（ontology.unavailable 事件，§6.10-4）
 }
 
 // Runtime 兼容别名（历史调用方）。
@@ -50,8 +53,13 @@ func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *stor
 	if agent == nil {
 		return nil, fmt.Errorf("agent is nil")
 	}
+	// M8：会话挂载的运行方案（O-6；runtime_profile_id + ontology_enabled）
+	mount := ""
+	if conv != nil {
+		mount, _ = ontology.MountOf(conv.RuntimeProfileID, conv.OntologyEnabled)
+	}
 	if conv == nil || conv.Scope != "project" {
-		return a.assembleSingle(ctx, agent)
+		return a.assembleSingle(ctx, agent, mount)
 	}
 	if conv.ProjectID == nil || *conv.ProjectID == "" {
 		return nil, fmt.Errorf("project conversation missing project_id")
@@ -60,30 +68,31 @@ func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *stor
 	if err != nil {
 		return nil, fmt.Errorf("load project: %w", err)
 	}
-	return a.assembleProject(ctx, p)
+	return a.assembleProject(ctx, p, mount)
 }
 
 // assembleSingle 单 Agent 装配（agent 直聊 / 项目 single 模式）。
-func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent) (*BuildResult, error) {
-	b, err := a.buildOne(ctx, ag)
+func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent, mount string) (*BuildResult, error) {
+	b, err := a.buildOne(ctx, ag, mount)
 	if err != nil {
 		return nil, err
 	}
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: b.Inst, EnableStreaming: true})
 	return &BuildResult{
-		Runner:       runner,
-		AgentName:    ag.Name,
-		ModelLabel:   b.Meta.ModelLabel,
-		ConnID:       b.Meta.ConnID,
-		SourceOf:     b.Meta.SourceOf,
-		Warnings:     b.Meta.Warnings,
-		LoadedSkills: b.Meta.LoadedSkills,
+		Runner:          runner,
+		AgentName:       ag.Name,
+		ModelLabel:      b.Meta.ModelLabel,
+		ConnID:          b.Meta.ConnID,
+		SourceOf:        b.Meta.SourceOf,
+		Warnings:        b.Meta.Warnings,
+		LoadedSkills:    b.Meta.LoadedSkills,
+		OntoUnavailable: b.Meta.OntoUnavailable,
 	}, nil
 }
 
 // assembleProject 项目多 Agent 装配（§6.4：agent_as_tool 推荐 / transfer 对照 / single）。
 // workflow_mode 非 free 时告警降级为 free（工作流编排 P1 后续）。
-func (a *Assembler) assembleProject(ctx context.Context, p *store.Project) (*BuildResult, error) {
+func (a *Assembler) assembleProject(ctx context.Context, p *store.Project, mount string) (*BuildResult, error) {
 	members, err := a.Store.ListProjectAgents(p.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load project members: %w", err)
@@ -139,24 +148,24 @@ func (a *Assembler) assembleProject(ctx context.Context, p *store.Project) (*Bui
 
 	switch mode {
 	case "agent_as_tool":
-		return a.assembleAgentAsTool(ctx, coord, subs, warns)
+		return a.assembleAgentAsTool(ctx, coord, subs, warns, mount)
 	case "transfer":
-		return a.assembleTransfer(ctx, coord, subs, warns)
+		return a.assembleTransfer(ctx, coord, subs, warns, mount)
 	case "single":
-		return a.assembleSingle(ctx, coord)
+		return a.assembleSingle(ctx, coord, mount)
 	default:
 		return nil, fmt.Errorf("不支持的协作模式 %q", p.CollabMode)
 	}
 }
 
 // assembleAgentAsTool 协调者以工具形式调用成员（推荐路径，ADK AgentTool）。
-func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string) (*BuildResult, error) {
+func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string, mount string) (*BuildResult, error) {
 	// 协调者基础装配（模型 + 技能 + MCP + 勾选工具）
 	cm, label, connID, err := a.buildModel(ctx, coord)
 	if err != nil {
 		return nil, fmt.Errorf("build coordinator: %w", err)
 	}
-	tbc, err := a.assembleTools(ctx, coord)
+	tbc, err := a.assembleTools(ctx, coord, mount)
 	if err != nil {
 		return nil, fmt.Errorf("compose coordinator tools: %w", err)
 	}
@@ -170,7 +179,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 		if err := requireAgentToolFields(s); err != nil {
 			return nil, err
 		}
-		sb, berr := a.buildOne(ctx, s)
+		sb, berr := a.buildOne(ctx, s, mount)
 		if berr != nil {
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
@@ -198,12 +207,12 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 }
 
 // assembleTransfer 协调者把控制权转移给成员（ADK SetSubAgents，对照路径）。
-func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string) (*BuildResult, error) {
+func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, subs []*store.Agent, warns []string, mount string) (*BuildResult, error) {
 	cm, label, connID, err := a.buildModel(ctx, coord)
 	if err != nil {
 		return nil, fmt.Errorf("build coordinator: %w", err)
 	}
-	tbc, err := a.assembleTools(ctx, coord)
+	tbc, err := a.assembleTools(ctx, coord, mount)
 	if err != nil {
 		return nil, fmt.Errorf("compose coordinator tools: %w", err)
 	}
@@ -217,7 +226,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	}
 	subAgents := make([]adk.Agent, 0, len(subs))
 	for _, s := range subs {
-		sb, berr := a.buildOne(ctx, s)
+		sb, berr := a.buildOne(ctx, s, mount)
 		if berr != nil {
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
@@ -239,31 +248,45 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 		Runner: runner, AgentName: coord.Name,
 		ModelLabel: label, ConnID: connID,
 		SourceOf: src, Warnings: allWarns, LoadedSkills: loaded,
+		OntoUnavailable: tbc.OntoIssue,
 	}, nil
 }
 
 // buildOne 装配单个 Agent 实例：模型解析（显式>默认，M3）→ 工具合并（§6.8/§6.12/§6.11）→ ChatModelAgent。
-func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent) (*agentBuild, error) {
+func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent, mount string) (*agentBuild, error) {
 	cm, label, connID, err := a.buildModel(ctx, ag)
 	if err != nil {
 		return nil, err
 	}
-	tb, err := a.assembleTools(ctx, ag)
+	tb, err := a.assembleTools(ctx, ag, mount)
 	if err != nil {
 		return nil, err
 	}
-	inst, err := newChatModelAgent(ctx, ag.Name, ag.Description, a.composeInstruction(ag), ag.MaxIteration, cm, tb.Tools)
+	// M8 §6.10-3：guide 注入——装配时取运行方案指引拼进 Agent 指引（失败并入降级）
+	instruction := a.composeInstruction(ag)
+	if mount != "" && a.Ontology != nil {
+		guide, gerr := a.Ontology.FetchGuide(ctx, mount, "")
+		if gerr != nil {
+			if tb.OntoIssue == nil {
+				tb.OntoIssue = &ontology.Issue{ProfileID: mount, Reason: gerr.Error()}
+			}
+		} else if guide != "" {
+			instruction += "\n\n# 本体运行方案指引（runtime_profile: " + mount + "）\n" + guide
+		}
+	}
+	inst, err := newChatModelAgent(ctx, ag.Name, ag.Description, instruction, ag.MaxIteration, cm, tb.Tools)
 	if err != nil {
 		return nil, err
 	}
 	return &agentBuild{
 		Inst: inst,
 		Meta: &agentMeta{
-			ModelLabel:   label,
-			ConnID:       connID,
-			SourceOf:     tb.SourceOf,
-			Warnings:     tb.Warnings,
-			LoadedSkills: tb.LoadedSkills,
+			ModelLabel:      label,
+			ConnID:          connID,
+			SourceOf:        tb.SourceOf,
+			Warnings:        tb.Warnings,
+			LoadedSkills:    tb.LoadedSkills,
+			OntoUnavailable: tb.OntoIssue,
 		},
 	}, nil
 }
@@ -274,14 +297,16 @@ type toolBundle struct {
 	SourceOf     map[string]string
 	Warnings     []string
 	LoadedSkills []*store.Skill
+	OntoIssue    *ontology.Issue // M8：本体 facade 不可达/方案停止（单次失败即降级，不重试风暴）
 }
 
-// assembleTools 工具合并管线（§6.8 M5 / §6.12 M9 技能 / §6.11 M9 MCP）：
+// assembleTools 工具合并管线（§6.8 M5 / §6.12 M9 技能 / §6.11 M9 MCP / §6.10 M8 本体）：
 // 1) builtin 注册表按 agent.tools 勾选实例化；
 // 2) 技能白名单（挂载且启用）并集补充，source=skill:{id}；
 // 3) MCP servers 拉取远端工具，{server}__{tool} 前缀，source=mcp:{server}，失败降级告警；
+// 4) 本体 facade（挂载运行方案时）onto_* 工具，source=ontology:facade，失败 ontology.unavailable 降级；
 // function name 冲突先到先得 + 告警。
-func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent) (*toolBundle, error) {
+func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, mount string) (*toolBundle, error) {
 	tb := &toolBundle{Tools: []einotool.BaseTool{}, SourceOf: map[string]string{}, Warnings: []string{}}
 
 	// 1) builtin 勾选
@@ -346,6 +371,28 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent) (*toolBu
 			tb.SourceOf[ti.Name] = "mcp:" + ms.Name
 		}
 	}
+
+	// 4) 本体 facade（M8 §6.10-1：挂载运行方案时并入 onto_* 工具；
+	// 单次失败即降级——ontology.unavailable 事件，不重试风暴，普通对话/知识库不受影响）
+	if mount != "" && a.Ontology != nil {
+		bts, ferr := a.Ontology.FetchTools(ctx)
+		if ferr != nil {
+			tb.OntoIssue = &ontology.Issue{ProfileID: mount, Reason: ferr.Error()}
+		} else {
+			for _, bt := range bts {
+				ti, ierr := bt.Info(ctx)
+				if ierr != nil || ti == nil || ti.Name == "" {
+					continue
+				}
+				if _, dup := tb.SourceOf[ti.Name]; dup {
+					tb.Warnings = append(tb.Warnings, fmt.Sprintf("本体工具 %q 与已有工具重名，已跳过", ti.Name))
+					continue
+				}
+				tb.Tools = append(tb.Tools, bt)
+				tb.SourceOf[ti.Name] = "ontology:facade"
+			}
+		}
+	}
 	return tb, nil
 }
 
@@ -380,11 +427,12 @@ type agentBuild struct {
 
 // agentMeta 单 Agent 元信息。
 type agentMeta struct {
-	ModelLabel   string
-	ConnID       string
-	SourceOf     map[string]string
-	Warnings     []string
-	LoadedSkills []*store.Skill
+	ModelLabel      string
+	ConnID          string
+	SourceOf        map[string]string
+	Warnings        []string
+	LoadedSkills    []*store.Skill
+	OntoUnavailable *ontology.Issue // M8：本体挂载降级（首个 Agent 的失败即代表整体降级）
 }
 
 // newChatModelAgent 构造 ADK ChatModelAgent（统一 ToolsConfig / EmitInternalEvents）。

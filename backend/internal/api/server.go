@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
@@ -16,17 +18,18 @@ import (
 
 // Server 聚合依赖并持有路由。
 type Server struct {
-	Store *store.Store
-	Box   *secrets.Box
-	Chat  *chat.Service
-	Tools *tool.Registry
-	KB    *kb.Service
-	Mux   *http.ServeMux
+	Store    *store.Store
+	Box      *secrets.Box
+	Chat     *chat.Service
+	Tools    *tool.Registry
+	KB       *kb.Service
+	Ontology *ontology.Service // M8：本体对接（反代/facade 探测）
+	Mux      *http.ServeMux
 }
 
 // NewServer 构造并注册全部路由。
-func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service) *Server {
-	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Mux: http.NewServeMux()}
+func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service) *Server {
+	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -34,7 +37,7 @@ func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *
 func (s *Server) routes() {
 	m := s.Mux
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, s.healthz(r.Context()))
 	})
 
 	// Agents
@@ -94,6 +97,15 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/skills/{id}", s.updateSkill)
 	m.HandleFunc("GET /api/skills/{id}/preview", s.previewSkill)
 	m.HandleFunc("DELETE /api/skills/{id}", s.deleteSkill)
+
+	// 本体对接（M8 §6.10）：模型能力代理 + 双反向代理（同源透传免跨域）
+	m.HandleFunc("POST /api/ontology-llm/generate", s.generateOntologyLLM)
+	if s.Ontology != nil {
+		m.Handle("/api/ontologies", s.Ontology.BuildProxy()) // → 构建平面 BUILD_SVC_URL(:8091)
+		m.Handle("/api/ontologies/", s.Ontology.BuildProxy())
+		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
+		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
+	}
 }
 
 // ---- JSON 工具 ----
@@ -127,4 +139,40 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 	log.Printf("[api] internal error: %v", err)
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
+// healthz 汇总后端依赖状态（§6.10/§8：模型默认连接、本体 facade、知识库向量后端可达性）。
+func (s *Server) healthz(ctx context.Context) map[string]any {
+	out := map[string]any{"status": "ok"}
+
+	if def, err := s.Store.GetDefaultConnection("chat"); err != nil {
+		out["model_default_conn"] = "error"
+	} else if def == nil {
+		out["model_default_conn"] = "not_configured"
+	} else {
+		out["model_default_conn"] = "ok"
+	}
+	if defE, err := s.Store.GetDefaultConnection("embedding"); err != nil {
+		out["embedding_default_conn"] = "error"
+	} else if defE == nil {
+		out["embedding_default_conn"] = "not_configured"
+	} else {
+		out["embedding_default_conn"] = "ok"
+	}
+
+	if s.KB == nil {
+		out["knowledge_backend"] = "disabled"
+	} else {
+		out["knowledge_backend"] = s.KB.Healthz(ctx)
+	}
+
+	switch {
+	case s.Ontology == nil:
+		out["ontology_facade"] = "disabled"
+	case s.Ontology.Reachable(ctx):
+		out["ontology_facade"] = "ok"
+	default:
+		out["ontology_facade"] = "unreachable"
+	}
+	return out
 }

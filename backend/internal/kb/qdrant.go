@@ -32,6 +32,22 @@ func pointUUID(chunkID string) string {
 	return fmt.Sprintf("%s-%s-%s-%s-%s", h[0:8], h[8:12], h[12:16], h[16:20], h[20:32])
 }
 
+// ping Qdrant 可达性探测（healthz 汇总用）：GET /collections 返回 2xx 即视为可达。
+func (q *QdrantStore) ping(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(q.base, "/")+"/collections", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := q.hc.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < 500
+}
+
 func (q *QdrantStore) do(ctx context.Context, method, path string, body any, out any) error {
 	var rd io.Reader
 	if body != nil {

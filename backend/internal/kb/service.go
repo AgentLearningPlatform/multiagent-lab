@@ -244,6 +244,19 @@ func (s *Service) backendName() string {
 	}
 }
 
+// Healthz 向量后端可达性（healthz 汇总用，§8）：sqlite 恒 ok；qdrant 探测 /collections。
+func (s *Service) Healthz(ctx context.Context) string {
+	switch v := s.Vector.(type) {
+	case *QdrantStore:
+		if v.ping(ctx) {
+			return "qdrant-ok"
+		}
+		return "qdrant-unreachable"
+	default:
+		return "sqlite-ok"
+	}
+}
+
 // pointUUIDOf 与 qdrant.go 的 pointUUID 一致（避免循环依赖，此包内直接复用）。
 func pointUUIDOf(chunkID string) string { return pointUUID(chunkID) }
 

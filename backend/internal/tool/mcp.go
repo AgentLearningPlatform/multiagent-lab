@@ -12,18 +12,34 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// renamedTool 改写暴露给模型的工具名（§6.11：多 server 冲突用 {server}__{tool} 前缀）。
-type renamedTool struct {
-	einotool.BaseTool
+// renamedInvokable 改写暴露给模型的工具名并保留 Invoke 能力（§6.11）。
+type renamedInvokable struct {
+	einotool.InvokableTool
 	name string
 }
 
-func (r renamedTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	ti, err := r.BaseTool.Info(ctx)
+func (r *renamedInvokable) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	ti, err := r.InvokableTool.Info(ctx)
 	if err != nil {
 		return nil, err
 	}
 	c := *ti // 浅拷贝，避免改写共享 ToolInfo
+	c.Name = r.name
+	return &c, nil
+}
+
+// renamedStreamable 改写暴露给模型的流式工具名并保留 StreamInvoke 能力。
+type renamedStreamable struct {
+	einotool.StreamableTool
+	name string
+}
+
+func (r *renamedStreamable) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	ti, err := r.StreamableTool.Info(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c := *ti
 	c.Name = r.name
 	return &c, nil
 }
@@ -66,7 +82,15 @@ func FetchMCPTools(ctx context.Context, serverName, url string, timeout time.Dur
 		if err != nil || ti == nil || ti.Name == "" {
 			continue
 		}
-		out = append(out, renamedTool{BaseTool: bt, name: prefix + ti.Name})
+		// 保留底层工具的调用能力：按 Invokable / Streamable 分别包装，仅改写名字。
+		switch t := bt.(type) {
+		case einotool.InvokableTool:
+			out = append(out, &renamedInvokable{InvokableTool: t, name: prefix + ti.Name})
+		case einotool.StreamableTool:
+			out = append(out, &renamedStreamable{StreamableTool: t, name: prefix + ti.Name})
+		default:
+			out = append(out, bt)
+		}
 	}
 	return out, nil
 }

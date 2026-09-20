@@ -135,6 +135,15 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		s.emitAndRecord(runCtx, conv, runID, newEvent("skill.loaded", runID, map[string]any{"skills": skills}), emit)
 	}
 
+	// 本体降级（M8 §6.10-4：挂载运行方案但 facade 不可达/方案停止 → 单次失败即降级，
+	// ontology.unavailable 事件，不重试风暴，普通对话/知识库不受影响，恢复后下一条消息自动恢复）
+	if rt.OntoUnavailable != nil {
+		s.emitAndRecord(runCtx, conv, runID, newEvent("ontology.unavailable", runID, map[string]any{
+			"profile_id": rt.OntoUnavailable.ProfileID,
+			"reason":     rt.OntoUnavailable.Reason,
+		}), emit)
+	}
+
 	// 知识库召回（M6，§11/§6.9：提问先检索 → retrieval 事件 → 上下文注入；失败降级不阻断）
 	if conv.EnableKB && conv.KBID != nil && *conv.KBID != "" && s.KB != nil {
 		kbcfg, kerr := s.Store.GetKnowledgeBase(*conv.KBID)
@@ -394,6 +403,11 @@ func emitToolCall(s *Service, ctx context.Context, conv *store.Conversation, run
 	if rt != nil {
 		if src := rt.SourceOf[tc.Function.Name]; src != "" {
 			data["source"] = src
+			// M8 §11：本体查询事件语义——onto_* 工具（source=ontology:facade）附加 profile/via
+			if src == "ontology:facade" && conv != nil && conv.RuntimeProfileID != nil {
+				data["profile_id"] = *conv.RuntimeProfileID
+				data["via"] = "mcp"
+			}
 		}
 	}
 	s.emitAndRecord(ctx, conv, runID, newEvent("tool.call", runID, data), emit)
