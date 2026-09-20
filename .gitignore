@@ -1,0 +1,4 @@
+backend/data/
+web/node_modules/
+web/dist/
+*.log
