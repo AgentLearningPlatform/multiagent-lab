@@ -1,0 +1,1141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>eino-multiagent-lab · 智能体平台 界面交互原型 v0.1</title>
+<style>
+:root{
+  --c-bg:#f6f7fb; --c-surface:#ffffff; --c-line:#e6e8f0; --c-line-strong:#d3d7e4;
+  --c-ink:#1c2130; --c-ink-2:#575e75; --c-ink-3:#8b91a7;
+  --c-brand:#4f46e5; --c-brand-ink:#3d36c4; --c-brand-weak:#eef0fe; --c-brand-line:#d9dcfc;
+  --c-ok:#0e9f6e; --c-ok-weak:#e6f6f0; --c-warn:#b45309; --c-warn-weak:#fdf3e3; --c-err:#c2373f; --c-err-weak:#fdeef0;
+  --c-skill:#0e9f6e; --c-skill-weak:#e6f6f0; --c-mcp:#7c3aed; --c-mcp-weak:#f3eefe; --c-onto:#0369a1; --c-onto-weak:#e6f3fb; --c-builtin:#575e75; --c-builtin-weak:#eef0f5;
+  --radius:12px; --radius-s:8px;
+  --shadow:0 1px 2px rgba(28,33,48,.05), 0 6px 20px rgba(28,33,48,.07);
+  --font:system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  --nav-w:248px; --files-w:264px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--font); background:var(--c-bg); color:var(--c-ink);
+  font-size:14px; line-height:1.6; overflow-x:hidden;
+}
+button,select,input,textarea{font-family:inherit;font-size:inherit;color:inherit}
+button{cursor:pointer}
+:is(button,select,input,textarea,a,[tabindex]):focus-visible{outline:2px solid var(--c-brand);outline-offset:2px;border-radius:4px}
+a{color:var(--c-brand-ink)}
+h1,h2,h3{margin:0;line-height:1.4}
+
+/* ===== 顶栏 ===== */
+.topbar{
+  position:sticky;top:0;z-index:30;height:52px;background:var(--c-surface);
+  border-bottom:1px solid var(--c-line);display:flex;align-items:center;gap:14px;padding:0 16px;
+}
+.topbar .logo{display:flex;align-items:center;gap:9px;min-width:0}
+.topbar .logo svg{flex:none}
+.topbar h1{font-size:15px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.topbar .sub{font-size:12px;color:var(--c-ink-3);white-space:nowrap}
+.proj{margin-left:auto;display:flex;align-items:center;gap:8px}
+.proj label{font-size:12px;color:var(--c-ink-3)}
+.proj select{
+  appearance:none;-webkit-appearance:none;border:1px solid var(--c-line-strong);border-radius:var(--radius-s);
+  padding:5px 26px 5px 10px;background:var(--c-surface);
+  font-size:13px;max-width:180px;
+}
+.selwrap{position:relative;display:inline-flex;min-width:0}
+.selwrap::after{
+  content:"";position:absolute;right:11px;top:50%;width:7px;height:7px;pointer-events:none;
+  border-right:1.6px solid var(--c-ink-2);border-bottom:1.6px solid var(--c-ink-2);
+  transform:translateY(-70%) rotate(45deg);
+}
+.badge-proto{
+  font-size:11px;color:var(--c-brand-ink);background:var(--c-brand-weak);border:1px solid var(--c-brand-line);
+  border-radius:999px;padding:2px 10px;white-space:nowrap;
+}
+
+/* ===== 框架 ===== */
+.frame{display:grid;grid-template-columns:var(--nav-w) minmax(0,1fr) auto;min-height:calc(100vh - 52px)}
+.side{
+  background:#fbfbfd;border-right:1px solid var(--c-line);padding:14px 10px 24px;
+  display:flex;flex-direction:column;gap:16px;
+}
+.navgroup .cap{font-size:11px;color:var(--c-ink-3);letter-spacing:.06em;padding:0 8px 6px}
+.navbtn{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:0;
+  border-radius:var(--radius-s);padding:8px 10px;color:var(--c-ink-2);font-size:13.5px;margin-bottom:2px;
+}
+.navbtn svg{flex:none}
+.navbtn:hover{background:#eef0f6;color:var(--c-ink)}
+.navbtn[aria-current="true"]{background:var(--c-brand-weak);color:var(--c-brand-ink);font-weight:600}
+.navbtn .cnt{margin-left:auto;font-size:11px;color:var(--c-ink-3);background:#eef0f5;border-radius:999px;padding:0 7px}
+.tree{border-top:1px solid var(--c-line);padding-top:10px}
+.tree .cap{display:flex;align-items:center;font-size:11px;color:var(--c-ink-3);letter-spacing:.06em;padding:0 8px 6px}
+.tree .cap .new{margin-left:auto;font-size:11px;color:var(--c-brand-ink);background:none;border:0;padding:2px 6px;border-radius:4px}
+.tree .cap .new:hover{background:var(--c-brand-weak)}
+.agent-node{margin-bottom:2px}
+.agent-node>summary{
+  display:flex;align-items:center;gap:7px;list-style:none;cursor:pointer;
+  padding:7px 8px;border-radius:var(--radius-s);font-size:13.5px;font-weight:600;color:var(--c-ink);
+}
+.agent-node>summary::-webkit-details-marker{display:none}
+.agent-node>summary:hover{background:#eef0f6}
+.agent-node>summary .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.agent-node>summary .chev{margin-left:auto;transition:transform .18s ease;color:var(--c-ink-3)}
+.agent-node[open]>summary .chev{transform:rotate(90deg)}
+.conv{
+  display:flex;align-items:center;gap:7px;padding:6px 8px 6px 26px;margin:1px 0;border-radius:var(--radius-s);
+  font-size:13px;color:var(--c-ink-2);cursor:pointer;border:0;background:none;width:100%;text-align:left;
+}
+.conv:hover{background:#eef0f6;color:var(--c-ink)}
+.conv[aria-current="true"]{background:var(--c-brand-weak);color:var(--c-brand-ink);font-weight:600}
+.conv .time{margin-left:auto;font-size:11px;color:var(--c-ink-3);font-weight:400}
+
+/* ===== 主区 ===== */
+main{min-width:0;display:flex;flex-direction:column}
+.view{display:none;flex:1;flex-direction:column}
+.view.active{display:flex}
+.view-head{display:flex;align-items:baseline;gap:10px;padding:18px 22px 4px;flex-wrap:wrap}
+.view-head h2{font-size:17px;font-weight:700}
+.view-head p{margin:0;font-size:12.5px;color:var(--c-ink-3)}
+.view-body{padding:14px 22px 30px;display:flex;flex-direction:column;gap:14px}
+
+/* ===== 对话视图 ===== */
+#view-chat .view-body{padding-bottom:0;flex:1}
+.chat-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start;flex:1}
+.chat-col{display:flex;flex-direction:column;min-width:0;min-height:520px}
+.cfgbar{
+  background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);
+  padding:9px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:var(--shadow);
+}
+.cfgbar .lab{font-size:12px;color:var(--c-ink-3)}
+.cfgbar select{
+  appearance:none;-webkit-appearance:none;border:1px solid var(--c-line-strong);border-radius:var(--radius-s);
+  padding:4px 26px 4px 9px;font-size:12.5px;background:var(--c-surface);
+}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;font-size:12px;border-radius:999px;padding:2.5px 10px;
+  border:1px solid var(--c-line);background:#f7f8fc;color:var(--c-ink-2);white-space:nowrap;
+}
+.chip .cdot{width:6px;height:6px;border-radius:50%;flex:none}
+.chip.model{background:var(--c-brand-weak);border-color:var(--c-brand-line);color:var(--c-brand-ink)}
+.chip.src-skill{background:var(--c-skill-weak);border-color:#bfe8d8;color:#0b7a55}
+.chip.src-mcp{background:var(--c-mcp-weak);border-color:#ddd0f8;color:#6527bd}
+.chip.src-onto{background:var(--c-onto-weak);border-color:#bfe0f3;color:var(--c-onto)}
+.chip.src-builtin{background:var(--c-builtin-weak);border-color:#dfe2ec;color:var(--c-builtin)}
+.cfgbar .hint{font-size:11.5px;color:var(--c-ink-3);margin-left:auto}
+
+.stream{display:flex;flex-direction:column;gap:12px;padding:16px 2px;overflow-y:auto;flex:1;min-height:420px;max-height:calc(100vh - 320px)}
+.msg{max-width:78%;animation:none}
+.msg.user{align-self:flex-end}
+.msg.user .bubble{
+  background:var(--c-brand);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 13px;
+  box-shadow:0 2px 8px rgba(79,70,229,.25);
+}
+.msg.assistant{align-self:flex-start;max-width:88%}
+.msg.assistant .bubble{
+  background:var(--c-surface);border:1px solid var(--c-line);border-radius:4px 14px 14px 14px;
+  padding:11px 14px;box-shadow:var(--shadow);
+}
+.msg.assistant .bubble p{margin:0 0 8px}
+.msg.assistant .bubble p:last-child{margin-bottom:0}
+.msg .who{font-size:11px;color:var(--c-ink-3);margin-bottom:3px;padding:0 2px}
+.msg.assistant .bubble .cite{color:var(--c-onto);font-size:11px;vertical-align:super}
+.evcards{align-self:stretch;display:flex;flex-direction:column;gap:8px;max-width:92%}
+.evcard{
+  background:var(--c-surface);border:1px solid var(--c-line);border-left:3px solid var(--c-builtin);
+  border-radius:var(--radius-s);padding:8px 12px;box-shadow:var(--shadow);font-size:12.5px;
+}
+.evcard.hidden-ev{display:none}
+.evcard .evhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.evcard .evhead .evtitle{font-weight:600;font-size:12.5px;color:var(--c-ink)}
+.evcard .evhead .mono{font-family:var(--mono);font-size:11.5px;color:var(--c-ink-2)}
+.evcard .evbody{margin-top:6px;color:var(--c-ink-2);font-size:12.5px}
+.evcard .evbody .mono{font-family:var(--mono);font-size:11.5px}
+.evcard.ev-skill{border-left-color:var(--c-skill)}
+.evcard.ev-mcp{border-left-color:var(--c-mcp)}
+.evcard.ev-onto{border-left-color:var(--c-onto)}
+.evcard.ev-file{border-left-color:var(--c-warn)}
+.evcard.ev-warn{border-left-color:var(--c-err);background:#fffafa}
+.evcard.ev-warn .evbody{color:#8f3a41}
+.evcard ul{margin:4px 0 0;padding-left:18px}
+.evcard li{margin:2px 0}
+.evcard .oktag{color:var(--c-ok);font-weight:600}
+.composer{
+  background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);
+  padding:10px 12px;display:flex;gap:10px;align-items:flex-end;box-shadow:var(--shadow);margin-bottom:16px;
+}
+.composer textarea{
+  flex:1;border:0;resize:none;min-height:44px;max-height:120px;line-height:1.55;padding:2px 4px;background:none;
+}
+.composer textarea:focus{outline:none}
+.composer textarea:focus-visible{outline:none}
+.composer:focus-within{border-color:var(--c-brand-line);box-shadow:0 0 0 3px var(--c-brand-weak)}
+.btn{
+  border:1px solid var(--c-line-strong);background:var(--c-surface);border-radius:var(--radius-s);
+  padding:7px 16px;font-size:13px;font-weight:500;color:var(--c-ink-2);transition:transform .08s ease;
+}
+.btn:hover{border-color:var(--c-brand);color:var(--c-brand-ink)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--c-brand);border-color:var(--c-brand);color:#fff}
+.btn.primary:hover{background:var(--c-brand-ink)}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.btn.ghost{border-color:transparent;background:none;color:var(--c-ink-3)}
+.btn.ghost:hover{color:var(--c-ink);background:#eef0f6}
+.replay-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.replay-row .note{font-size:12px;color:var(--c-ink-3)}
+
+/* ===== 右侧文件面板（P3） ===== */
+.files{
+  width:var(--files-w);background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);
+  box-shadow:var(--shadow);align-self:stretch;display:flex;flex-direction:column;max-height:calc(100vh - 200px);
+}
+.files-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--c-line)}
+.files-head h3{font-size:13px;font-weight:700}
+.files-head .tag{font-size:10.5px;color:var(--c-warn);background:var(--c-warn-weak);border-radius:999px;padding:1px 8px}
+.files-head .fold{margin-left:auto;background:none;border:0;color:var(--c-ink-3);font-size:12px;padding:2px 6px;border-radius:4px}
+.files-head .fold:hover{background:#eef0f6;color:var(--c-ink)}
+.files ul{list-style:none;margin:0;padding:6px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.files li{
+  display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--radius-s);font-size:12.5px;
+  color:var(--c-ink-2);cursor:pointer;border:1px solid transparent;
+}
+.files li:hover{background:#f4f5fa}
+.files li.fresh{background:var(--c-warn-weak);border-color:#f3ddba;color:var(--c-warn)}
+.files li .fname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.files li .fmeta{margin-left:auto;font-size:11px;color:var(--c-ink-3);white-space:nowrap}
+.files .empty{padding:18px 12px;font-size:12.5px;color:var(--c-ink-3);text-align:center}
+body.files-off .files{display:none}
+body.files-off .files-toggle{display:inline-flex}
+.files-toggle{display:none;border:1px dashed var(--c-line-strong);background:var(--c-surface);border-radius:var(--radius-s);padding:6px 12px;font-size:12.5px;color:var(--c-ink-2)}
+.files-toggle:hover{color:var(--c-brand-ink);border-color:var(--c-brand)}
+
+/* ===== 管理视图卡片 ===== */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.card{
+  background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);
+  padding:14px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:9px;
+}
+.card .chead{display:flex;align-items:flex-start;gap:10px}
+.card .avatar{
+  width:36px;height:36px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:15px;color:#fff;
+}
+.card .ttl{font-size:14.5px;font-weight:700;line-height:1.35}
+.card .desc{font-size:12.5px;color:var(--c-ink-2);margin-top:1px}
+.card .meta{display:flex;gap:6px;flex-wrap:wrap}
+.card .foot{display:flex;gap:8px;margin-top:2px}
+.card .foot .btn{padding:5px 12px;font-size:12.5px}
+.card.new-agent{
+  border-style:dashed;border-color:var(--c-line-strong);align-items:center;justify-content:center;
+  color:var(--c-ink-3);min-height:132px;background:transparent;box-shadow:none;cursor:pointer;
+}
+.card.new-agent:hover{color:var(--c-brand-ink);border-color:var(--c-brand)}
+.tag{font-size:11px;border-radius:999px;padding:1.5px 9px;border:1px solid var(--c-line);background:#f7f8fc;color:var(--c-ink-2);white-space:nowrap}
+.tag.backend{background:var(--c-onto-weak);border-color:#bfe0f3;color:var(--c-onto)}
+.tag.backend.inproc{background:#f0f1f6;border-color:#dfe2ec;color:var(--c-builtin)}
+.tag.k8s{background:var(--c-mcp-weak);border-color:#ddd0f8;color:#6527bd}
+
+/* ===== 抽屉（dialog） ===== */
+dialog{
+  border:0;border-radius:14px;box-shadow:0 24px 60px rgba(28,33,48,.28);
+  padding:0;width:min(680px,calc(100vw - 32px));max-height:min(86vh,860px);
+}
+dialog::backdrop{background:rgba(28,33,48,.42)}
+.dlg{display:flex;flex-direction:column;max-height:inherit}
+.dlg-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--c-line)}
+.dlg-head h3{font-size:15px;font-weight:700}
+.dlg-head .x{margin-left:auto;background:none;border:0;font-size:16px;color:var(--c-ink-3);width:30px;height:30px;border-radius:8px}
+.dlg-head .x:hover{background:#eef0f6;color:var(--c-ink)}
+.dlg-body{padding:14px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.dlg-foot{display:flex;justify-content:flex-end;gap:10px;padding:12px 18px;border-top:1px solid var(--c-line)}
+fieldset{border:0;margin:0;padding:0}
+legend,.flabel{font-size:12px;font-weight:700;color:var(--c-ink-2);letter-spacing:.04em;margin-bottom:6px;display:block}
+.frow{display:flex;gap:10px;flex-wrap:wrap}
+.frow>*{flex:1;min-width:200px}
+input[type="text"],input[type="url"],select,textarea.tf{
+  width:100%;border:1px solid var(--c-line-strong);border-radius:var(--radius-s);padding:7px 10px;font-size:13px;background:var(--c-surface);
+}
+textarea.tf{resize:vertical;min-height:96px;line-height:1.6}
+.hintline{font-size:11.5px;color:var(--c-ink-3);margin-top:4px}
+.radio-row{display:flex;flex-direction:column;gap:6px}
+.radio-row label{
+  display:flex;gap:9px;align-items:flex-start;border:1px solid var(--c-line);border-radius:var(--radius-s);
+  padding:9px 11px;cursor:pointer;font-size:13px;
+}
+.radio-row label:hover{border-color:var(--c-brand-line);background:#fafaff}
+.radio-row input{margin-top:3px;accent-color:var(--c-brand)}
+.radio-row .rtitle{font-weight:600;font-size:13px}
+.radio-row .rdesc{font-size:11.5px;color:var(--c-ink-3);font-weight:400}
+.radio-row label:has(input:checked){border-color:var(--c-brand);background:var(--c-brand-weak)}
+.check-list{display:flex;flex-direction:column;gap:6px}
+.check-list label{display:flex;align-items:center;gap:9px;font-size:13px;border:1px solid var(--c-line);border-radius:var(--radius-s);padding:8px 11px;cursor:pointer}
+.check-list label:hover{border-color:var(--c-brand-line)}
+.check-list input{accent-color:var(--c-brand)}
+.check-list .cdesc{font-size:11.5px;color:var(--c-ink-3);margin-left:auto}
+.backend-detail{
+  display:none;font-size:12px;color:var(--c-ink-2);background:#f7f8fc;border:1px dashed var(--c-line-strong);
+  border-radius:var(--radius-s);padding:8px 11px;margin-top:6px;
+}
+.backend-detail.show{display:block}
+.backend-detail .mono{font-family:var(--mono);font-size:11px}
+.kv-row{display:flex;gap:8px;align-items:center}
+.kv-row input[type="checkbox"]{accent-color:var(--c-brand)}
+.kv-row .mono{font-family:var(--mono);font-size:11.5px;color:var(--c-ink-2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcp-row{display:flex;gap:8px;align-items:center;border:1px solid var(--c-line);border-radius:var(--radius-s);padding:8px 10px}
+.mcp-row .mono{font-family:var(--mono);font-size:11.5px;color:var(--c-ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcp-row .mname{font-size:12.5px;font-weight:600;white-space:nowrap}
+.mcp-row .sw{margin-left:auto;font-size:11.5px;color:var(--c-ok);white-space:nowrap}
+
+/* ===== 知识库试运行 ===== */
+.trybox{display:flex;gap:8px;margin-top:8px}
+.trybox input{flex:1}
+.try-res{margin-top:8px;display:none;flex-direction:column;gap:6px}
+.try-res.show{display:flex}
+.try-res .hit{border:1px solid var(--c-line);border-radius:var(--radius-s);padding:7px 10px;font-size:12px;color:var(--c-ink-2)}
+.try-res .hit b{color:var(--c-ink)}
+.try-res .score{font-family:var(--mono);font-size:11px;color:var(--c-onto)}
+.state-tag{font-size:11px;border-radius:999px;padding:1.5px 9px;white-space:nowrap}
+.state-tag.ready{background:var(--c-ok-weak);color:var(--c-ok);border:1px solid #bfe8d8}
+.state-tag.building{background:var(--c-warn-weak);color:var(--c-warn);border:1px solid #f3ddba}
+
+/* ===== 原型说明 ===== */
+.proto-notes{margin:6px 22px 26px}
+.proto-notes details{background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.proto-notes summary{cursor:pointer;padding:11px 16px;font-size:13px;font-weight:600;color:var(--c-ink-2);list-style:none}
+.proto-notes summary::-webkit-details-marker{display:none}
+.proto-notes summary::before{content:"▸ ";color:var(--c-brand)}
+.proto-notes details[open] summary::before{content:"▾ "}
+.proto-notes .notes-body{padding:2px 18px 14px;font-size:12.5px;color:var(--c-ink-2);border-top:1px dashed var(--c-line)}
+.proto-notes table{border-collapse:collapse;width:100%;margin-top:10px;font-size:12.5px}
+.proto-notes th,.proto-notes td{border:1px solid var(--c-line);padding:6px 9px;text-align:left;vertical-align:top}
+.proto-notes th{background:#f7f8fc;font-weight:600;white-space:nowrap}
+
+/* ===== Toast ===== */
+.toast{
+  position:fixed;left:50%;bottom:26px;transform:translate(-50%,16px);opacity:0;pointer-events:none;
+  background:var(--c-ink);color:#fff;border-radius:10px;padding:9px 18px;font-size:13px;
+  box-shadow:0 10px 30px rgba(28,33,48,.35);transition:transform .22s ease,opacity .22s ease;z-index:60;
+}
+.toast.show{transform:translate(-50%,0);opacity:1}
+
+/* ===== 响应式 ===== */
+@media (max-width:1080px){
+  .frame{grid-template-columns:minmax(0,1fr)}
+  .side{
+    border-right:0;border-bottom:1px solid var(--c-line);flex-direction:row;align-items:center;
+    overflow-x:auto;padding:10px 12px;gap:8px;position:sticky;top:52px;z-index:20;
+  }
+  .navgroup{display:flex;gap:6px}
+  .navgroup .cap{display:none}
+  .navbtn{width:auto;margin:0;white-space:nowrap;padding:7px 12px}
+  .navbtn .cnt{display:none}
+  .tree{border-top:0;padding-top:0;margin-left:8px;display:flex;align-items:center;gap:6px}
+  .tree .cap{padding:0 4px 0 0}
+  .agent-node,.conv{display:inline-block;width:auto}
+  .agent-node>summary{padding:7px 12px}
+  .agent-node[open]{position:relative}
+  .agent-node[open] .conv-list{
+    position:absolute;top:100%;left:0;background:var(--c-surface);border:1px solid var(--c-line);
+    border-radius:var(--radius-s);box-shadow:var(--shadow);padding:6px;min-width:200px;z-index:40;
+  }
+  .conv .time{display:none}
+  .chat-wrap{grid-template-columns:minmax(0,1fr)}
+  .files{max-height:340px}
+}
+@media (max-width:640px){
+  .topbar .sub,.proj label{display:none}
+  .msg{max-width:94%}
+  .view-head,.view-body,.proto-notes{padding-left:14px;padding-right:14px}
+  .stream{max-height:60vh}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
+@media print{
+  .topbar,.side,.composer,.replay-row,.files,.files-toggle,.dlg-foot,dialog{display:none!important}
+  .frame{display:block}
+  .view{display:flex!important}
+  .stream{max-height:none;overflow:visible}
+  .evcard,.msg .bubble{box-shadow:none}
+  body{background:#fff}
+}
+</style>
+</head>
+<body data-page-id="agent-platform-prototype" data-entry="true">
+
+<header class="topbar">
+  <div class="logo">
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" fill="#4f46e5"/><path d="M7 9h6M7 13h10M7 17h4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <h1>eino-multiagent-lab · 智能体平台</h1>
+    <span class="sub">界面交互原型</span>
+  </div>
+  <div class="proj">
+    <label for="proj-select">项目</label>
+    <span class="selwrap">
+    <select id="proj-select">
+      <option selected>K8s 运维平台</option>
+      <option>本体学习实验室</option>
+      <option>+ 新建项目…</option>
+    </select>
+    </span>
+  </div>
+  <span class="badge-proto">原型 v0.1 · 待确认</span>
+</header>
+
+<div class="frame">
+
+  <!-- ===== 左侧：导航 + Agent 折叠树 ===== -->
+  <aside class="side" aria-label="导航与对话树">
+    <nav class="navgroup" aria-label="主导航">
+      <div class="cap">平台</div>
+      <button class="navbtn" id="nav-chat" data-view="chat" aria-current="true" aria-controls="view-chat">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H6l-3.2 2.6A.6.6 0 0 1 2 13V3.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        对话<span class="cnt">3</span>
+      </button>
+      <button class="navbtn" data-view="agents" aria-controls="view-agents">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="4.5" width="10" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6.2" cy="8.2" r="1" fill="currentColor"/><circle cx="9.8" cy="8.2" r="1" fill="currentColor"/><path d="M8 4.5V2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="2.2" r="1" fill="currentColor"/></svg>
+        Agent 管理<span class="cnt">2</span>
+      </button>
+      <button class="navbtn" data-view="kb" aria-controls="view-kb">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.8A.8.8 0 0 1 3.8 2h8.4a.8.8 0 0 1 .8.8v10.4a.8.8 0 0 1-.8.8H3.8a.8.8 0 0 1-.8-.8V2.8z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 5h5M5.5 7.5h5M5.5 10h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        知识库<span class="cnt">2</span>
+      </button>
+      <button class="navbtn" data-view="skills" aria-controls="view-skills">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l1.7 3.5 3.8.5-2.8 2.7.7 3.8L8 10.5l-3.4 1.8.7-3.8L2.5 5.8l3.8-.5L8 1.8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        技能管理<span class="cnt">2</span>
+      </button>
+    </nav>
+
+    <div class="tree">
+      <div class="cap">Agent · 对话
+        <button class="new" id="btn-new-conv" title="新建对话（归属当前 Agent）">＋ 新对话</button>
+      </div>
+      <details class="agent-node" open>
+        <summary><span class="dot" style="background:var(--c-skill)"></span>K8s 运维助手
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </summary>
+        <div class="conv-list">
+          <button class="conv" aria-current="true">Pod 异常排查<span class="time">10:24</span></button>
+          <button class="conv">节点资源巡检<span class="time">昨天</span></button>
+          <button class="conv">周报整理<span class="time">09-18</span></button>
+        </div>
+      </details>
+      <details class="agent-node">
+        <summary><span class="dot" style="background:var(--c-onto)"></span>文档问答助手
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </summary>
+        <div class="conv-list">
+          <button class="conv">FLUIDOS 论文问答<span class="time">09-19</span></button>
+        </div>
+      </details>
+    </div>
+  </aside>
+
+  <!-- ===== 主区 ===== -->
+  <main>
+
+    <!-- ===== 视图 1：对话工作台 ===== -->
+    <section class="view active" id="view-chat" aria-label="对话工作台">
+      <div class="view-head">
+        <h2>对话 · Pod 异常排查</h2>
+        <p>归属 Agent：K8s 运维助手 · 执行后端 docker</p>
+      </div>
+      <div class="view-body">
+        <div class="chat-wrap">
+          <div class="chat-col">
+
+            <!-- 挂载配置条 -->
+            <div class="cfgbar" data-anchor-id="agent-platform-prototype.mount-bar">
+              <span class="chip model">
+                <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="6" r="1.4" fill="currentColor"/></svg>
+                模型：DeepSeek-V3（Agent 独立配置）
+              </span>
+              <label class="lab" for="onto-profile">本体运行方案</label>
+              <span class="selwrap">
+              <select id="onto-profile">
+                <option value="">不挂载</option>
+                <option value="mem" selected>运维本体 · 内存图 v3（running）</option>
+                <option value="oxi">运维本体 · Oxigraph v2（running）</option>
+                <option value="draft" disabled>故障诊断本体 v1（draft · 不可选）</option>
+              </select>
+              </span>
+              <span class="lab">已挂技能</span>
+              <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>K8s 故障排查</span>
+              <span class="hint" id="onto-hint">挂载后，对话可通过统一 MCP facade 查询本体</span>
+            </div>
+
+            <!-- 消息流 -->
+            <div class="stream" id="stream" data-state="complete" aria-live="polite">
+
+              <div class="msg user">
+                <div class="who">董奎 · 10:21</div>
+                <div class="bubble">default 命名空间里 nginx-7d9f 这个 Pod 一直重启，帮我排查下原因</div>
+              </div>
+
+              <!-- SSE 事件演示组（可重放） -->
+              <div class="evcards" id="evgroup" data-anchor-id="agent-platform-prototype.sse-events">
+                <div class="evcard ev-skill ev-step">
+                  <div class="evhead">
+                    <span class="evtitle">技能已加载</span>
+                    <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>skill.loaded</span>
+                  </div>
+                  <div class="evbody">「K8s 故障排查」注入系统提示词（约 3.2k tokens），追加工具白名单：k8s_get_pods、k8s_get_events、k8s_describe</div>
+                </div>
+
+                <div class="evcard ev-mcp ev-step">
+                  <div class="evhead">
+                    <span class="evtitle">工具调用</span>
+                    <span class="chip src-mcp"><span class="cdot" style="background:var(--c-mcp)"></span>source: mcp</span>
+                    <span class="mono">tool.call · k8s__k8s_get_pods</span>
+                  </div>
+                  <div class="evbody mono">{"namespace":"default","app":"nginx"} → <span class="oktag">成功</span> · 1 Pod · RESTARTS=14 · lastState=OOMKilled</div>
+                </div>
+
+                <div class="evcard ev-skill ev-step">
+                  <div class="evhead">
+                    <span class="evtitle">工具调用</span>
+                    <span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>source: builtin</span>
+                    <span class="mono">tool.call · kb_search</span>
+                  </div>
+                  <div class="evbody">知识库《K8s 运维手册》召回 3 段落（Qdrant · cosine）<ul><li>OOMKilled 常见原因与处置 <span class="mono">score 0.87</span></li><li>resources.limits 配置规范 <span class="mono">score 0.81</span></li></ul></div>
+                </div>
+
+                <div class="evcard ev-onto ev-step">
+                  <div class="evhead">
+                    <span class="evtitle">本体查询</span>
+                    <span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>via: mcp</span>
+                    <span class="mono">ontology.query · profile=运维本体-内存图 v3</span>
+                  </div>
+                  <div class="evbody">命中概念：<b>Pod</b> → <b>OOMKilled</b> → <b>资源限制(Limit)</b> · 关联处置策略 2 条（统一 MCP facade · 4 个 onto_* 工具）</div>
+                </div>
+
+                <div class="msg assistant">
+                  <div class="who">K8s 运维助手 · 10:21</div>
+                  <div class="bubble">
+                    <p><b>结论：nginx-7d9f 因内存超限被 OOMKill 后反复重启。</b></p>
+                    <p>排查依据：容器最近一次退出原因为 <span class="mono">OOMKilled</span>，14 次重启均伴随内存峰值触顶<span class="cite">[1]</span>；对照手册中 OOMKilled 处置策略<span class="cite">[2]</span>与本体概念链（Pod→OOMKilled→资源限制）。</p>
+                    <p>建议：① 将 <span class="mono">resources.limits.memory</span> 从 256Mi 提升至 512Mi 并观察；② 若为流量高峰导致，可为 Deployment 配置 HPA。详细报告已生成：</p>
+                  </div>
+                </div>
+
+                <div class="evcard ev-file ev-step">
+                  <div class="evhead">
+                    <span class="evtitle">文件已保存</span>
+                    <span class="tag" style="background:var(--c-warn-weak);color:var(--c-warn);border:1px solid #f3ddba">artifact.saved · P3</span>
+                    <span class="mono">排查报告_nginx-7d9f.md</span>
+                  </div>
+                  <div class="evbody">可在右侧「项目文件」面板查看</div>
+                </div>
+              </div>
+
+              <!-- 降级演示 -->
+              <div class="msg user">
+                <div class="who">董奎 · 10:23</div>
+                <div class="bubble">再查一下故障诊断本体里 OOM 的处置预案</div>
+              </div>
+              <div class="evcards">
+                <div class="evcard ev-warn">
+                  <div class="evhead">
+                    <span class="evtitle">本体服务不可用</span>
+                    <span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>ontology.unavailable</span>
+                    <span class="mono">profile=故障诊断本体 v1</span>
+                  </div>
+                  <div class="evbody">本次查询失败（单次失败即降级，不重试风暴）· 对话已降级为普通问答，历史挂载配置保留，可稍后重试</div>
+                </div>
+                <div class="msg assistant">
+                  <div class="who">K8s 运维助手 · 10:23</div>
+                  <div class="bubble"><p>故障诊断本体当前不可用，我基于知识库与已加载技能继续回答：OOM 处置优先检查内存 limit 与实际用量的差值…</p></div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- 输入区 -->
+            <div class="composer">
+              <label class="ghost" for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">消息输入</label>
+              <textarea id="input" placeholder="输入消息，Enter 发送（原型内为模拟回复）…"></textarea>
+              <button class="btn primary" id="btn-send" disabled>发送</button>
+            </div>
+            <div class="replay-row">
+              <button class="btn" id="btn-replay">▶ 重放本轮事件流</button>
+              <button class="files-toggle" id="btn-files-on" aria-controls="files-panel">显示项目文件面板</button>
+              <span class="note">事件卡演示 SSE 渲染：工具调用带来源标注（技能 / 内置 / MCP / 本体）</span>
+            </div>
+          </div>
+
+          <!-- 右侧：项目文件面板（P3） -->
+          <aside class="files" id="files-panel" aria-label="项目文件面板">
+            <div class="files-head">
+              <h3>项目文件</h3>
+              <span class="tag">P3</span>
+              <button class="fold" id="btn-files-off" aria-controls="files-panel">收起 ›</button>
+            </div>
+            <ul>
+              <li class="fresh" id="file-new">
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 1.5h5.5L11.5 4.5v8a.8.8 0 0 1-.8.8H3.8a.8.8 0 0 1-.8-.8V2.3a.8.8 0 0 1 .8-.8z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+                <span class="fname">排查报告_nginx-7d9f.md</span><span class="fmeta">刚刚 · 新增</span>
+              </li>
+              <li>
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 1.5h5.5L11.5 4.5v8a.8.8 0 0 1-.8.8H3.8a.8.8 0 0 1-.8-.8V2.3a.8.8 0 0 1 .8-.8z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+                <span class="fname">节点巡检_0919.md</span><span class="fmeta">昨天</span>
+              </li>
+              <li>
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 1.5h5.5L11.5 4.5v8a.8.8 0 0 1-.8.8H3.8a.8.8 0 0 1-.8-.8V2.3a.8.8 0 0 1 .8-.8z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+                <span class="fname">周报_W38.md</span><span class="fmeta">09-18</span>
+              </li>
+            </ul>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 视图 2：Agent 管理 ===== -->
+    <section class="view" id="view-agents" aria-label="Agent 管理">
+      <div class="view-head">
+        <h2>Agent 管理</h2>
+        <p>Agent 级可独立配置模型 / 技能 / MCP / 执行后端（REQ-92/93）</p>
+      </div>
+      <div class="view-body">
+        <div class="grid">
+          <article class="card">
+            <div class="chead">
+              <div class="avatar" style="background:var(--c-skill)">K</div>
+              <div>
+                <div class="ttl">K8s 运维助手</div>
+                <div class="desc">集群故障排查与日常巡检，挂载运维本体</div>
+              </div>
+            </div>
+            <div class="meta">
+              <span class="tag backend">执行后端 · docker</span>
+              <span class="tag">技能 ×1</span>
+              <span class="tag">MCP ×1</span>
+              <span class="tag">模型 · 独立配置</span>
+            </div>
+            <div class="foot">
+              <button class="btn" data-open-agent="k8s">配置</button>
+              <button class="btn ghost">对话</button>
+            </div>
+          </article>
+          <article class="card">
+            <div class="chead">
+              <div class="avatar" style="background:var(--c-onto)">文</div>
+              <div>
+                <div class="ttl">文档问答助手</div>
+                <div class="desc">基于知识库的论文与手册问答</div>
+              </div>
+            </div>
+            <div class="meta">
+              <span class="tag backend inproc">执行后端 · inprocess</span>
+              <span class="tag">技能 ×0</span>
+              <span class="tag">模型 · 跟随全局</span>
+            </div>
+            <div class="foot">
+              <button class="btn" data-open-agent="doc">配置</button>
+              <button class="btn ghost">对话</button>
+            </div>
+          </article>
+          <button class="card new-agent" id="btn-new-agent">＋ 新建 Agent</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 视图 3：知识库 ===== -->
+    <section class="view" id="view-kb" aria-label="知识库管理">
+      <div class="view-head">
+        <h2>知识库</h2>
+        <p>向量后端可切换：Qdrant（首选）/ SQLite（fallback），环境变量 KB_VECTOR_BACKEND</p>
+      </div>
+      <div class="view-body">
+        <div class="grid">
+          <article class="card">
+            <div class="chead">
+              <div class="avatar" style="background:var(--c-brand)">手</div>
+              <div>
+                <div class="ttl">K8s 运维手册</div>
+                <div class="desc">内部运维手册与 runbook 切片</div>
+              </div>
+            </div>
+            <div class="meta">
+              <span class="tag backend">Qdrant</span>
+              <span class="tag">12 文档 · 1,842 chunks</span>
+              <span class="state-tag ready">索引就绪</span>
+            </div>
+            <div class="foot">
+              <button class="btn" data-open-kb="manual">查看 · 试运行</button>
+            </div>
+          </article>
+          <article class="card">
+            <div class="chead">
+              <div class="avatar" style="background:#7c3aed">论</div>
+              <div>
+                <div class="ttl">FLUIDOS 论文库</div>
+                <div class="desc">FLUIDOS 相关论文切片（演示 fallback）</div>
+              </div>
+            </div>
+            <div class="meta">
+              <span class="tag backend inproc">SQLite</span>
+              <span class="tag">4 文档 · 217 chunks</span>
+              <span class="state-tag building">建索引中</span>
+            </div>
+            <div class="foot">
+              <button class="btn ghost" disabled title="索引构建中，暂不可试运行">查看 · 试运行</button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 视图 4：技能管理 ===== -->
+    <section class="view" id="view-skills" aria-label="技能管理">
+      <div class="view-head">
+        <h2>技能管理</h2>
+        <p>技能 = 配置级能力包（提示词 + 工具白名单），不执行脚本（Q-19）</p>
+      </div>
+      <div class="view-body">
+        <div class="grid">
+          <article class="card">
+            <div class="chead">
+              <div class="avatar" style="background:var(--c-skill)">故</div>
+              <div>
+                <div class="ttl">K8s 故障排查</div>
+                <div class="desc">Pod/节点异常的排查套路与命令模板</div>
+              </div>
+            </div>
+            <div class="meta">
+              <span class="tag">工具 ×3</span>
+              <span class="tag">挂载于 1 个 Agent</span>
+              <span class="state-tag ready">启用</span>
+            </div>
+            <div class="foot">
+              <button class="btn" data-open-skill="k8s">编辑</button>
+            </div>
+          </article>
+          <article class="card">
+            <div class="chead">
+              <div class="avatar" style="background:var(--c-warn)">周</div>
+              <div>
+                <div class="ttl">周报生成</div>
+                <div class="desc">按模板汇总本周对话与巡检结论</div>
+              </div>
+            </div>
+            <div class="meta">
+              <span class="tag">工具 ×1</span>
+              <span class="tag">未挂载</span>
+              <span class="state-tag ready">启用</span>
+            </div>
+            <div class="foot">
+              <button class="btn" data-open-skill="weekly">编辑</button>
+            </div>
+          </article>
+          <button class="card new-agent" id="btn-new-skill">＋ 新建技能</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 原型说明（需求对照） -->
+    <div class="proto-notes">
+      <details>
+        <summary>原型说明 · 与 v0.6 需求对照（确认后按此进入开发）</summary>
+        <div class="notes-body">
+          <table>
+            <caption class="ghost" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">原型与需求对照</caption>
+            <thead><tr><th>原型演示点</th><th>对应需求</th><th>确认要点</th></tr></thead>
+            <tbody>
+              <tr><td>左侧导航 + Agent 折叠树（Agent 名下多对话）</td><td>REQ-01~08a / REQ-94 / REQ-06</td><td>树形结构与「＋ 新对话」归属关系</td></tr>
+              <tr><td>对话顶部挂载条：模型 / 本体运行方案 / 技能徽标</td><td>REQ-19c/19d / REQ-93 / REQ-97</td><td>运行方案仅 running 可选、降级交互</td></tr>
+              <tr><td>事件流卡片（带来源标注）+ 重放</td><td>SSE 协议（skill.loaded / tool.call+source / ontology.query / artifact.saved）</td><td>事件粒度与视觉密度是否合适</td></tr>
+              <tr><td>右侧项目文件面板（新增高亮）</td><td>REQ-95/96（P3）</td><td>文件面板常驻 vs 按需展开</td></tr>
+              <tr><td>Agent 配置抽屉：模型跟随/覆盖、技能勾选、MCP、执行后端三选一</td><td>REQ-92 / REQ-93（P2）</td><td>执行后端默认 inprocess，docker/k8s 配置深度</td></tr>
+              <tr><td>知识库列表 + 向量后端标签 + 试运行</td><td>REQ-30~39 / Q-18</td><td>Qdrant / SQLite 双后端展示方式</td></tr>
+              <tr><td>技能卡片 + 编辑抽屉（instruction + 工具白名单）</td><td>REQ-90/91（Q-19）</td><td>技能包模型是否够用</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </main>
+</div>
+
+<!-- ===== Agent 配置抽屉 ===== -->
+<dialog id="dlg-agent" aria-labelledby="dlg-agent-title">
+  <div class="dlg">
+    <div class="dlg-head">
+      <h3 id="dlg-agent-title">Agent 配置 · K8s 运维助手</h3>
+      <button class="x" data-close="dlg-agent" aria-label="关闭">✕</button>
+    </div>
+    <div class="dlg-body">
+      <fieldset>
+        <legend>基本信息</legend>
+        <div class="frow">
+          <div><span class="flabel">名称</span><input type="text" value="K8s 运维助手"></div>
+          <div><span class="flabel">描述</span><input type="text" value="集群故障排查与日常巡检"></div>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>模型（REQ-93 · Agent 级独立配置，P2）</legend>
+        <div class="radio-row" id="model-mode">
+          <label><input type="radio" name="model-mode" value="global"><span><span class="rtitle">跟随全局默认</span><span class="rdesc">DeepSeek-V3 · temperature 0.7（全局设置中配置）</span></span></label>
+          <label><input type="radio" name="model-mode" value="own" checked><span><span class="rtitle">独立配置</span><span class="rdesc">为该 Agent 单独指定模型与参数</span></span></label>
+        </div>
+        <div class="backend-detail show" id="model-own-detail">
+          <div class="frow">
+            <div><span class="flabel">模型</span>
+              <select><option selected>DeepSeek-V3</option><option>DeepSeek-R1</option><option>Qwen2.5-72B</option></select>
+            </div>
+            <div><span class="flabel">Temperature</span><input type="text" value="0.3"></div>
+          </div>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>技能挂载（REQ-91 · 可多选）</legend>
+        <div class="check-list">
+          <label><input type="checkbox" checked><span>K8s 故障排查</span><span class="cdesc">工具 ×3 · 排查套路与命令模板</span></label>
+          <label><input type="checkbox"><span>周报生成</span><span class="cdesc">工具 ×1 · 周报模板汇总</span></label>
+        </div>
+        <p class="hintline">生效方式：指令注入系统提示词 + 工具白名单合并（agent.tools ∪ skills[].tools）</p>
+      </fieldset>
+      <fieldset>
+        <legend>MCP 服务器（P2 · 多 server，工具名加 server 前缀防冲突）</legend>
+        <div class="check-list">
+          <div class="mcp-row">
+            <input type="checkbox" checked aria-label="启用 k8s-cluster">
+            <span class="mname">k8s-cluster</span>
+            <span class="mono">https://mcp.internal:8443/k8s</span>
+            <span class="sw">已启用 · 8 工具</span>
+          </div>
+          <div class="mcp-row">
+            <input type="checkbox" aria-label="启用 grafana">
+            <span class="mname">grafana</span>
+            <span class="mono">http://127.0.0.1:9100/mcp</span>
+            <span class="sw" style="color:var(--c-ink-3)">未启用</span>
+          </div>
+        </div>
+        <p class="hintline"><button class="btn ghost" style="padding:2px 8px;font-size:12px" type="button">＋ 添加 MCP 服务器</button></p>
+      </fieldset>
+      <fieldset>
+        <legend>执行后端（REQ-92 · 沙箱策略，Q-17）</legend>
+        <div class="radio-row" id="backend-mode">
+          <label><input type="radio" name="backend" value="inproc"><span><span class="rtitle">inprocess（P0 · 默认）</span><span class="rdesc">进程内 ADK 装配，零基础设施，适合个人使用与调试</span></span></label>
+          <label><input type="radio" name="backend" value="docker" checked><span><span class="rtitle">docker 容器（P1）</span><span class="rdesc">每 Agent 一个独立容器跑 agent-runtime 镜像，配置经 manifest 下发</span></span></label>
+          <label><input type="radio" name="backend" value="k8s"><span><span class="rtitle">k8s Pod（P2）</span><span class="rdesc">Pod 部署 + requests/limits 资源约束</span></span></label>
+        </div>
+        <div class="backend-detail show" id="backend-docker-detail">
+          镜像 <span class="mono">kma-agentd:latest</span> · 资源上限 <span class="mono">cpu 1 / mem 512Mi</span> · 超时回收 <span class="mono">30m</span>
+        </div>
+      </fieldset>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" data-close="dlg-agent">取消</button>
+      <button class="btn primary" id="btn-save-agent">保存配置</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ===== 技能编辑抽屉 ===== -->
+<dialog id="dlg-skill" aria-labelledby="dlg-skill-title">
+  <div class="dlg">
+    <div class="dlg-head">
+      <h3 id="dlg-skill-title">编辑技能 · K8s 故障排查</h3>
+      <button class="x" data-close="dlg-skill" aria-label="关闭">✕</button>
+    </div>
+    <div class="dlg-body">
+      <fieldset>
+        <legend>基本信息</legend>
+        <div class="frow">
+          <div><span class="flabel">名称</span><input type="text" value="K8s 故障排查"></div>
+          <div><span class="flabel">描述</span><input type="text" value="Pod/节点异常的排查套路与命令模板"></div>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>指令内容（instruction · 注入系统提示词，数据模型参考 Claude Skills）</legend>
+        <textarea class="tf" rows="7">你是 K8s 故障排查专家。排查 Pod 异常时按以下顺序：
+1. k8s_get_pods 确认重启次数与 lastState；
+2. k8s_get_events 关联同命名空间事件；
+3. k8s_describe 查看资源限制与探针配置。
+输出结论必须区分「证据」与「推断」，并给出可执行的修复命令。</textarea>
+      </fieldset>
+      <fieldset>
+        <legend>工具白名单（合并进挂载该技能的 Agent）</legend>
+        <div class="check-list">
+          <label><input type="checkbox" checked><span>k8s_get_pods</span><span class="cdesc">内置工具</span></label>
+          <label><input type="checkbox" checked><span>k8s_get_events</span><span class="cdesc">内置工具</span></label>
+          <label><input type="checkbox" checked><span>k8s_describe</span><span class="cdesc">内置工具</span></label>
+          <label><input type="checkbox"><span>kb_search</span><span class="cdesc">内置工具 · 知识库检索</span></label>
+        </div>
+        <p class="hintline">安全边界：技能只做配置级注入，不提供技能级脚本执行环境</p>
+      </fieldset>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" data-close="dlg-skill">取消</button>
+      <button class="btn primary" id="btn-save-skill">保存技能</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ===== 知识库详情抽屉 ===== -->
+<dialog id="dlg-kb" aria-labelledby="dlg-kb-title">
+  <div class="dlg">
+    <div class="dlg-head">
+      <h3 id="dlg-kb-title">知识库 · K8s 运维手册</h3>
+      <button class="x" data-close="dlg-kb" aria-label="关闭">✕</button>
+    </div>
+    <div class="dlg-body">
+      <fieldset>
+        <legend>概览</legend>
+        <div class="meta" style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="tag backend">Qdrant · collection kb_manual</span>
+          <span class="tag">12 文档 · 1,842 chunks</span>
+          <span class="tag">切片 512 tok / overlap 64</span>
+          <span class="state-tag ready">索引就绪</span>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>文档列表</legend>
+        <div class="check-list">
+          <div class="mcp-row"><span class="mname">K8s运维手册_v3.pdf</span><span class="mono">412 chunks</span><span class="sw">已索引</span></div>
+          <div class="mcp-row"><span class="mname">runbook_告警处置.docx</span><span class="mono">268 chunks</span><span class="sw">已索引</span></div>
+          <div class="mcp-row"><span class="mname">网络排障手册.md</span><span class="mono">186 chunks</span><span class="sw">已索引</span></div>
+        </div>
+        <p class="hintline"><button class="btn ghost" style="padding:2px 8px;font-size:12px" type="button">＋ 上传文档</button></p>
+      </fieldset>
+      <fieldset>
+        <legend>检索试运行</legend>
+        <div class="trybox">
+          <label for="try-input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">检索词</label>
+          <input type="text" id="try-input" value="nginx Pod OOMKilled 排查">
+          <button class="btn primary" id="btn-try">搜索</button>
+        </div>
+        <div class="try-res" id="try-res" data-state="complete">
+          <div class="hit"><span class="score">0.87</span> · <b>OOMKilled 常见原因</b>：容器内存用量超过 resources.limits.memory，kubelet 按 OOMKill 终止并按重启策略拉起…</div>
+          <div class="hit"><span class="score">0.81</span> · <b>resources 配置规范</b>：生产负载必须同时设置 requests 与 limits；Java/Node 类应用需预留堆外内存…</div>
+          <div class="hit"><span class="score">0.74</span> · <b>重启风暴处置</b>：先 kubectl describe 确认退出码，再区分 OOMKilled / 探针失败 / 镜像问题三类路径…</div>
+        </div>
+      </fieldset>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" data-close="dlg-kb">关闭</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function(){
+  try{
+    var $=function(s){return document.querySelector(s)};
+    var $$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
+
+    /* ---- Toast ---- */
+    var toastTimer=null;
+    function toast(msg){
+      var t=$('#toast'); if(!t) return;
+      t.textContent=msg; t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer=setTimeout(function(){t.classList.remove('show')},2200);
+    }
+
+    /* ---- 视图切换 ---- */
+    function showView(name){
+      $$('.view').forEach(function(v){v.classList.toggle('active', v.id==='view-'+name)});
+      $$('.navbtn').forEach(function(b){
+        if(b.dataset.view===name){b.setAttribute('aria-current','true')}
+        else{b.removeAttribute('aria-current')}
+      });
+      if(name==='chat'){document.body.classList.remove('files-off')}
+    }
+    $$('.navbtn').forEach(function(b){
+      b.addEventListener('click',function(){showView(b.dataset.view)});
+    });
+
+    /* ---- 对话树切换（演示：仅高亮） ---- */
+    $$('.conv').forEach(function(c){
+      c.addEventListener('click',function(){
+        $$('.conv').forEach(function(x){x.removeAttribute('aria-current')});
+        c.setAttribute('aria-current','true');
+      });
+    });
+    var newConv=$('#btn-new-conv');
+    if(newConv){newConv.addEventListener('click',function(){toast('（原型演示）将在「K8s 运维助手」下新建对话')});}
+
+    /* ---- 本体运行方案切换 ---- */
+    var ontoSel=$('#onto-profile'), ontoHint=$('#onto-hint');
+    if(ontoSel&&ontoHint){
+      ontoSel.addEventListener('change',function(){
+        if(ontoSel.value===''){
+          ontoHint.textContent='未挂载本体：对话不携带 onto_* 工具';
+        }else if(ontoSel.value==='oxi'){
+          ontoHint.textContent='已切换：ontology.query 将携带 profile_id（Oxigraph v2）';
+        }else{
+          ontoHint.textContent='挂载后，对话可通过统一 MCP facade 查询本体';
+        }
+      });
+    }
+
+    /* ---- SSE 事件重放 ---- */
+    var steps=$$('#evgroup .ev-step');
+    var reduceMotion=false;
+    try{reduceMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+    var replaying=false;
+    function replay(){
+      if(replaying) return; replaying=true;
+      steps.forEach(function(s){s.classList.add('hidden-ev')});
+      if(reduceMotion){
+        steps.forEach(function(s){s.classList.remove('hidden-ev')});
+        replaying=false; toast('已重放本轮事件流'); return;
+      }
+      var i=0;
+      (function next(){
+        if(i>=steps.length){replaying=false;toast('已重放本轮事件流');return;}
+        var s=steps[i++];
+        s.style.opacity='0'; s.style.transform='translateY(6px)';
+        s.classList.remove('hidden-ev');
+        requestAnimationFrame(function(){
+          s.style.transition='opacity .3s ease, transform .3s ease';
+          s.style.opacity='1'; s.style.transform='translateY(0)';
+          setTimeout(function(){s.style.transition='';},350);
+        });
+        setTimeout(next,650);
+      })();
+    }
+    var btnReplay=$('#btn-replay');
+    if(btnReplay){btnReplay.addEventListener('click',replay)}
+
+    /* ---- 发送模拟 ---- */
+    var input=$('#input'), btnSend=$('#btn-send'), stream=$('#stream');
+    if(input&&btnSend&&stream){
+      input.addEventListener('input',function(){btnSend.disabled=input.value.trim()===''});
+      btnSend.addEventListener('click',function(){
+        var text=input.value.trim(); if(!text) return;
+        input.value=''; btnSend.disabled=true;
+        var u=document.createElement('div');
+        u.className='msg user';
+        u.innerHTML='<div class="who">董奎 · 刚刚</div><div class="bubble"></div>';
+        u.querySelector('.bubble').textContent=text;
+        stream.appendChild(u);
+        var run=document.createElement('div');
+        run.className='evcards';
+        run.innerHTML='<div class="evcard"><div class="evhead"><span class="evtitle">运行开始</span>'+
+          '<span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>run.started</span>'+
+          '<span class="mono">backend=inprocess · conversation=Pod 异常排查</span></div></div>';
+        stream.appendChild(run);
+        setTimeout(function(){
+          var a=document.createElement('div');
+          a.className='msg assistant';
+          a.innerHTML='<div class="who">K8s 运维助手 · 刚刚</div><div class="bubble"><p>（原型演示）已收到消息。正式实现中，这里将按 Agent 配置装配模型 / 技能 / MCP / 本体工具并流式返回。</p></div>';
+          stream.appendChild(a);
+          stream.scrollTop=stream.scrollHeight;
+        },900);
+        stream.scrollTop=stream.scrollHeight;
+      });
+      input.addEventListener('keydown',function(e){
+        if(e.key==='Enter'&&!e.shiftKey){e.preventDefault(); if(!btnSend.disabled){btnSend.click();}}
+      });
+    }
+
+    /* ---- 右侧文件面板 ---- */
+    var off=$('#btn-files-off'), on=$('#btn-files-on');
+    if(off){off.addEventListener('click',function(){document.body.classList.add('files-off')})}
+    if(on){on.addEventListener('click',function(){document.body.classList.remove('files-off')})}
+
+    /* ---- dialog 打开 / 关闭 ---- */
+    function openDlg(id){
+      var d=document.getElementById(id);
+      if(d&&typeof d.showModal==='function'){try{d.showModal()}catch(e){}}
+    }
+    $$('[data-close]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var d=document.getElementById(b.dataset.close);
+        if(d&&typeof d.close==='function'){d.close()}
+      });
+    });
+    $$('[data-open-agent]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var t=document.getElementById('dlg-agent-title');
+        if(t){t.textContent = b.dataset.openAgent==='doc' ? 'Agent 配置 · 文档问答助手' : 'Agent 配置 · K8s 运维助手';}
+        openDlg('dlg-agent');
+      });
+    });
+    var newAgent=$('#btn-new-agent');
+    if(newAgent){newAgent.addEventListener('click',function(){
+      var t=document.getElementById('dlg-agent-title');
+      if(t){t.textContent='新建 Agent'}
+      openDlg('dlg-agent');
+    })}
+    $$('[data-open-skill]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var t=document.getElementById('dlg-skill-title');
+        if(t){t.textContent = b.dataset.openSkill==='weekly' ? '编辑技能 · 周报生成' : '编辑技能 · K8s 故障排查';}
+        openDlg('dlg-skill');
+      });
+    });
+    var newSkill=$('#btn-new-skill');
+    if(newSkill){newSkill.addEventListener('click',function(){
+      var t=document.getElementById('dlg-skill-title');
+      if(t){t.textContent='新建技能'}
+      openDlg('dlg-skill');
+    })}
+    $$('[data-open-kb]').forEach(function(b){
+      b.addEventListener('click',function(){openDlg('dlg-kb')});
+    });
+
+    /* ---- Agent 抽屉：模型模式 / 执行后端联动 ---- */
+    var modelDetail=$('#model-own-detail');
+    $$('input[name="model-mode"]').forEach(function(r){
+      r.addEventListener('change',function(){
+        if(modelDetail){modelDetail.classList.toggle('show', r.value==='own'&&r.checked)}
+      });
+    });
+    var backendDetail=$('#backend-docker-detail');
+    $$('input[name="backend"]').forEach(function(r){
+      r.addEventListener('change',function(){
+        if(!backendDetail) return;
+        if(r.value==='docker'&&r.checked){
+          backendDetail.classList.add('show');
+          backendDetail.innerHTML='镜像 <span class="mono">kma-agentd:latest</span> · 资源上限 <span class="mono">cpu 1 / mem 512Mi</span> · 超时回收 <span class="mono">30m</span>';
+        }else if(r.value==='k8s'&&r.checked){
+          backendDetail.classList.add('show');
+          backendDetail.innerHTML='Namespace <span class="mono">kma-agents</span> · requests <span class="mono">cpu 500m / mem 256Mi</span> · limits <span class="mono">cpu 1 / mem 512Mi</span>';
+        }else if(r.value==='inproc'&&r.checked){
+          backendDetail.classList.remove('show');
+        }
+      });
+    });
+
+    /* ---- 保存反馈 ---- */
+    var sa=$('#btn-save-agent');
+    if(sa){sa.addEventListener('click',function(){
+      var d=document.getElementById('dlg-agent');
+      if(d&&typeof d.close==='function'){d.close()}
+      toast('Agent 配置已保存（原型演示）');
+    })}
+    var ss=$('#btn-save-skill');
+    if(ss){ss.addEventListener('click',function(){
+      var d=document.getElementById('dlg-skill');
+      if(d&&typeof d.close==='function'){d.close()}
+      toast('技能已保存（原型演示）');
+    })}
+
+    /* ---- 知识库试运行 ---- */
+    var tryBtn=$('#btn-try'), tryRes=$('#try-res');
+    if(tryBtn&&tryRes){
+      tryBtn.addEventListener('click',function(){
+        tryBtn.disabled=true; tryBtn.textContent='搜索中…';
+        tryRes.classList.remove('show');
+        setTimeout(function(){
+          tryRes.classList.add('show');
+          tryBtn.disabled=false; tryBtn.textContent='搜索';
+          toast('试运行完成（原型演示数据）');
+        },600);
+      });
+    }
+  }catch(e){
+    /* 脚本失败时静态内容仍完整可读 */
+  }
+})();
+</script>
+</body>
+</html>

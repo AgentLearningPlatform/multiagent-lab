@@ -1,0 +1,1157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>eino-multiagent-lab · 智能体平台 界面交互原型 v0.2</title>
+<style>
+:root{
+  --c-bg:#f6f7fb; --c-surface:#ffffff; --c-line:#e6e8f0; --c-line-strong:#d3d7e4;
+  --c-ink:#1c2130; --c-ink-2:#575e75; --c-ink-3:#8b91a7;
+  --c-brand:#4f46e5; --c-brand-ink:#3d36c4; --c-brand-weak:#eef0fe; --c-brand-line:#d9dcfc;
+  --c-ok:#0e9f6e; --c-ok-weak:#e6f6f0; --c-warn:#b45309; --c-warn-weak:#fdf3e3; --c-err:#c2373f; --c-err-weak:#fdeef0;
+  --c-skill:#0e9f6e; --c-skill-weak:#e6f6f0; --c-mcp:#7c3aed; --c-mcp-weak:#f3eefe; --c-onto:#0369a1; --c-onto-weak:#e6f3fb; --c-builtin:#575e75; --c-builtin-weak:#eef0f5;
+  --radius:12px; --radius-s:8px;
+  --shadow:0 1px 2px rgba(28,33,48,.05), 0 6px 20px rgba(28,33,48,.07);
+  --font:system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  --side-w:252px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:var(--font);background:var(--c-bg);color:var(--c-ink);font-size:14px;line-height:1.6;overflow-x:hidden}
+button,select,input,textarea{font-family:inherit;font-size:inherit;color:inherit}
+button{cursor:pointer}
+:is(button,select,input,textarea,a,[tabindex]):focus-visible{outline:2px solid var(--c-brand);outline-offset:2px;border-radius:4px}
+a{color:var(--c-brand-ink)}
+h1,h2,h3{margin:0;line-height:1.4}
+
+/* ===== 顶栏 + 导航 ===== */
+.topbar{position:sticky;top:0;z-index:30;height:52px;background:var(--c-surface);border-bottom:1px solid var(--c-line);display:flex;align-items:center;gap:6px;padding:0 16px}
+.topbar .logo{display:flex;align-items:center;gap:9px;min-width:0;margin-right:10px}
+.topbar h1{font-size:15px;font-weight:700;white-space:nowrap}
+.topnav{display:flex;gap:4px;align-items:center}
+.tnav{padding:7px 15px;border-radius:8px;border:0;background:none;color:var(--c-ink-2);font-size:13.5px;font-weight:500;white-space:nowrap}
+.tnav:hover{background:#eef0f6;color:var(--c-ink)}
+.tnav[aria-current="true"]{background:var(--c-brand-weak);color:var(--c-brand-ink);font-weight:600}
+.badge-proto{margin-left:auto;font-size:11px;color:var(--c-brand-ink);background:var(--c-brand-weak);border:1px solid var(--c-brand-line);border-radius:999px;padding:2px 10px;white-space:nowrap}
+
+/* ===== 视图框架：左列表 + 右主区 ===== */
+.view{display:none;height:calc(100vh - 52px)}
+.view.active{display:flex}
+.ws{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);width:100%;min-height:0}
+.ws-side{border-right:1px solid var(--c-line);background:#fbfbfd;padding:12px 10px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.ws-side .cap{font-size:11px;color:var(--c-ink-3);letter-spacing:.06em;padding:2px 8px 6px;display:flex;align-items:center}
+.ws-side .cap .new{margin-left:auto;font-size:11px;color:var(--c-brand-ink);background:none;border:0;padding:2px 6px;border-radius:4px}
+.ws-side .cap .new:hover{background:var(--c-brand-weak)}
+.ws-main{min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+
+/* 左栏列表项 / Agent 折叠树 */
+.lsitem{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;margin:1px 0;border-radius:var(--radius-s);border:0;background:none;font-size:13px;color:var(--c-ink-2)}
+.lsitem:hover{background:#eef0f6;color:var(--c-ink)}
+.lsitem[aria-current="true"]{background:var(--c-brand-weak);color:var(--c-brand-ink);font-weight:600}
+.lsitem .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.lsitem .sub{margin-left:auto;font-size:11px;color:var(--c-ink-3);font-weight:400;white-space:nowrap}
+.agent-node>summary{display:flex;align-items:center;gap:8px;list-style:none;cursor:pointer;padding:8px 8px;border-radius:var(--radius-s);font-size:13.5px;font-weight:600;color:var(--c-ink)}
+.agent-node>summary::-webkit-details-marker{display:none}
+.agent-node>summary:hover{background:#eef0f6}
+.agent-node>summary .chev{margin-left:auto;transition:transform .18s ease;color:var(--c-ink-3);flex:none}
+.agent-node[open]>summary .chev{transform:rotate(90deg)}
+.gear{background:none;border:0;color:var(--c-ink-3);width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.gear:hover{background:var(--c-brand-weak);color:var(--c-brand-ink)}
+.conv-list{padding:1px 0 4px}
+.conv{display:flex;align-items:center;gap:7px;width:100%;text-align:left;padding:6px 8px 6px 26px;margin:1px 0;border-radius:var(--radius-s);font-size:13px;color:var(--c-ink-2);cursor:pointer;border:0;background:none}
+.conv:hover{background:#eef0f6;color:var(--c-ink)}
+.conv[aria-current="true"]{background:var(--c-brand-weak);color:var(--c-brand-ink);font-weight:600}
+.conv .time{margin-left:auto;font-size:11px;color:var(--c-ink-3);font-weight:400}
+.reserved-box{margin:6px 4px 0;border:1px dashed var(--c-line-strong);border-radius:var(--radius-s);padding:10px 12px;font-size:12px;color:var(--c-ink-3);line-height:1.9}
+.reserved-box .tag{margin-right:4px}
+
+/* ===== 右主区 pane ===== */
+.pane{display:none;min-height:0;flex:1}
+.pane.active{display:flex;flex-direction:column}
+
+/* 对话类 pane */
+.conv-grid{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:stretch;flex:1;min-height:0;padding:0 18px}
+.chat-col{display:flex;flex-direction:column;min-width:0;min-height:0}
+.pane-head{display:flex;align-items:baseline;gap:10px;padding:14px 18px 8px;flex-wrap:wrap}
+.pane-head h2{font-size:16.5px;font-weight:700}
+.pane-head p{margin:0;font-size:12.5px;color:var(--c-ink-3)}
+.cfgbar{background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);padding:9px 12px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;box-shadow:var(--shadow)}
+.cfgbar .lab{font-size:12px;color:var(--c-ink-3)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;border-radius:999px;padding:2.5px 10px;border:1px solid var(--c-line);background:#f7f8fc;color:var(--c-ink-2);white-space:nowrap}
+.chip .cdot{width:6px;height:6px;border-radius:50%;flex:none}
+.chip.model{background:var(--c-brand-weak);border-color:var(--c-brand-line);color:var(--c-brand-ink)}
+.chip.src-skill{background:var(--c-skill-weak);border-color:#bfe8d8;color:#0b7a55}
+.chip.src-mcp{background:var(--c-mcp-weak);border-color:#ddd0f8;color:#6527bd}
+.chip.src-onto{background:var(--c-onto-weak);border-color:#bfe0f3;color:var(--c-onto)}
+.chip.src-builtin{background:var(--c-builtin-weak);border-color:#dfe2ec;color:var(--c-builtin)}
+.selwrap{position:relative;display:inline-flex;min-width:0}
+.selwrap::after{content:"";position:absolute;right:11px;top:50%;width:7px;height:7px;pointer-events:none;border-right:1.6px solid var(--c-ink-2);border-bottom:1.6px solid var(--c-ink-2);transform:translateY(-70%) rotate(45deg)}
+select{appearance:none;-webkit-appearance:none;border:1px solid var(--c-line-strong);border-radius:var(--radius-s);padding:4px 26px 4px 9px;font-size:12.5px;background:var(--c-surface)}
+.cfgbar .hint{font-size:11.5px;color:var(--c-ink-3);margin-left:auto}
+.stream{display:flex;flex-direction:column;gap:12px;padding:16px 2px;overflow-y:auto;flex:1;min-height:120px}
+.msg{max-width:78%}
+.msg.user{align-self:flex-end}
+.msg.user .bubble{background:var(--c-brand);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 13px;box-shadow:0 2px 8px rgba(79,70,229,.25)}
+.msg.assistant{align-self:flex-start;max-width:88%}
+.msg.assistant .bubble{background:var(--c-surface);border:1px solid var(--c-line);border-radius:4px 14px 14px 14px;padding:11px 14px;box-shadow:var(--shadow)}
+.msg .who{font-size:11px;color:var(--c-ink-3);margin-bottom:3px;padding:0 2px}
+.msg.assistant .bubble p{margin:0 0 8px}
+.msg.assistant .bubble p:last-child{margin-bottom:0}
+.msg .cite{color:var(--c-onto);font-size:11px;vertical-align:super}
+.mono{font-family:var(--mono);font-size:11.5px}
+.evcards{align-self:stretch;display:flex;flex-direction:column;gap:8px;max-width:92%}
+.evcard{background:var(--c-surface);border:1px solid var(--c-line);border-left:3px solid var(--c-builtin);border-radius:var(--radius-s);padding:8px 12px;box-shadow:var(--shadow);font-size:12.5px}
+.evcard.hidden-ev{display:none}
+.evcard .evhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.evcard .evtitle{font-weight:600;font-size:12.5px}
+.evcard .evbody{margin-top:6px;color:var(--c-ink-2);font-size:12.5px}
+.evcard ul{margin:4px 0 0;padding-left:18px}
+.evcard li{margin:2px 0}
+.evcard .oktag{color:var(--c-ok);font-weight:600}
+.ev-skill{border-left-color:var(--c-skill)}
+.ev-mcp{border-left-color:var(--c-mcp)}
+.ev-onto{border-left-color:var(--c-onto)}
+.ev-file{border-left-color:var(--c-warn)}
+.ev-warn{border-left-color:var(--c-err);background:#fffafa}
+.ev-warn .evbody{color:#8f3a41}
+.composer{background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);padding:10px 12px;display:flex;gap:10px;align-items:flex-end;box-shadow:var(--shadow);margin:10px 18px 6px}
+.composer textarea{flex:1;border:0;resize:none;min-height:44px;max-height:120px;line-height:1.55;padding:2px 4px;background:none}
+.composer textarea:focus{outline:none}
+.composer:focus-within{border-color:var(--c-brand-line);box-shadow:0 0 0 3px var(--c-brand-weak)}
+.btn{border:1px solid var(--c-line-strong);background:var(--c-surface);border-radius:var(--radius-s);padding:7px 16px;font-size:13px;font-weight:500;color:var(--c-ink-2);transition:transform .08s ease}
+.btn:hover{border-color:var(--c-brand);color:var(--c-brand-ink)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--c-brand);border-color:var(--c-brand);color:#fff}
+.btn.primary:hover{background:var(--c-brand-ink)}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.btn.ghost{border-color:transparent;background:none;color:var(--c-ink-3)}
+.btn.ghost:hover{color:var(--c-ink);background:#eef0f6}
+.replay-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 18px 14px}
+.replay-row .note{font-size:12px;color:var(--c-ink-3)}
+
+/* 右侧文件面板 */
+.files{width:264px;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;margin:14px 18px 14px 0;max-height:100%}
+.files-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--c-line)}
+.files-head h3{font-size:13px;font-weight:700}
+.files-head .fold{margin-left:auto;background:none;border:0;color:var(--c-ink-3);font-size:12px;padding:2px 6px;border-radius:4px}
+.files-head .fold:hover{background:#eef0f6;color:var(--c-ink)}
+.files ul{list-style:none;margin:0;padding:6px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.files li{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--radius-s);font-size:12.5px;color:var(--c-ink-2);cursor:pointer;border:1px solid transparent}
+.files li:hover{background:#f4f5fa}
+.files li.fresh{background:var(--c-warn-weak);border-color:#f3ddba;color:var(--c-warn)}
+.files li .fname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.files li .fmeta{margin-left:auto;font-size:11px;color:var(--c-ink-3);white-space:nowrap}
+body.files-off .files{display:none}
+.files-toggle{display:none;border:1px dashed var(--c-line-strong);background:var(--c-surface);border-radius:var(--radius-s);padding:6px 12px;font-size:12.5px;color:var(--c-ink-2)}
+body.files-off .files-toggle{display:inline-flex}
+.files-toggle:hover{color:var(--c-brand-ink);border-color:var(--c-brand)}
+
+/* ===== 管理类 pane（知识库 / 本体 / 技能详情） ===== */
+.detail-wrap{flex:1;min-height:0;overflow-y:auto;padding:0 20px 26px;display:flex;flex-direction:column;gap:12px}
+.tag{font-size:11px;border-radius:999px;padding:1.5px 9px;border:1px solid var(--c-line);background:#f7f8fc;color:var(--c-ink-2);white-space:nowrap}
+.tag.backend{background:var(--c-onto-weak);border-color:#bfe0f3;color:var(--c-onto)}
+.tag.backend.inproc{background:#f0f1f6;border-color:#dfe2ec;color:var(--c-builtin)}
+.tag.k8s{background:var(--c-mcp-weak);border-color:#ddd0f8;color:#6527bd}
+.state-tag{font-size:11px;border-radius:999px;padding:1.5px 9px;white-space:nowrap}
+.state-tag.ready,.state-tag.running{background:var(--c-ok-weak);color:var(--c-ok);border:1px solid #bfe8d8}
+.state-tag.building,.state-tag.starting{background:var(--c-warn-weak);color:var(--c-warn);border:1px solid #f3ddba}
+.state-tag.stopped{background:#f0f1f6;color:var(--c-ink-2);border:1px solid #dfe2ec}
+.state-tag.error{background:var(--c-err-weak);color:var(--c-err);border:1px solid #f5cfd4}
+.state-tag.draft{background:#f0f1f6;color:var(--c-ink-2);border:1px solid #dfe2ec}
+
+/* ===== 本体流水线 ===== */
+.steps{display:flex;gap:5px;flex-wrap:wrap;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);padding:10px;box-shadow:var(--shadow)}
+.step{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:1px solid var(--c-line);background:#f9fafd;border-radius:var(--radius-s);padding:7px 12px;min-width:104px;text-align:left}
+.step:hover{border-color:var(--c-brand-line)}
+.step[aria-current="true"]{border-color:var(--c-brand);background:var(--c-brand-weak)}
+.step .sid{font-size:10.5px;color:var(--c-ink-3);letter-spacing:.04em}
+.step .sname{font-size:12.5px;font-weight:600;color:var(--c-ink)}
+.step[aria-current="true"] .sname{color:var(--c-brand-ink)}
+.step .stool{font-size:11px;color:var(--c-ink-3)}
+.step .stool.done{color:var(--c-ok)}
+.step .stool.todo{color:var(--c-ink-3)}
+.stage-pane{display:none}
+.stage-pane.active{display:block;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px}
+.stage-pane h3{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.stage-pane .sdesc{font-size:12.5px;color:var(--c-ink-2);margin:4px 0 10px}
+.mode-tag{font-size:10.5px;border-radius:999px;padding:1px 8px;border:1px solid var(--c-line);white-space:nowrap}
+.mode-builtin{background:var(--c-ok-weak);color:var(--c-ok);border-color:#bfe8d8}
+.mode-guided{background:var(--c-warn-weak);color:var(--c-warn);border-color:#f3ddba}
+.mode-managed{background:var(--c-onto-weak);color:var(--c-onto);border-color:#bfe0f3}
+.pipe-row{display:flex;gap:8px;align-items:center;border:1px solid var(--c-line);border-radius:var(--radius-s);padding:8px 10px;flex-wrap:wrap}
+.pipe-row .mname{font-size:12.5px;font-weight:600;white-space:nowrap}
+.pipe-row .mono{color:var(--c-ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pipe-row .sw{margin-left:auto;font-size:11.5px;white-space:nowrap}
+.sw-ok{color:var(--c-ok)}
+.sw-off{color:var(--c-ink-3)}
+.vowl-box{border:1px solid var(--c-line);border-radius:var(--radius-s);background:#fcfcff;padding:10px;display:flex;justify-content:center}
+.vowl-box svg{max-width:100%;height:auto}
+.tool-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.tool-list .tool{display:flex;align-items:center;gap:10px;border:1px solid var(--c-line);border-radius:var(--radius-s);padding:7px 11px;font-size:12.5px}
+.tool-list .tool .mono{font-weight:600;color:var(--c-ink)}
+.tool-list .tool .tdesc{color:var(--c-ink-2)}
+.fieldrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.fieldrow>div{flex:1;min-width:180px}
+.flabel{font-size:12px;font-weight:700;color:var(--c-ink-2);display:block;margin-bottom:5px}
+input[type="text"]{width:100%;border:1px solid var(--c-line-strong);border-radius:var(--radius-s);padding:7px 10px;font-size:13px;background:var(--c-surface)}
+.check-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.check-list label,.check-list .prow{display:flex;align-items:center;gap:9px;font-size:13px;border:1px solid var(--c-line);border-radius:var(--radius-s);padding:8px 11px}
+.check-list label:hover{border-color:var(--c-brand-line)}
+.check-list input{accent-color:var(--c-brand)}
+.check-list .cdesc{font-size:11.5px;color:var(--c-ink-3);margin-left:auto}
+.hintline{font-size:11.5px;color:var(--c-ink-3);margin-top:6px}
+
+/* ===== 技能列表（右侧） ===== */
+.skill-list{display:flex;flex-direction:column;gap:10px}
+.skill-row{display:flex;align-items:flex-start;gap:12px;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius);box-shadow:var(--shadow);padding:12px 16px;flex-wrap:wrap}
+.skill-row .avatar{width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff}
+.skill-row .s-main{flex:1;min-width:200px}
+.skill-row .s-main .ttl{font-size:14px;font-weight:700}
+.skill-row .s-main .desc{font-size:12.5px;color:var(--c-ink-2)}
+.skill-row .s-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.skill-row .foot{display:flex;gap:8px}
+
+/* ===== 抽屉 dialog ===== */
+dialog{border:0;border-radius:14px;box-shadow:0 24px 60px rgba(28,33,48,.28);padding:0;width:min(680px,calc(100vw - 32px));max-height:min(86vh,860px)}
+dialog::backdrop{background:rgba(28,33,48,.42)}
+.dlg{display:flex;flex-direction:column;max-height:inherit}
+.dlg-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--c-line)}
+.dlg-head h3{font-size:15px;font-weight:700}
+.dlg-head .x{margin-left:auto;background:none;border:0;font-size:16px;color:var(--c-ink-3);width:30px;height:30px;border-radius:8px}
+.dlg-head .x:hover{background:#eef0f6;color:var(--c-ink)}
+.dlg-body{padding:14px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.dlg-foot{display:flex;justify-content:flex-end;gap:10px;padding:12px 18px;border-top:1px solid var(--c-line)}
+fieldset{border:0;margin:0;padding:0}
+legend{font-size:12px;font-weight:700;color:var(--c-ink-2);letter-spacing:.04em;margin-bottom:6px;display:block}
+.frow{display:flex;gap:10px;flex-wrap:wrap}
+.frow>*{flex:1;min-width:200px}
+.radio-row{display:flex;flex-direction:column;gap:6px}
+.radio-row label{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--c-line);border-radius:var(--radius-s);padding:9px 11px;cursor:pointer;font-size:13px}
+.radio-row label:hover{border-color:var(--c-brand-line);background:#fafaff}
+.radio-row input{margin-top:3px;accent-color:var(--c-brand)}
+.radio-row .rtitle{font-weight:600;font-size:13px}
+.radio-row .rdesc{font-size:11.5px;color:var(--c-ink-3);font-weight:400}
+.radio-row label:has(input:checked){border-color:var(--c-brand);background:var(--c-brand-weak)}
+textarea.tf{width:100%;border:1px solid var(--c-line-strong);border-radius:var(--radius-s);padding:8px 10px;font-size:13px;resize:vertical;min-height:96px;line-height:1.6}
+.mcp-row{display:flex;gap:8px;align-items:center;border:1px solid var(--c-line);border-radius:var(--radius-s);padding:8px 10px}
+.mcp-row .mname{font-size:12.5px;font-weight:600;white-space:nowrap}
+.mcp-row .mono{color:var(--c-ink-2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcp-row .sw{margin-left:auto;font-size:11.5px;color:var(--c-ok);white-space:nowrap}
+.backend-detail{display:none;font-size:12px;color:var(--c-ink-2);background:#f7f8fc;border:1px dashed var(--c-line-strong);border-radius:var(--radius-s);padding:8px 11px;margin-top:6px}
+.backend-detail.show{display:block}
+
+/* 试运行 */
+.trybox{display:flex;gap:8px;margin-top:8px}
+.trybox input{flex:1}
+.try-res{margin-top:8px;display:none;flex-direction:column;gap:6px}
+.try-res.show{display:flex}
+.try-res .hit{border:1px solid var(--c-line);border-radius:var(--radius-s);padding:7px 10px;font-size:12px;color:var(--c-ink-2)}
+.try-res .hit b{color:var(--c-ink)}
+.try-res .score{font-family:var(--mono);font-size:11px;color:var(--c-onto)}
+
+/* Toast */
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,16px);opacity:0;pointer-events:none;background:var(--c-ink);color:#fff;border-radius:10px;padding:9px 18px;font-size:13px;box-shadow:0 10px 30px rgba(28,33,48,.35);transition:transform .22s ease,opacity .22s ease;z-index:60}
+.toast.show{transform:translate(-50%,0);opacity:1}
+
+/* 响应式 */
+@media (max-width:1080px){
+  .ws{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .ws-side{border-right:0;border-bottom:1px solid var(--c-line);flex-direction:row;align-items:flex-start;overflow-x:auto;gap:6px;padding:10px 12px;max-height:none}
+  .ws-side .cap{display:none}
+  .lsitem,.conv{width:auto;white-space:nowrap;padding:7px 12px;margin:0}
+  .lsitem .sub,.conv .time{display:none}
+  .agent-node{display:inline-block}
+  .agent-node>summary{padding:7px 12px}
+  .agent-node[open] .conv-list{position:absolute;top:100%;left:0;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--radius-s);box-shadow:var(--shadow);padding:6px;min-width:200px;z-index:40}
+  .reserved-box{min-width:220px}
+  .conv-grid{grid-template-columns:minmax(0,1fr);padding:0 12px}
+  .files{margin:10px 12px;max-height:320px}
+  .composer{margin:10px 12px 6px}
+  .replay-row{padding:0 12px 14px}
+  .detail-wrap{padding:0 12px 20px}
+  .view{height:auto;min-height:calc(100vh - 52px)}
+  .pane.active{height:auto}
+  .stream{max-height:56vh}
+  .topbar{flex-wrap:wrap;height:auto;padding:8px 12px;row-gap:4px}
+  .view{height:auto}
+}
+@media (max-width:640px){
+  .msg{max-width:94%}
+  .files{width:100%}
+  .step{min-width:88px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media print{
+  .topbar,.ws-side,.composer,.replay-row,.files,.dlg-foot,dialog,.toast{display:none!important}
+  .view{display:flex!important;height:auto}
+  .pane{display:flex!important;flex-direction:column}
+  .stage-pane,.conv-pane{display:block!important}
+  .stream{max-height:none;overflow:visible}
+  body{background:#fff}
+}
+</style>
+</head>
+<body data-page-id="agent-platform-prototype" data-entry="true">
+
+<header class="topbar">
+  <div class="logo">
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" fill="#4f46e5"/><path d="M7 9h6M7 13h10M7 17h4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <h1>eino-multiagent-lab</h1>
+  </div>
+  <nav class="topnav" aria-label="平台模块导航">
+    <button class="tnav" data-view="agents" aria-current="true" aria-controls="view-agents">Agent</button>
+    <button class="tnav" data-view="projects" aria-controls="view-projects">项目</button>
+    <button class="tnav" data-view="ontology" aria-controls="view-ontology">本体</button>
+    <button class="tnav" data-view="kb" aria-controls="view-kb">知识库</button>
+    <button class="tnav" data-view="skills" aria-controls="view-skills">技能</button>
+  </nav>
+  <span class="badge-proto">界面原型 v0.2 · 待确认</span>
+</header>
+
+<!-- ============ 视图 1：Agent ============ -->
+<section class="view active" id="view-agents" aria-label="Agent 模块">
+  <div class="ws">
+    <aside class="ws-side" aria-label="Agent 与对话列表">
+      <div class="cap">Agent 列表
+        <button class="new" id="btn-new-agent">＋ 新建 Agent</button>
+      </div>
+      <details class="agent-node" open>
+        <summary>
+          <span class="dot" style="background:var(--c-skill)"></span>K8s 运维助手
+          <button class="gear" data-open-agent="k8s" aria-label="配置 K8s 运维助手" title="Agent 配置"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.6v2M7 10.4v2M1.6 7h2M10.4 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M10.8 3.2L9.4 4.6M4.6 9.4l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </summary>
+        <div class="conv-list">
+          <button class="conv lsitem" data-group="agent-convs" data-pane="pane-agent-1" aria-current="true">Pod 异常排查<span class="time">10:24</span></button>
+          <button class="conv lsitem" data-group="agent-convs" data-pane="pane-agent-2">节点资源巡检<span class="time">昨天</span></button>
+          <button class="conv" id="btn-new-conv-agent">＋ 新对话</button>
+        </div>
+      </details>
+      <details class="agent-node">
+        <summary>
+          <span class="dot" style="background:var(--c-onto)"></span>文档问答助手
+          <button class="gear" data-open-agent="doc" aria-label="配置 文档问答助手" title="Agent 配置"><svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.6v2M7 10.4v2M1.6 7h2M10.4 7h2M3.2 3.2l1.4 1.4M9.4 9.4l1.4 1.4M10.8 3.2L9.4 4.6M4.6 9.4l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </summary>
+        <div class="conv-list">
+          <button class="conv lsitem" data-group="agent-convs" data-pane="pane-agent-3">FLUIDOS 论文问答<span class="time">09-19</span></button>
+          <button class="conv" id="btn-new-conv-doc">＋ 新对话</button>
+        </div>
+      </details>
+    </aside>
+
+    <div class="ws-main">
+      <!-- 对话 1：完整演示 -->
+      <div class="pane active" id="pane-agent-1" data-group="agent-convs" aria-label="对话：Pod 异常排查">
+        <div class="pane-head">
+          <h2>Pod 异常排查</h2>
+          <p>Agent：K8s 运维助手 · 执行后端 docker · 创建于 09-20</p>
+        </div>
+        <div class="conv-grid">
+          <div class="chat-col">
+            <div class="cfgbar">
+              <span class="chip model"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="6" r="1.4" fill="currentColor"/></svg>模型：DeepSeek-V3（Agent 独立配置）</span>
+              <label class="lab" for="onto-profile-1">本体运行方案</label>
+              <span class="selwrap">
+              <select id="onto-profile-1">
+                <option value="">不挂载</option>
+                <option value="mem" selected>运维本体 · 内存图 v3（running）</option>
+                <option value="oxi">运维本体 · Oxigraph v2（running）</option>
+                <option value="draft" disabled>故障诊断本体 v1（draft · 不可选）</option>
+              </select>
+              </span>
+              <span class="lab">已挂技能</span>
+              <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>K8s 故障排查</span>
+              <span class="hint">挂载后经统一 MCP facade 查询本体</span>
+            </div>
+            <div class="stream" id="stream" aria-live="polite">
+              <div class="msg user"><div class="who">董奎 · 10:21</div><div class="bubble">default 命名空间里 nginx-7d9f 这个 Pod 一直重启，帮我排查下原因</div></div>
+              <div class="evcards" id="evgroup">
+                <div class="evcard ev-skill ev-step">
+                  <div class="evhead"><span class="evtitle">技能已加载</span><span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>skill.loaded</span></div>
+                  <div class="evbody">「K8s 故障排查」注入系统提示词（约 3.2k tokens），追加工具白名单：k8s_get_pods、k8s_get_events、k8s_describe</div>
+                </div>
+                <div class="evcard ev-mcp ev-step">
+                  <div class="evhead"><span class="evtitle">工具调用</span><span class="chip src-mcp"><span class="cdot" style="background:var(--c-mcp)"></span>source: mcp</span><span class="mono">tool.call · k8s__k8s_get_pods</span></div>
+                  <div class="evbody mono">{"namespace":"default","app":"nginx"} → <span class="oktag">成功</span> · 1 Pod · RESTARTS=14 · lastState=OOMKilled</div>
+                </div>
+                <div class="evcard ev-skill ev-step">
+                  <div class="evhead"><span class="evtitle">工具调用</span><span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>source: builtin</span><span class="mono">tool.call · kb_search</span></div>
+                  <div class="evbody">知识库《K8s 运维手册》召回 3 段落（Qdrant · cosine）<ul><li>OOMKilled 常见原因与处置 <span class="mono">score 0.87</span></li><li>resources.limits 配置规范 <span class="mono">score 0.81</span></li></ul></div>
+                </div>
+                <div class="evcard ev-onto ev-step">
+                  <div class="evhead"><span class="evtitle">本体查询</span><span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>via: mcp</span><span class="mono">ontology.query · profile=运维本体-内存图 v3</span></div>
+                  <div class="evbody">命中概念：<b>Pod</b> → <b>OOMKilled</b> → <b>资源限制(Limit)</b> · 关联处置策略 2 条</div>
+                </div>
+                <div class="msg assistant">
+                  <div class="who">K8s 运维助手 · 10:21</div>
+                  <div class="bubble">
+                    <p><b>结论：nginx-7d9f 因内存超限被 OOMKill 后反复重启。</b></p>
+                    <p>排查依据：容器最近一次退出原因为 <span class="mono">OOMKilled</span>，14 次重启均伴随内存峰值触顶<span class="cite">[1]</span>；对照手册中 OOMKilled 处置策略<span class="cite">[2]</span>与本体概念链（Pod→OOMKilled→资源限制）。</p>
+                    <p>建议：① 将 <span class="mono">resources.limits.memory</span> 从 256Mi 提升至 512Mi 并观察；② 若为流量高峰导致，可为 Deployment 配置 HPA。详细报告已生成：</p>
+                  </div>
+                </div>
+                <div class="evcard ev-file ev-step">
+                  <div class="evhead"><span class="evtitle">文件已保存</span><span class="tag" style="background:var(--c-warn-weak);color:var(--c-warn);border:1px solid #f3ddba">artifact.saved · P3</span><span class="mono">排查报告_nginx-7d9f.md</span></div>
+                  <div class="evbody">可在右侧「项目文件」面板查看</div>
+                </div>
+              </div>
+              <div class="msg user"><div class="who">董奎 · 10:23</div><div class="bubble">再查一下故障诊断本体里 OOM 的处置预案</div></div>
+              <div class="evcards">
+                <div class="evcard ev-warn">
+                  <div class="evhead"><span class="evtitle">本体服务不可用</span><span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>ontology.unavailable</span><span class="mono">profile=故障诊断本体 v1</span></div>
+                  <div class="evbody">本次查询失败（单次失败即降级，不重试风暴）· 对话已降级为普通问答，挂载配置保留，可稍后重试</div>
+                </div>
+                <div class="msg assistant"><div class="who">K8s 运维助手 · 10:23</div><div class="bubble"><p>故障诊断本体当前不可用，我基于知识库与已加载技能继续回答：OOM 处置优先检查内存 limit 与实际用量的差值…</p></div></div>
+              </div>
+            </div>
+            <div class="composer">
+              <label for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">消息输入</label>
+              <textarea id="input" placeholder="输入消息，Enter 发送（原型内为模拟回复）…"></textarea>
+              <button class="btn primary" id="btn-send" disabled>发送</button>
+            </div>
+            <div class="replay-row">
+              <button class="btn" id="btn-replay">▶ 重放本轮事件流</button>
+              <button class="files-toggle" id="btn-files-on" aria-controls="files-panel-agent1">显示项目文件面板</button>
+              <span class="note">事件卡演示 SSE 渲染，来源标注：技能 / 内置 / MCP / 本体</span>
+            </div>
+          </div>
+          <aside class="files" id="files-panel-agent1" aria-label="项目文件面板">
+            <div class="files-head"><h3>项目文件</h3><span class="tag">P3</span><button class="fold" id="btn-files-off" aria-controls="files-panel-agent1">收起 ›</button></div>
+            <ul>
+              <li class="fresh"><span class="fname">排查报告_nginx-7d9f.md</span><span class="fmeta">刚刚 · 新增</span></li>
+              <li><span class="fname">节点巡检_0919.md</span><span class="fmeta">昨天</span></li>
+              <li><span class="fname">周报_W38.md</span><span class="fmeta">09-18</span></li>
+            </ul>
+          </aside>
+        </div>
+      </div>
+
+      <!-- 对话 2：简版 -->
+      <div class="pane" id="pane-agent-2" data-group="agent-convs" aria-label="对话：节点资源巡检">
+        <div class="pane-head"><h2>节点资源巡检</h2><p>Agent：K8s 运维助手 · 执行后端 docker · 创建于 09-19</p></div>
+        <div class="conv-grid"><div class="chat-col">
+          <div class="cfgbar">
+            <span class="chip model">模型：DeepSeek-V3（Agent 独立配置）</span>
+            <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>K8s 故障排查</span>
+            <span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>本体：未挂载</span>
+          </div>
+          <div class="stream">
+            <div class="msg user"><div class="who">定时任务 · 昨天 09:00</div><div class="bubble">执行每日节点资源巡检</div></div>
+            <div class="evcards">
+              <div class="evcard ev-mcp"><div class="evhead"><span class="evtitle">工具调用</span><span class="chip src-mcp"><span class="cdot" style="background:var(--c-mcp)"></span>source: mcp</span><span class="mono">k8s__k8s_nodes</span></div><div class="evbody mono">3 节点 · 1 节点内存使用率 87% <span class="oktag">（超阈值）</span></div></div>
+            </div>
+            <div class="msg assistant"><div class="who">K8s 运维助手 · 昨天 09:00</div><div class="bubble"><p>巡检完成：worker-2 内存使用率 87%，建议排查压力来源；其余节点正常。报告已写入项目文件。</p></div></div>
+          </div>
+          <div class="composer"><textarea aria-label="消息输入" placeholder="输入消息…"></textarea><button class="btn primary">发送</button></div>
+        </div></div>
+      </div>
+
+      <!-- 对话 3：简版 -->
+      <div class="pane" id="pane-agent-3" data-group="agent-convs" aria-label="对话：FLUIDOS 论文问答">
+        <div class="pane-head"><h2>FLUIDOS 论文问答</h2><p>Agent：文档问答助手 · 执行后端 inprocess · 创建于 09-19</p></div>
+        <div class="conv-grid"><div class="chat-col">
+          <div class="cfgbar">
+            <span class="chip model">模型：跟随全局默认</span>
+            <span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>知识库：FLUIDOS 论文库</span>
+          </div>
+          <div class="stream">
+            <div class="msg user"><div class="who">董奎 · 09-19</div><div class="bubble">FLUIDOS 的 Node 框架里，k8s fluent 层解决什么问题？</div></div>
+            <div class="msg assistant"><div class="who">文档问答助手 · 09-19</div><div class="bubble"><p>fluent 层负责把外部云的远端资源"无缝接入"本地 k8s 集群，对上层屏蔽异构差异（引用 FLUIDOS 论文库 2 个段落）。</p></div></div>
+          </div>
+          <div class="composer"><textarea aria-label="消息输入" placeholder="输入消息…"></textarea><button class="btn primary">发送</button></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 视图 2：项目 ============ -->
+<section class="view" id="view-projects" aria-label="项目模块">
+  <div class="ws">
+    <aside class="ws-side" aria-label="项目与会话列表">
+      <div class="cap">项目列表<button class="new" id="btn-new-project">＋ 新建项目</button></div>
+      <details class="agent-node" open>
+        <summary><span class="dot" style="background:var(--c-brand)"></span>K8s 运维平台
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </summary>
+        <div class="conv-list">
+          <button class="conv lsitem" data-group="proj-convs" data-pane="pane-proj-1" aria-current="true">Pod 异常排查<span class="time">今天</span></button>
+          <button class="conv lsitem" data-group="proj-convs" data-pane="pane-proj-2">巡检日报<span class="time">昨天</span></button>
+          <button class="conv" id="btn-new-conv-proj">＋ 新对话</button>
+        </div>
+      </details>
+      <details class="agent-node">
+        <summary><span class="dot" style="background:var(--c-onto)"></span>本体学习实验室
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5L7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </summary>
+        <div class="conv-list">
+          <button class="conv lsitem" data-group="proj-convs" data-pane="pane-proj-3">论文概念问答<span class="time">09-19</span></button>
+          <button class="conv" id="btn-new-conv-proj2">＋ 新对话</button>
+        </div>
+      </details>
+    </aside>
+
+    <div class="ws-main">
+      <div class="pane active" id="pane-proj-1" data-group="proj-convs" aria-label="项目会话：Pod 异常排查">
+        <div class="pane-head"><h2>Pod 异常排查</h2><p>项目：K8s 运维平台 · 会话使用的 Agent：K8s 运维助手</p></div>
+        <div class="conv-grid"><div class="chat-col">
+          <div class="cfgbar">
+            <span class="chip model">Agent：K8s 运维助手</span>
+            <span class="chip src-onto"><span class="cdot" style="background:var(--c-onto)"></span>本体运行方案：内存图 v3（running）</span>
+            <span class="chip src-skill"><span class="cdot" style="background:var(--c-skill)"></span>K8s 故障排查</span>
+            <span class="hint">项目会话界面与 Agent 对话保持一致</span>
+          </div>
+          <div class="stream">
+            <div class="msg user"><div class="who">董奎 · 10:21</div><div class="bubble">default 命名空间里 nginx-7d9f 这个 Pod 一直重启，帮我排查下原因</div></div>
+            <div class="msg assistant"><div class="who">K8s 运维助手 · 10:21</div><div class="bubble"><p>（同一对话在项目视图打开）结论：nginx-7d9f 因内存超限被 OOMKill 后反复重启。事件流、工具调用、本体查询过程与 Agent 对话视图完全一致。</p></div></div>
+          </div>
+          <div class="composer"><textarea aria-label="消息输入" placeholder="输入消息…"></textarea><button class="btn primary">发送</button></div>
+        </div></div>
+      </div>
+
+      <div class="pane" id="pane-proj-2" data-group="proj-convs" aria-label="项目会话：巡检日报">
+        <div class="pane-head"><h2>巡检日报</h2><p>项目：K8s 运维平台 · 会话使用的 Agent：K8s 运维助手</p></div>
+        <div class="conv-grid"><div class="chat-col">
+          <div class="cfgbar">
+            <span class="chip model">Agent：K8s 运维助手</span>
+            <span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>知识库：K8s 运维手册</span>
+          </div>
+          <div class="stream">
+            <div class="msg user"><div class="who">定时任务 · 昨天 18:00</div><div class="bubble">汇总今日巡检与告警，生成日报</div></div>
+            <div class="msg assistant"><div class="who">K8s 运维助手 · 昨天 18:00</div><div class="bubble"><p>日报已生成：<b>巡检日报_0919.md</b>（含 worker-2 内存水位告警 1 条），已保存到项目文件面板。</p></div></div>
+          </div>
+          <div class="composer"><textarea aria-label="消息输入" placeholder="输入消息…"></textarea><button class="btn primary">发送</button></div>
+        </div></div>
+      </div>
+
+      <div class="pane" id="pane-proj-3" data-group="proj-convs" aria-label="项目会话：论文概念问答">
+        <div class="pane-head"><h2>论文概念问答</h2><p>项目：本体学习实验室 · 会话使用的 Agent：文档问答助手</p></div>
+        <div class="conv-grid"><div class="chat-col">
+          <div class="cfgbar">
+            <span class="chip model">Agent：文档问答助手</span>
+            <span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>知识库：FLUIDOS 论文库</span>
+          </div>
+          <div class="stream">
+            <div class="msg user"><div class="who">董奎 · 09-19</div><div class="bubble">总结一下本周论文问答的结论，输出到文件</div></div>
+            <div class="msg assistant"><div class="who">文档问答助手 · 09-19</div><div class="bubble"><p>已生成 <b>论文问答小结_W38.md</b>（3 个主题），可在项目文件面板查看。</p></div></div>
+          </div>
+          <div class="composer"><textarea aria-label="消息输入" placeholder="输入消息…"></textarea><button class="btn primary">发送</button></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 视图 3：本体（流水线） ============ -->
+<section class="view" id="view-ontology" aria-label="本体模块">
+  <div class="ws">
+    <aside class="ws-side" aria-label="本体流水线列表">
+      <div class="cap">本体流水线<button class="new" id="btn-new-pipe">＋ 新建流水线</button></div>
+      <button class="lsitem" data-group="pipes" data-pane="pane-pipe-1" aria-current="true">
+        <span class="dot" style="background:var(--c-onto)"></span>运维本体流水线<span class="sub">7/7 · running</span>
+      </button>
+      <button class="lsitem" data-group="pipes" data-pane="pane-pipe-2">
+        <span class="dot" style="background:var(--c-warn)"></span>故障诊断本体流水线<span class="sub">2/7 · draft</span>
+      </button>
+      <button class="lsitem" data-group="pipes" data-pane="pane-pipe-3">
+        <span class="dot" style="background:var(--c-ink-3)"></span>FLUIDOS 互联本体<span class="sub">1/7 · 导入中</span>
+      </button>
+      <div class="reserved-box">
+        <span class="tag" style="background:var(--c-onto-weak);color:var(--c-onto);border-color:#bfe0f3">方案依据</span><br>
+        流水线 = 《04_本体_方案设计.md》七阶段 S1~S7 视图化；每阶段可配置开源工具与执行模式（builtin / guided / managed）。
+      </div>
+    </aside>
+
+    <div class="ws-main">
+      <!-- 流水线 1：完整七阶段 -->
+      <div class="pane active" id="pane-pipe-1" data-group="pipes" aria-label="本体流水线：运维本体">
+        <div class="pane-head"><h2>运维本体流水线</h2><p>本体：k8s-ops（v3）· 目标：接入 K8s 运维助手对话 · 状态 <span class="state-tag running">running</span></p></div>
+        <div class="detail-wrap">
+          <div class="steps" role="tablist" aria-label="流水线阶段">
+            <button class="step" data-group="stages" data-pane="stage-s1" aria-current="true"><span class="sid">S1</span><span class="sname">本体来源</span><span class="stool done">内置导入 · 已完成</span></button>
+            <button class="step" data-group="stages" data-pane="stage-s2"><span class="sid">S2</span><span class="sname">编辑</span><span class="stool done">JSON 编辑器 · 已完成</span></button>
+            <button class="step" data-group="stages" data-pane="stage-s3"><span class="sid">S3</span><span class="sname">校验</span><span class="stool done">通过 · 0 错误</span></button>
+            <button class="step" data-group="stages" data-pane="stage-s4"><span class="sid">S4</span><span class="sname">可视化</span><span class="stool done">WebVOWL</span></button>
+            <button class="step" data-group="stages" data-pane="stage-s5"><span class="sid">S5</span><span class="sname">运行方式</span><span class="stool done">2 方案 running</span></button>
+            <button class="step" data-group="stages" data-pane="stage-s6"><span class="sid">S6</span><span class="sname">对外暴露</span><span class="stool done">MCP facade</span></button>
+            <button class="step" data-group="stages" data-pane="stage-s7"><span class="sid">S7</span><span class="sname">对接 Agent</span><span class="stool done">已挂载 2 对话</span></button>
+          </div>
+
+          <div class="stage-pane active" id="stage-s1" data-group="stages">
+            <h3>S1 · 本体来源 <span class="mode-tag mode-builtin">builtin</span></h3>
+            <p class="sdesc">本体进入仓库的方式：导入多形态资产（OWL/Turtle/CSV/GraphML，原样存档 + 归一化 spec_json + 导入报告）、AI 辅助创建（生成-校验循环）、手动 JSON、内置示例。original 形态不可变，spec_json 为归一化工作形态。</p>
+            <div class="check-list">
+              <div class="prow"><span class="mname">k8s-ops.owl</span><span class="mono">RDF/XML · 原样存档（original）</span><span class="sw sw-ok">已导入 · v3</span></div>
+              <div class="prow"><span class="mname">k8s-ops · spec_json</span><span class="mono">归一化工作形态 · 57 节点 / 63 关系</span><span class="sw sw-ok">校验通过</span></div>
+            </div>
+            <p class="hintline">导入报告：有损映射警告 2 条（公理语义丢弃已计入 warnings）· <button class="btn ghost" style="padding:2px 8px;font-size:12px" type="button">查看报告</button> <button class="btn ghost" style="padding:2px 8px;font-size:12px" type="button">＋ AI 创建新本体</button></p>
+          </div>
+
+          <div class="stage-pane" id="stage-s2" data-group="stages">
+            <h3>S2 · 编辑 <span class="mode-tag mode-builtin">builtin</span></h3>
+            <p class="sdesc">P0 JSON 编辑器（校验就地标红 + 三栏只读预览）；P1 图形化编辑器（React Flow + RJSF + dagre，坐标存 localStorage，排期 O8）。编辑保存新版本后：memory_graph 方案按 version 校验自动生效；RDF 型方案需手动触发「重载本体」。</p>
+            <div class="pipe-row"><span class="mname">当前版本</span><span class="mono">k8s-ops v3 · 2026-09-19 修改</span><span class="sw sw-ok">memory_graph 方案已自动生效</span></div>
+          </div>
+
+          <div class="stage-pane" id="stage-s3" data-group="stages">
+            <h3>S3 · 校验 <span class="mode-tag mode-builtin">builtin</span></h3>
+            <p class="sdesc">JSON Schema 结构校验（santhosh-tekuri/jsonschema）+ graph.Build 引用完整性校验，服务侧执行；与 AI 创建共用同一校验器。</p>
+            <div class="pipe-row"><span class="mname">最近校验</span><span class="mono">2026-09-19 · 结构 + 引用完整性</span><span class="sw sw-ok">通过 · 0 错误 0 警告</span></div>
+          </div>
+
+          <div class="stage-pane" id="stage-s4" data-group="stages">
+            <h3>S4 · 可视化 <span class="mode-tag mode-guided">guided</span></h3>
+            <p class="sdesc">TBox 结构浏览：WebVOWL（自托管，OWL2VOWL 预转换，按 version 缓存）；ABox 实例关系：memory-graph 方案复用 OntologyExplorer 资产，SPARQL 型方案用 LodLive 直连端点。预转换失败时降级为「结构浏览暂不可用」，不影响其他阶段。</p>
+            <div class="vowl-box">
+              <svg width="560" height="170" viewBox="0 0 560 170" role="img" aria-label="本体结构示意：Pod 到 OOMKilled 到资源限制的概念链">
+                <ellipse cx="110" cy="85" rx="62" ry="30" fill="#eef0fe" stroke="#4f46e5" stroke-width="1.6"/>
+                <text x="110" y="90" text-anchor="middle" font-size="14" fill="#3d36c4" font-family="system-ui">Pod</text>
+                <ellipse cx="290" cy="45" rx="78" ry="28" fill="#e6f3fb" stroke="#0369a1" stroke-width="1.6"/>
+                <text x="290" y="50" text-anchor="middle" font-size="13" fill="#0369a1" font-family="system-ui">OOMKilled</text>
+                <ellipse cx="290" cy="128" rx="88" ry="28" fill="#e6f6f0" stroke="#0e9f6e" stroke-width="1.6"/>
+                <text x="290" y="133" text-anchor="middle" font-size="13" fill="#0b7a55" font-family="system-ui">资源限制 Limit</text>
+                <ellipse cx="480" cy="85" rx="58" ry="28" fill="#f3eefe" stroke="#7c3aed" stroke-width="1.6"/>
+                <text x="480" y="90" text-anchor="middle" font-size="12" fill="#6527bd" font-family="system-ui">处置策略</text>
+                <line x1="168" y1="72" x2="214" y2="56" stroke="#8b91a7" stroke-width="1.4"/>
+                <line x1="168" y1="100" x2="204" y2="118" stroke="#8b91a7" stroke-width="1.4"/>
+                <line x1="366" y1="52" x2="424" y2="74" stroke="#8b91a7" stroke-width="1.4"/>
+                <line x1="376" y1="122" x2="424" y2="98" stroke="#8b91a7" stroke-width="1.4"/>
+              </svg>
+            </div>
+            <p class="hintline">浏览入口按运行方案类型路由 · <button class="btn ghost" style="padding:2px 8px;font-size:12px" type="button">在新窗口打开 WebVOWL</button></p>
+          </div>
+
+          <div class="stage-pane" id="stage-s5" data-group="stages">
+            <h3>S5 · 运行方式（运行方案）<span class="mode-tag mode-managed">managed</span></h3>
+            <p class="sdesc">由 Runtime Manager 编排（仅此阶段为 managed）：每套方案选运行时引擎并加载本体集合，状态机 created → starting → running ⇄ stopped，任意态可进 error。方案未 running 时对话侧禁选。</p>
+            <div class="check-list">
+              <div class="prow"><span class="mname">运维本体 · 内存图 v3</span><span class="mono">engine=memory_graph · 加载 k8s-ops v3</span><span class="state-tag running">running · :8091</span></div>
+              <div class="prow"><span class="mname">运维本体 · Oxigraph v2</span><span class="mono">engine=oxigraph · SPARQL 端点</span><span class="state-tag running">running · :8092</span></div>
+              <div class="prow"><span class="mname">运维本体 · Fuseki（推理）</span><span class="mono">engine=fuseki · RDFS/OWL 推理（规划 O7）</span><span class="state-tag draft">created</span></div>
+            </div>
+            <div class="fieldrow">
+              <div><span class="flabel">新建运行方案 · 引擎</span>
+                <span class="selwrap"><select aria-label="运行时引擎"><option>memory_graph（自研内存图）</option><option>oxigraph（SPARQL）</option><option>fuseki（SPARQL + 推理）</option></select></span>
+              </div>
+              <div><span class="flabel">方案名称</span><input type="text" value="运维本体 · 内存图 v4"></div>
+            </div>
+            <p class="hintline">本体集合变更后需重启方案生效（v0.2 简化：不支持热加载）· 方案页可查看最近日志（tail=200）</p>
+          </div>
+
+          <div class="stage-pane" id="stage-s6" data-group="stages">
+            <h3>S6 · 对外暴露（统一 MCP facade）<span class="mode-tag mode-managed">managed</span></h3>
+            <p class="sdesc">Runtime Manager 内嵌 mcp-go Server：每个 running 方案经统一 facade 暴露<b>相同签名的 4 个 onto_* 工具</b>，按 ontology_id 路由到方案内本体——Agent 侧无需感知运行时差异（memory_graph 直查；oxigraph/fuseki 翻译为 SPARQL）。</p>
+            <div class="pipe-row"><span class="mname">Facade 端点</span><span class="mono">http://127.0.0.1:8090/mcp（Streamable HTTP）</span><span class="sw sw-ok">健康</span></div>
+            <div class="tool-list">
+              <div class="tool"><span class="mono">onto_get_concept</span><span class="tdesc">查询概念定义与层级</span></div>
+              <div class="tool"><span class="mono">onto_get_instance</span><span class="tdesc">查询单个实例详情</span></div>
+              <div class="tool"><span class="mono">onto_list_instances</span><span class="tdesc">按类型列出实例</span></div>
+              <div class="tool"><span class="mono">onto_neighbors</span><span class="tdesc">查询实例 / 概念的邻居关系</span></div>
+            </div>
+          </div>
+
+          <div class="stage-pane" id="stage-s7" data-group="stages">
+            <h3>S7 · 对接 Agent <span class="mode-tag mode-guided">guided</span></h3>
+            <p class="sdesc">对话挂载运行方案（conversation.runtime_profile_id）：主平台经 eino-ext GetTools 连 facade；方案提供 guide 注入（运维指南）；方案停止时对话降级（ONTOLOGY_SERVICE_UNAVAILABLE，按方案隔离，不影响其他对话）。</p>
+            <div class="check-list">
+              <div class="prow"><span class="mname">对话「Pod 异常排查」</span><span class="mono">挂载 内存图 v3 · guide 已注入</span><span class="sw sw-ok">使用中</span></div>
+              <div class="prow"><span class="mname">对话「节点资源巡检」</span><span class="mono">未挂载（可随时在对话顶部切换）</span><span class="sw sw-off">未挂载</span></div>
+            </div>
+            <p class="hintline">主平台侧配置入口：Agent 对话窗口顶部「本体运行方案」下拉（本原型 Agent 视图）</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 流水线 2：半成品 -->
+      <div class="pane" id="pane-pipe-2" data-group="pipes" aria-label="本体流水线：故障诊断本体">
+        <div class="pane-head"><h2>故障诊断本体流水线</h2><p>本体：fault-diag（v1）· 状态 <span class="state-tag draft">draft</span></p></div>
+        <div class="detail-wrap">
+          <div class="steps" role="tablist" aria-label="流水线阶段">
+            <button class="step" data-group="stages2" data-pane="stage2-s1" aria-current="true"><span class="sid">S1</span><span class="sname">本体来源</span><span class="stool done">AI 创建 · 已完成</span></button>
+            <button class="step" data-group="stages2" data-pane="stage2-s2"><span class="sid">S2</span><span class="sname">编辑</span><span class="stool">进行中</span></button>
+            <button class="step" data-group="stages2" data-pane="stage2-s3"><span class="sid">S3</span><span class="sname">校验</span><span class="stool todo">未开始</span></button>
+            <button class="step" data-group="stages2" data-pane="stage2-s4"><span class="sid">S4</span><span class="sname">可视化</span><span class="stool todo">未开始</span></button>
+            <button class="step" data-group="stages2" data-pane="stage2-s5"><span class="sid">S5</span><span class="sname">运行方式</span><span class="stool todo">未配置</span></button>
+            <button class="step" data-group="stages2" data-pane="stage2-s6"><span class="sid">S6</span><span class="sname">对外暴露</span><span class="stool todo">未配置</span></button>
+            <button class="step" data-group="stages2" data-pane="stage2-s7"><span class="sid">S7</span><span class="sname">对接 Agent</span><span class="stool todo">未对接</span></button>
+          </div>
+          <div class="stage-pane active" id="stage2-s1" data-group="stages2">
+            <h3>S1 · 本体来源 <span class="mode-tag mode-builtin">builtin</span></h3>
+            <p class="sdesc">经 AI 辅助创建：领域描述 → Eino 结构化生成 spec_json 草稿 → 校验器回喂修正（最多 3 轮）→ 人工预览确认入库。校验器与人工编辑共用。</p>
+            <div class="pipe-row"><span class="mname">fault-diag · spec_json</span><span class="mono">v1 · 生成轮次 2 · 人工已确认</span><span class="sw sw-ok">已入库</span></div>
+          </div>
+          <div class="stage-pane" id="stage2-s2" data-group="stages2">
+            <h3>S2 · 编辑</h3><p class="sdesc">JSON 编辑器编辑中：补充「告警 → 处置预案」关系定义，保存后进入 S3 校验。</p>
+          </div>
+          <div class="stage-pane" id="stage2-s3" data-group="stages2"><h3>S3 · 校验</h3><p class="sdesc">未开始。编辑保存后自动触发结构 + 引用完整性校验。</p></div>
+          <div class="stage-pane" id="stage2-s4" data-group="stages2"><h3>S4 · 可视化</h3><p class="sdesc">未开始。校验通过后生成 WebVOWL 预览（按 version 缓存）。</p></div>
+          <div class="stage-pane" id="stage2-s5" data-group="stages2"><h3>S5 · 运行方式</h3><p class="sdesc">未配置。需选择引擎（memory_graph / oxigraph / fuseki）创建运行方案。</p></div>
+          <div class="stage-pane" id="stage2-s6" data-group="stages2"><h3>S6 · 对外暴露</h3><p class="sdesc">未配置。方案 running 后自动纳入统一 MCP facade（4 个 onto_* 工具）。</p></div>
+          <div class="stage-pane" id="stage2-s7" data-group="stages2"><h3>S7 · 对接 Agent</h3><p class="sdesc">未对接。方案 running 后可在对话顶部「本体运行方案」下拉中选择（当前因 draft 状态禁选）。</p></div>
+        </div>
+      </div>
+
+      <!-- 流水线 3：导入中 -->
+      <div class="pane" id="pane-pipe-3" data-group="pipes" aria-label="本体流水线：FLUIDOS 互联本体">
+        <div class="pane-head"><h2>FLUIDOS 互联本体流水线</h2><p>来源：导入 fluidos-interconn.ttl · 状态 <span class="state-tag building">导入中</span></p></div>
+        <div class="detail-wrap">
+          <div class="steps" role="tablist" aria-label="流水线阶段">
+            <button class="step" data-group="stages3" data-pane="stage3-s1" aria-current="true"><span class="sid">S1</span><span class="sname">本体来源</span><span class="stool">导入中…</span></button>
+            <button class="step" data-group="stages3" data-pane="stage3-s2"><span class="sid">S2</span><span class="sname">编辑</span><span class="stool todo">待导入完成</span></button>
+            <button class="step" data-group="stages3" data-pane="stage3-s3"><span class="sid">S3</span><span class="sname">校验</span><span class="stool todo">—</span></button>
+            <button class="step" data-group="stages3" data-pane="stage3-s4"><span class="sid">S4</span><span class="sname">可视化</span><span class="stool todo">—</span></button>
+            <button class="step" data-group="stages3" data-pane="stage3-s5"><span class="sid">S5</span><span class="sname">运行方式</span><span class="stool todo">—</span></button>
+            <button class="step" data-group="stages3" data-pane="stage3-s6"><span class="sid">S6</span><span class="sname">对外暴露</span><span class="stool todo">—</span></button>
+            <button class="step" data-group="stages3" data-pane="stage3-s7"><span class="sid">S7</span><span class="sname">对接 Agent</span><span class="stool todo">—</span></button>
+          </div>
+          <div class="stage-pane active" id="stage3-s1" data-group="stages3">
+            <h3>S1 · 本体来源 <span class="mode-tag mode-builtin">builtin</span></h3>
+            <p class="sdesc">正在导入 fluidos-interconn.ttl（Turtle）：格式嗅探 → original 原样存档 → 归一化 spec_json → 校验 → 入库 → 导入报告。OWL/Turtle 为有损导入（公理/推理语义丢弃计入 warnings）。</p>
+            <div class="pipe-row"><span class="mname">fluidos-interconn.ttl</span><span class="mono">归一化进行中（步骤 3/5）</span><span class="state-tag building">导入中</span></div>
+          </div>
+          <div class="stage-pane" id="stage3-s2" data-group="stages3"><h3>S2 · 编辑</h3><p class="sdesc">待导入完成后开放。</p></div>
+          <div class="stage-pane" id="stage3-s3" data-group="stages3"><h3>S3 · 校验</h3><p class="sdesc">—</p></div>
+          <div class="stage-pane" id="stage3-s4" data-group="stages3"><h3>S4 · 可视化</h3><p class="sdesc">—</p></div>
+          <div class="stage-pane" id="stage3-s5" data-group="stages3"><h3>S5 · 运行方式</h3><p class="sdesc">—</p></div>
+          <div class="stage-pane" id="stage3-s6" data-group="stages3"><h3>S6 · 对外暴露</h3><p class="sdesc">—</p></div>
+          <div class="stage-pane" id="stage3-s7" data-group="stages3"><h3>S7 · 对接 Agent</h3><p class="sdesc">—</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 视图 4：知识库 ============ -->
+<section class="view" id="view-kb" aria-label="知识库模块">
+  <div class="ws">
+    <aside class="ws-side" aria-label="知识库列表">
+      <div class="cap">知识库列表<button class="new" id="btn-new-kb">＋ 新建知识库</button></div>
+      <button class="lsitem" data-group="kbs" data-pane="pane-kb-1" aria-current="true">
+        <span class="dot" style="background:var(--c-brand)"></span>K8s 运维手册<span class="sub">Qdrant · 就绪</span>
+      </button>
+      <button class="lsitem" data-group="kbs" data-pane="pane-kb-2">
+        <span class="dot" style="background:var(--c-mcp)"></span>FLUIDOS 论文库<span class="sub">SQLite · 建索引中</span>
+      </button>
+      <div class="reserved-box">
+        <span class="tag" style="background:var(--c-brand-weak);color:var(--c-brand-ink);border-color:var(--c-brand-line)">后端策略</span><br>
+        向量后端可切换：Qdrant（首选）/ SQLite（fallback），环境变量 KB_VECTOR_BACKEND；自研 SQLiteRetriever 仅作对照。
+      </div>
+    </aside>
+
+    <div class="ws-main">
+      <div class="pane active" id="pane-kb-1" data-group="kbs" aria-label="知识库：K8s 运维手册">
+        <div class="pane-head"><h2>K8s 运维手册</h2><p>向量后端 Qdrant · collection kb_manual · 12 文档 · 1,842 chunks</p></div>
+        <div class="detail-wrap">
+          <div class="check-list">
+            <div class="prow"><span class="mname">K8s运维手册_v3.pdf</span><span class="mono">412 chunks · 512 tok / overlap 64</span><span class="state-tag ready">已索引</span></div>
+            <div class="prow"><span class="mname">runbook_告警处置.docx</span><span class="mono">268 chunks</span><span class="state-tag ready">已索引</span></div>
+            <div class="prow"><span class="mname">网络排障手册.md</span><span class="mono">186 chunks</span><span class="state-tag ready">已索引</span></div>
+          </div>
+          <p class="hintline"><button class="btn ghost" style="padding:2px 8px;font-size:12px" type="button">＋ 上传文档</button></p>
+          <div>
+            <span class="flabel">检索试运行</span>
+            <div class="trybox">
+              <label for="try-input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">检索词</label>
+              <input type="text" id="try-input" value="nginx Pod OOMKilled 排查">
+              <button class="btn primary" id="btn-try">搜索</button>
+            </div>
+            <div class="try-res show" id="try-res">
+              <div class="hit"><span class="score">0.87</span> · <b>OOMKilled 常见原因</b>：容器内存用量超过 resources.limits.memory，kubelet 按 OOMKill 终止并按重启策略拉起…</div>
+              <div class="hit"><span class="score">0.81</span> · <b>resources 配置规范</b>：生产负载必须同时设置 requests 与 limits；Java/Node 类应用需预留堆外内存…</div>
+              <div class="hit"><span class="score">0.74</span> · <b>重启风暴处置</b>：先 kubectl describe 确认退出码，再区分 OOMKilled / 探针失败 / 镜像问题三类路径…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane" id="pane-kb-2" data-group="kbs" aria-label="知识库：FLUIDOS 论文库">
+        <div class="pane-head"><h2>FLUIDOS 论文库</h2><p>向量后端 SQLite（fallback 对照）· 4 文档 · 217 chunks</p></div>
+        <div class="detail-wrap">
+          <div class="check-list">
+            <div class="prow"><span class="mname">fluidos-architecture.pdf</span><span class="mono">98 chunks</span><span class="state-tag ready">已索引</span></div>
+            <div class="prow"><span class="mname">fluidos-node-framework.pdf</span><span class="mono">74 chunks</span><span class="state-tag building">建索引中</span></div>
+          </div>
+          <p class="hintline">索引构建中，试运行暂不可用（按钮禁用）；完成后自动开放。</p>
+          <div class="trybox">
+            <input type="text" aria-label="检索词" value="k8s fluent 层作用" disabled>
+            <button class="btn primary" disabled>搜索</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 视图 5：技能 ============ -->
+<section class="view" id="view-skills" aria-label="技能模块">
+  <div class="ws">
+    <aside class="ws-side" aria-label="技能侧栏（预留）">
+      <div class="cap">筛选</div>
+      <fieldset style="border:0;padding:0 4px;margin:0">
+        <legend style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">技能筛选</legend>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 4px;cursor:pointer"><input type="radio" name="skill-filter" value="all" checked>全部（2）</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 4px;cursor:pointer"><input type="radio" name="skill-filter" value="1">已挂载（1）</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 4px;cursor:pointer"><input type="radio" name="skill-filter" value="0">未挂载（1）</label>
+      </fieldset>
+      <div class="cap" style="margin-top:16px">预留能力<span class="tag" style="margin-left:auto">规划中</span></div>
+      <div class="reserved-box">技能分组 / 标签管理<br>技能版本历史<br>技能市场与导入</div>
+    </aside>
+
+    <div class="ws-main">
+      <div class="pane active" id="pane-skills" data-group="skills" aria-label="技能列表">
+        <div class="pane-head"><h2>技能列表</h2><p>技能 = 配置级能力包（提示词 + 工具白名单），注入生效，不执行脚本（Q-19）</p></div>
+        <div class="detail-wrap">
+          <div class="skill-list">
+            <article class="skill-row" data-mounted="1">
+              <div class="avatar" style="background:var(--c-skill)">故</div>
+              <div class="s-main">
+                <div class="ttl">K8s 故障排查</div>
+                <div class="desc">Pod/节点异常的排查套路与命令模板；instruction 注入系统提示词 + 工具白名单合并</div>
+              </div>
+              <div class="s-meta">
+                <span class="tag">工具 ×3</span>
+                <span class="state-tag ready">已挂载 · 1 Agent</span>
+              </div>
+              <div class="foot"><button class="btn" data-open-skill="k8s">编辑</button></div>
+            </article>
+            <article class="skill-row" data-mounted="0">
+              <div class="avatar" style="background:var(--c-warn)">周</div>
+              <div class="s-main">
+                <div class="ttl">周报生成</div>
+                <div class="desc">按模板汇总本周对话与巡检结论，产出周报文件</div>
+              </div>
+              <div class="s-meta">
+                <span class="tag">工具 ×1</span>
+                <span class="state-tag draft">未挂载</span>
+              </div>
+              <div class="foot"><button class="btn" data-open-skill="weekly">编辑</button></div>
+            </article>
+            <button class="btn" id="btn-new-skill" style="align-self:flex-start;border-style:dashed">＋ 新建技能</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Agent 配置抽屉 ===== -->
+<dialog id="dlg-agent" aria-labelledby="dlg-agent-title">
+  <div class="dlg">
+    <div class="dlg-head"><h3 id="dlg-agent-title">Agent 配置 · K8s 运维助手</h3><button class="x" data-close="dlg-agent" aria-label="关闭">✕</button></div>
+    <div class="dlg-body">
+      <fieldset>
+        <legend>基本信息</legend>
+        <div class="frow">
+          <div><span class="flabel">名称</span><input type="text" value="K8s 运维助手"></div>
+          <div><span class="flabel">描述</span><input type="text" value="集群故障排查与日常巡检"></div>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>模型（Agent 级独立配置）</legend>
+        <div class="radio-row">
+          <label><input type="radio" name="model-mode" value="global"><span><span class="rtitle">跟随全局默认</span><span class="rdesc">DeepSeek-V3 · temperature 0.7（全局设置中配置）</span></span></label>
+          <label><input type="radio" name="model-mode" value="own" checked><span><span class="rtitle">独立配置</span><span class="rdesc">为该 Agent 单独指定模型与参数</span></span></label>
+        </div>
+        <div class="backend-detail show" id="model-own-detail">
+          <div class="frow">
+            <div><span class="flabel">模型</span><span class="selwrap"><select aria-label="模型"><option selected>DeepSeek-V3</option><option>DeepSeek-R1</option><option>Qwen2.5-72B</option></select></span></div>
+            <div><span class="flabel">Temperature</span><input type="text" value="0.3"></div>
+          </div>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>技能挂载（可多选）</legend>
+        <div class="check-list">
+          <label><input type="checkbox" checked><span>K8s 故障排查</span><span class="cdesc">工具 ×3</span></label>
+          <label><input type="checkbox"><span>周报生成</span><span class="cdesc">工具 ×1</span></label>
+        </div>
+        <p class="hintline">生效方式：指令注入系统提示词 + 工具白名单合并（agent.tools ∪ skills[].tools）</p>
+      </fieldset>
+      <fieldset>
+        <legend>MCP 服务器（多 server，工具名加 server 前缀防冲突）</legend>
+        <div class="check-list">
+          <div class="mcp-row"><input type="checkbox" checked aria-label="启用 k8s-cluster"><span class="mname">k8s-cluster</span><span class="mono">https://mcp.internal:8443/k8s</span><span class="sw">已启用 · 8 工具</span></div>
+          <div class="mcp-row"><input type="checkbox" aria-label="启用 grafana"><span class="mname">grafana</span><span class="mono">http://127.0.0.1:9100/mcp</span><span class="sw" style="color:var(--c-ink-3)">未启用</span></div>
+        </div>
+        <p class="hintline"><button class="btn ghost" style="padding:2px 8px;font-size:12px" type="button">＋ 添加 MCP 服务器</button></p>
+      </fieldset>
+      <fieldset>
+        <legend>执行后端（沙箱策略）</legend>
+        <div class="radio-row">
+          <label><input type="radio" name="backend" value="inproc"><span><span class="rtitle">inprocess（默认）</span><span class="rdesc">进程内 ADK 装配，零基础设施，适合个人使用与调试</span></span></label>
+          <label><input type="radio" name="backend" value="docker" checked><span><span class="rtitle">docker 容器</span><span class="rdesc">每 Agent 一个独立容器跑 agent-runtime 镜像，配置经 manifest 下发</span></span></label>
+          <label><input type="radio" name="backend" value="k8s"><span><span class="rtitle">k8s Pod</span><span class="rdesc">Pod 部署 + requests/limits 资源约束</span></span></label>
+        </div>
+        <div class="backend-detail show" id="backend-docker-detail">镜像 <span class="mono">kma-agentd:latest</span> · 资源上限 <span class="mono">cpu 1 / mem 512Mi</span> · 超时回收 <span class="mono">30m</span></div>
+      </fieldset>
+    </div>
+    <div class="dlg-foot"><button class="btn" data-close="dlg-agent">取消</button><button class="btn primary" id="btn-save-agent">保存配置</button></div>
+  </div>
+</dialog>
+
+<!-- ===== 技能编辑抽屉 ===== -->
+<dialog id="dlg-skill" aria-labelledby="dlg-skill-title">
+  <div class="dlg">
+    <div class="dlg-head"><h3 id="dlg-skill-title">编辑技能 · K8s 故障排查</h3><button class="x" data-close="dlg-skill" aria-label="关闭">✕</button></div>
+    <div class="dlg-body">
+      <fieldset>
+        <legend>基本信息</legend>
+        <div class="frow">
+          <div><span class="flabel">名称</span><input type="text" value="K8s 故障排查"></div>
+          <div><span class="flabel">描述</span><input type="text" value="Pod/节点异常的排查套路与命令模板"></div>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>指令内容（instruction · 数据模型参考 Claude Skills）</legend>
+        <textarea class="tf" rows="7">你是 K8s 故障排查专家。排查 Pod 异常时按以下顺序：
+1. k8s_get_pods 确认重启次数与 lastState；
+2. k8s_get_events 关联同命名空间事件；
+3. k8s_describe 查看资源限制与探针配置。
+输出结论必须区分「证据」与「推断」，并给出可执行的修复命令。</textarea>
+      </fieldset>
+      <fieldset>
+        <legend>工具白名单（合并进挂载该技能的 Agent）</legend>
+        <div class="check-list">
+          <label><input type="checkbox" checked><span>k8s_get_pods</span><span class="cdesc">内置工具</span></label>
+          <label><input type="checkbox" checked><span>k8s_get_events</span><span class="cdesc">内置工具</span></label>
+          <label><input type="checkbox" checked><span>k8s_describe</span><span class="cdesc">内置工具</span></label>
+          <label><input type="checkbox"><span>kb_search</span><span class="cdesc">内置工具 · 知识库检索</span></label>
+        </div>
+        <p class="hintline">安全边界：技能只做配置级注入，不提供技能级脚本执行环境</p>
+      </fieldset>
+    </div>
+    <div class="dlg-foot"><button class="btn" data-close="dlg-skill">取消</button><button class="btn primary" id="btn-save-skill">保存技能</button></div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function(){
+  try{
+    var $=function(s){return document.querySelector(s)};
+    var $$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
+
+    /* Toast */
+    var toastTimer=null;
+    function toast(msg){
+      var t=$('#toast'); if(!t) return;
+      t.textContent=msg; t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer=setTimeout(function(){t.classList.remove('show')},2200);
+    }
+
+    /* 顶部导航切换视图 */
+    function showView(name){
+      $$('.view').forEach(function(v){v.classList.toggle('active', v.id==='view-'+name)});
+      $$('.tnav').forEach(function(b){
+        if(b.dataset.view===name){b.setAttribute('aria-current','true')}
+        else{b.removeAttribute('aria-current')}
+      });
+    }
+    $$('.tnav').forEach(function(b){
+      b.addEventListener('click',function(){showView(b.dataset.view)});
+    });
+
+    /* 通用 pane 切换：左列表项 data-pane → 右 .pane[data-group] */
+    function switchPane(group,id){
+      $$('.pane[data-group="'+group+'"]').forEach(function(p){p.classList.toggle('active',p.id===id)});
+      $$('.lsitem[data-group="'+group+'"]').forEach(function(b){
+        var sel=b.dataset.pane===id;
+        b.setAttribute('aria-current',sel?'true':'false');
+      });
+      /* 阶段步骤条按钮同机制 */
+      $$('.step[data-group="'+group+'"]').forEach(function(b){
+        b.setAttribute('aria-current',b.dataset.pane===id?'true':'false');
+      });
+    }
+    $$('[data-pane]').forEach(function(b){
+      b.addEventListener('click',function(){switchPane(b.dataset.group,b.dataset.pane)});
+    });
+
+    /* 本体阶段：默认展开每个流水线的 S1，点击步骤切换 */
+    /* （已由通用 data-pane 机制覆盖） */
+
+    /* 技能筛选 */
+    $$('input[name="skill-filter"]').forEach(function(r){
+      r.addEventListener('change',function(){
+        var v=r.value;
+        $$('.skill-row').forEach(function(row){
+          var m=row.dataset.mounted;
+          row.style.display=(v==='all'||m===v)?'':'none';
+        });
+      });
+    });
+
+    /* SSE 事件重放（Agent 对话 1） */
+    var steps=$$('#evgroup .ev-step');
+    var reduceMotion=false;
+    try{reduceMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+    var replaying=false;
+    function replay(){
+      if(replaying||!steps.length) return; replaying=true;
+      steps.forEach(function(s){s.classList.add('hidden-ev')});
+      if(reduceMotion){
+        steps.forEach(function(s){s.classList.remove('hidden-ev')});
+        replaying=false; toast('已重放本轮事件流'); return;
+      }
+      var i=0;
+      (function next(){
+        if(i>=steps.length){replaying=false;toast('已重放本轮事件流');return;}
+        var s=steps[i++];
+        s.style.opacity='0'; s.style.transform='translateY(6px)';
+        s.classList.remove('hidden-ev');
+        requestAnimationFrame(function(){
+          s.style.transition='opacity .3s ease, transform .3s ease';
+          s.style.opacity='1'; s.style.transform='translateY(0)';
+          setTimeout(function(){s.style.transition='';},350);
+        });
+        setTimeout(next,650);
+      })();
+    }
+    var btnReplay=$('#btn-replay');
+    if(btnReplay){btnReplay.addEventListener('click',replay)}
+
+    /* 发送模拟 */
+    var input=$('#input'), btnSend=$('#btn-send'), stream=$('#stream');
+    if(input&&btnSend&&stream){
+      input.addEventListener('input',function(){btnSend.disabled=input.value.trim()===''});
+      btnSend.addEventListener('click',function(){
+        var text=input.value.trim(); if(!text) return;
+        input.value=''; btnSend.disabled=true;
+        var u=document.createElement('div');
+        u.className='msg user';
+        u.innerHTML='<div class="who">董奎 · 刚刚</div><div class="bubble"></div>';
+        u.querySelector('.bubble').textContent=text;
+        stream.appendChild(u);
+        var run=document.createElement('div');
+        run.className='evcards';
+        run.innerHTML='<div class="evcard"><div class="evhead"><span class="evtitle">运行开始</span>'+
+          '<span class="chip src-builtin"><span class="cdot" style="background:var(--c-builtin)"></span>run.started</span>'+
+          '<span class="mono">backend=docker · conversation=Pod 异常排查</span></div></div>';
+        stream.appendChild(run);
+        setTimeout(function(){
+          var a=document.createElement('div');
+          a.className='msg assistant';
+          a.innerHTML='<div class="who">K8s 运维助手 · 刚刚</div><div class="bubble"><p>（原型演示）已收到消息。正式实现中将按 Agent 配置装配模型 / 技能 / MCP / 本体工具并流式返回。</p></div>';
+          stream.appendChild(a);
+          stream.scrollTop=stream.scrollHeight;
+        },900);
+        stream.scrollTop=stream.scrollHeight;
+      });
+      input.addEventListener('keydown',function(e){
+        if(e.key==='Enter'&&!e.shiftKey){e.preventDefault(); if(!btnSend.disabled){btnSend.click();}}
+      });
+    }
+
+    /* 文件面板 */
+    var off=$('#btn-files-off'), on=$('#btn-files-on');
+    if(off){off.addEventListener('click',function(){document.body.classList.add('files-off')})}
+    if(on){on.addEventListener('click',function(){document.body.classList.remove('files-off')})}
+
+    /* dialog */
+    function openDlg(id){
+      var d=document.getElementById(id);
+      if(d&&typeof d.showModal==='function'){try{d.showModal()}catch(e){}}
+    }
+    $$('[data-close]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var d=document.getElementById(b.dataset.close);
+        if(d&&typeof d.close==='function'){d.close()}
+      });
+    });
+    /* Agent 树上的齿轮按钮：阻止触发 summary 折叠 */
+    $$('.gear').forEach(function(g){
+      g.addEventListener('click',function(e){
+        e.preventDefault(); e.stopPropagation();
+        var t=document.getElementById('dlg-agent-title');
+        if(t){t.textContent = g.dataset.openAgent==='doc' ? 'Agent 配置 · 文档问答助手' : 'Agent 配置 · K8s 运维助手';}
+        openDlg('dlg-agent');
+      });
+    });
+    $$('[data-open-agent]').forEach(function(b){
+      if(b.classList.contains('gear')) return;
+      b.addEventListener('click',function(){
+        var t=document.getElementById('dlg-agent-title');
+        if(t){t.textContent = b.dataset.openAgent==='doc' ? 'Agent 配置 · 文档问答助手' : 'Agent 配置 · K8s 运维助手';}
+        openDlg('dlg-agent');
+      });
+    });
+    $$('[data-open-skill]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var t=document.getElementById('dlg-skill-title');
+        if(t){t.textContent = b.dataset.openSkill==='weekly' ? '编辑技能 · 周报生成' : '编辑技能 · K8s 故障排查';}
+        openDlg('dlg-skill');
+      });
+    });
+
+    /* 新建类按钮：原型演示反馈 */
+    [['btn-new-agent','将在当前列表新建 Agent'],['btn-new-conv-agent','将在「K8s 运维助手」下新建对话'],
+     ['btn-new-conv-doc','将在「文档问答助手」下新建对话'],['btn-new-project','将新建项目'],
+     ['btn-new-conv-proj','将在「K8s 运维平台」下新建会话'],['btn-new-conv-proj2','将在「本体学习实验室」下新建会话'],
+     ['btn-new-pipe','将新建本体流水线（进入 S1 来源选择）'],['btn-new-kb','将新建知识库'],
+     ['btn-new-skill','将新建技能']].forEach(function(pair){
+      var el=document.getElementById(pair[0]);
+      if(el){el.addEventListener('click',function(){toast('（原型演示）'+pair[1])});}
+    });
+
+    /* Agent 抽屉联动 */
+    var modelDetail=$('#model-own-detail');
+    $$('input[name="model-mode"]').forEach(function(r){
+      r.addEventListener('change',function(){
+        if(modelDetail){modelDetail.classList.toggle('show', r.value==='own'&&r.checked)}
+      });
+    });
+    var backendDetail=$('#backend-docker-detail');
+    $$('input[name="backend"]').forEach(function(r){
+      r.addEventListener('change',function(){
+        if(!backendDetail) return;
+        if(r.value==='docker'&&r.checked){
+          backendDetail.classList.add('show');
+          backendDetail.innerHTML='镜像 <span class="mono">kma-agentd:latest</span> · 资源上限 <span class="mono">cpu 1 / mem 512Mi</span> · 超时回收 <span class="mono">30m</span>';
+        }else if(r.value==='k8s'&&r.checked){
+          backendDetail.classList.add('show');
+          backendDetail.innerHTML='Namespace <span class="mono">kma-agents</span> · requests <span class="mono">cpu 500m / mem 256Mi</span> · limits <span class="mono">cpu 1 / mem 512Mi</span>';
+        }else if(r.value==='inproc'&&r.checked){
+          backendDetail.classList.remove('show');
+        }
+      });
+    });
+
+    /* 保存反馈 */
+    var sa=$('#btn-save-agent');
+    if(sa){sa.addEventListener('click',function(){
+      var d=document.getElementById('dlg-agent');
+      if(d&&typeof d.close==='function'){d.close()}
+      toast('Agent 配置已保存（原型演示）');
+    })}
+    var ss=$('#btn-save-skill');
+    if(ss){ss.addEventListener('click',function(){
+      var d=document.getElementById('dlg-skill');
+      if(d&&typeof d.close==='function'){d.close()}
+      toast('技能已保存（原型演示）');
+    })}
+
+    /* 知识库试运行 */
+    var tryBtn=$('#btn-try'), tryRes=$('#try-res');
+    if(tryBtn&&tryRes){
+      tryBtn.addEventListener('click',function(){
+        tryBtn.disabled=true; tryBtn.textContent='搜索中…';
+        tryRes.classList.remove('show');
+        setTimeout(function(){
+          tryRes.classList.add('show');
+          tryBtn.disabled=false; tryBtn.textContent='搜索';
+          toast('试运行完成（原型演示数据）');
+        },600);
+      });
+    }
+  }catch(e){
+    /* 脚本失败时静态内容仍完整可读 */
+  }
+})();
+</script>
+</body>
+</html>
