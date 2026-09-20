@@ -90,9 +90,14 @@ func withStatic(next http.Handler) http.Handler {
 		}
 		p := filepath.Join(abs, filepath.Clean(r.URL.Path))
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			// 入口页不缓存，避免前端更新后浏览器仍引用旧产物；assets 文件名带 hash 可缓存
+			if strings.HasSuffix(r.URL.Path, "index.html") {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			fs.ServeHTTP(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, filepath.Join(abs, "index.html"))
 	})
 }

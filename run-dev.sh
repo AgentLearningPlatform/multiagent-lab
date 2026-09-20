@@ -12,8 +12,16 @@ if ! command -v go >/dev/null 2>&1; then
   exit 1
 fi
 
-# 前端构建（dist 缺失或 FORCE_BUILD=1 时）
-if [ ! -f web/dist/index.html ] || [ "${FORCE_BUILD:-0}" = "1" ]; then
+# 前端构建：dist 缺失、源码比 dist 新（如 git pull 之后）、或 FORCE_BUILD=1 时执行
+need_build=0
+if [ ! -f web/dist/index.html ]; then
+  need_build=1
+elif [ "${FORCE_BUILD:-0}" = "1" ]; then
+  need_build=1
+elif [ -n "$(find web/src web/index.html web/package.json -newer web/dist/index.html -print -quit 2>/dev/null)" ]; then
+  need_build=1
+fi
+if [ "$need_build" = "1" ]; then
   echo "[run-dev] 构建前端..."
   (cd web && npm install --no-audit --no-fund && npm run build)
 fi
