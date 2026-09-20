@@ -17,6 +17,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/skill"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
@@ -62,6 +63,16 @@ func main() {
 
 	svc := chat.NewService(st, asm, kbSvc)
 	srv := api.NewServer(st, box, svc, reg, kbSvc, asm.Ontology)
+	// M10 §6.3：Docker 沙箱执行后端（SANDBOX_IMAGE 配置即启用；PLATFORM_URL_EXTERNAL 为容器内回访主平台地址）
+	if img := getenv("SANDBOX_IMAGE", ""); img != "" {
+		platformURL := getenv("PLATFORM_URL_EXTERNAL", "http://host.docker.internal"+addr)
+		svc.Runtime = &runtime.DockerBackend{
+			Image:       img,
+			PlatformURL: platformURL,
+			TokenIssue:  srv.IssueManifestToken,
+		}
+		log.Printf("[backend] docker sandbox backend enabled: image=%s platform_url=%s", img, platformURL)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              addr,

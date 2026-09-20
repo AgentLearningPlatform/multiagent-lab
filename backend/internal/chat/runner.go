@@ -1,12 +1,15 @@
 package chat
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
@@ -21,7 +25,8 @@ import (
 type Service struct {
 	Store     *store.Store
 	Assembler *Assembler
-	KB        *kb.Service // M6：对话知识库召回（nil 时禁用）
+	KB        *kb.Service     // M6：对话知识库召回（nil 时禁用）
+	Runtime   runtime.Backend // M10：沙箱执行后端（nil=inprocess；agent.RuntimeBackend=docker 时转发）
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // conversationID -> cancel
@@ -79,6 +84,14 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 
 	if conv.Scope == "agent" && conv.AgentID == nil {
 		return nil, errors.New("conversation is not bound to an agent")
+	}
+
+	// M10 §6.3：执行后端分发——docker 沙箱 → Start + /run SSE 透传；inprocess → 进程内装配执行
+	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend == "docker" {
+		if s.Runtime != nil {
+			return s.runDocker(ctx, conv, agent, runID, input, emit)
+		}
+		emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了 docker 执行后端但沙箱后端未启用，已回退 inprocess"}))
 	}
 
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
@@ -425,6 +438,132 @@ func (s *Service) Stop(conversationID string) bool {
 }
 
 // emitAndRecord 发送事件并落 run_event 表（时间线可回放，验收5）。
+// agentdRunRequest 沙箱 /run 请求体（与 cmd/agentd 对齐）。
+type agentdRunRequest struct {
+	Input            string          `json:"input"`
+	RunID            string          `json:"run_id"`
+	History          []store.Message `json:"history,omitempty"` // 不含最后一条 user（沙箱 Run 会存 input）
+	RuntimeProfileID *string         `json:"runtime_profile_id,omitempty"`
+	OntologyEnabled  bool            `json:"ontology_enabled,omitempty"`
+}
+
+// runDocker docker 沙箱后端执行（§6.3，M10）：用户消息主平台落库 → 配置经启动时下发、
+// history 随请求下发 → agentd 容器内同一装配代码运行 → SSE 事件透传并记录 →
+// assistant 文本聚合落主平台库。对话历史权威数据在主平台（容器可随时重建）。
+func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, emit EmitFn) (*RunResult, error) {
+	res := &RunResult{}
+	start := time.Now()
+	if emit == nil {
+		emit = func(*Event) {}
+	}
+
+	// 1) 用户消息主平台落库（历史权威在主平台）
+	userMsg := &store.Message{ConversationID: conv.ID, Role: "user", Content: input}
+	if _, err := s.Store.InsertMessage(userMsg); err != nil {
+		return nil, fmt.Errorf("save user message: %w", err)
+	}
+	history, err := s.Store.ListMessages(conv.ID)
+	if err != nil {
+		return nil, err
+	}
+	// 去掉最后一条 user（agentd 端 Run 内部会存 input，避免重复）
+	if len(history) > 0 && history[len(history)-1].Role == "user" {
+		history = history[:len(history)-1]
+	}
+	histVals := make([]store.Message, len(history))
+	for i, m := range history {
+		histVals[i] = *m
+	}
+
+	// 2) 确保沙箱实例就绪
+	ep, err := s.Runtime.Start(ctx, agent.ID)
+	if err != nil {
+		s.emitAndRecord(ctx, conv, runID, newEvent("run.error", runID, map[string]any{
+			"code": "sandbox_start_failed", "message": err.Error(), "elapsed_ms": time.Since(start).Milliseconds(),
+		}), emit)
+		res.Error = err.Error()
+		return res, nil
+	}
+
+	// 3) POST {endpoint}/run 并透传 SSE
+	body, _ := json.Marshal(agentdRunRequest{
+		Input: input, RunID: runID, History: histVals,
+		RuntimeProfileID: conv.RuntimeProfileID, OntologyEnabled: conv.OntologyEnabled,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.URL+"/run", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+	if err != nil {
+		s.emitAndRecord(ctx, conv, runID, newEvent("run.error", runID, map[string]any{
+			"code": "sandbox_unreachable", "message": err.Error(), "elapsed_ms": time.Since(start).Milliseconds(),
+		}), emit)
+		res.Error = err.Error()
+		return res, nil
+	}
+	defer resp.Body.Close()
+
+	var buf strings.Builder
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+	curEvent := ""
+	rewrite := func(raw json.RawMessage) json.RawMessage {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) != nil {
+			return raw
+		}
+		m["conversation_id"] = conv.ID // 事件流会话 ID 重写为主平台会话
+		if curEvent == "run.started" {
+			m["backend"] = "docker"
+		}
+		b, err := json.Marshal(m)
+		if err != nil {
+			return raw
+		}
+		return b
+	}
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			curEvent = strings.TrimSpace(strings.TrimPrefix(line, "event: "))
+		case strings.HasPrefix(line, "data: "):
+			raw := json.RawMessage(strings.TrimSpace(strings.TrimPrefix(line, "data: ")))
+			ev := &Event{Type: curEvent, RunID: runID, Ts: time.Now().UTC().Format(time.RFC3339Nano), Data: rewrite(raw)}
+			// assistant 文本聚合（message.delta 与主平台 inprocess 语义一致）
+			if curEvent == "message.delta" {
+				var d struct {
+					Delta string `json:"delta"`
+				}
+				if json.Unmarshal(raw, &d) == nil {
+					buf.WriteString(d.Delta)
+				}
+			}
+			if curEvent == "run.error" {
+				var d struct {
+					Message string `json:"message"`
+				}
+				if json.Unmarshal(raw, &d) == nil && d.Message != "" {
+					res.Error = d.Message
+				}
+			}
+			s.emitAndRecord(ctx, conv, runID, ev, emit)
+			curEvent = ""
+		}
+	}
+
+	// 4) assistant 消息聚合落库（无错误且有输出时）
+	if res.Error == "" && buf.Len() > 0 {
+		asg := &store.Message{ConversationID: conv.ID, Role: "assistant", Content: buf.String()}
+		if m, err := s.Store.InsertMessage(asg); err == nil {
+			res.AssistantMessageID = m.ID
+		}
+	}
+	return res, nil
+}
+
 func (s *Service) emitAndRecord(_ context.Context, conv *store.Conversation, runID string, ev *Event, emit EmitFn) {
 	emit(ev)
 	re := &store.RunEvent{ConversationID: conv.ID, RunID: runID, Type: ev.Type, Data: string(ev.Data)}

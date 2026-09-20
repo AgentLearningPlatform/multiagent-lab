@@ -42,6 +42,8 @@ func (s *Server) routes() {
 
 	// Agents
 	m.HandleFunc("GET /api/agents", s.listAgents)
+	// M10 §6.3：沙箱配置下发（内部端点，一次性 token）
+	m.HandleFunc("GET /api/internal/agents/{id}/manifest", s.getManifest)
 	m.HandleFunc("POST /api/agents", s.createAgent)
 	m.HandleFunc("GET /api/agents/{id}", s.getAgent)
 	m.HandleFunc("PUT /api/agents/{id}", s.updateAgent)
