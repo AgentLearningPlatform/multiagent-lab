@@ -251,6 +251,14 @@ export const api = {
   listTraces: (profileId: string, limit = 50) => req<TraceResponse>(`/api/runtime-profiles/${profileId}/trace?limit=${limit}`),
   /** SPARQL 工作台：POST application/sparql-query；非 running → 409；状态码/错误透传引擎 */
   runSparql: (profileId: string, query: string) => reqSparql(`/api/runtime-profiles/${profileId}/sparql`, query),
+  /**
+   * SPARQL 工作台端点 URL（REQ-92，Yasgui 自行发起请求，不经 req 封装）。
+   * 运行平面反代支持 GET ?query= 与 POST application/sparql-query；非 running → 409。
+   */
+  sparqlEndpointUrl: (profileId: string) => `/api/runtime-profiles/${profileId}/sparql`,
+  /** 某版本原始源文件下载地址（REQ-93；>1MB 时前端提示下载查看而非渲染） */
+  versionOriginalUrl: (ontologyId: string, version: number) =>
+    `/api/ontologies/${ontologyId}/versions/${version}/original`,
 }
 
 /**

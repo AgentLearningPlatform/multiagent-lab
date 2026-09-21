@@ -1,5 +1,6 @@
 import '@xyflow/react/dist/style.css'
-import { useEffect, useMemo, useState } from 'react'
+import '@triply/yasgui/build/yasgui.min.css'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -34,6 +35,7 @@ import {
   CodeOutlined,
   CopyOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   InboxOutlined,
   PauseCircleOutlined,
@@ -43,6 +45,9 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { api, ApiError } from '../api/client'
+import Yasgui from '@triply/yasgui'
+import CodeMirror from '@uiw/react-codemirror'
+import { EditorView } from '@codemirror/view'
 import {
   Background,
   BackgroundVariant,
@@ -463,6 +468,9 @@ export default function OntologyPage() {
                 {step === 5 && <S6Expose ontology={active} profiles={profiles} />}
                 {step === 6 && <S7Agent ontology={active} profiles={profiles} />}
               </Card>
+
+              {/* P1：本体级「查询 & 源码」入口（REQ-92/93），不随阶段切换隐藏 */}
+              <QuerySourceEntry ontology={active} profiles={profiles} profilesErr={profilesErr} spec={spec} />
             </>
           )}
         </div>
@@ -1542,7 +1550,10 @@ function S5Runtime({
     }
   }
 
-  return (
+  const [tab, setTab] = useState<'plan' | 'sparql' | 'trace'>('plan')
+
+  // 「方案」页签：既有运行方案卡片 / 新建行 / 运行日志，行为保持不变
+  const planPane = (
     <>
       <div className="onto-sec">
         <span className="onto-sec-title">运行方案（本体的 S5 段）</span>
@@ -1661,6 +1672,19 @@ function S5Runtime({
       {mine.length > 0 && <RuntimeLogs profiles={mine} />}
     </>
   )
+
+  return (
+    <Tabs
+      activeKey={tab}
+      onChange={(k) => setTab(k as 'plan' | 'sparql' | 'trace')}
+      destroyOnHidden
+      items={[
+        { key: 'plan', label: '方案', children: planPane },
+        { key: 'sparql', label: 'SPARQL', children: <SparqlTab profiles={mine} profilesErr={profilesErr} /> },
+        { key: 'trace', label: '透视', children: <TraceTab profiles={mine} /> },
+      ]}
+    />
+  )
 }
 
 function RuntimeLogs({ profiles }: { profiles: RuntimeProfile[] }) {
@@ -1736,46 +1760,563 @@ function RuntimeLogs({ profiles }: { profiles: RuntimeProfile[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// S6 对外暴露
+// P1 学习增强：SPARQL 工作台（REQ-92）/ 源码视图（REQ-93）/ 翻译透视（REQ-94）
 // ---------------------------------------------------------------------------
 
-/** SPARQL 工作台默认模板（REQ-92：POST /api/runtime-profiles/{id}/sparql，引擎直连） */
+/** SPARQL 工作台默认模板（REQ-92：/api/runtime-profiles/{id}/sparql，引擎直连） */
 const DEFAULT_SPARQL = `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 SELECT ?s ?o WHERE { ?s rdf:type ?o } LIMIT 20`
 
-const TRACE_COLUMNS: ColumnsType<TraceEntry> = [
-  { title: '时间', dataIndex: 'ts', width: 165 },
-  { title: '工具', dataIndex: 'tool', width: 130 },
-  {
-    title: 'SPARQL',
-    dataIndex: 'sparql',
-    ellipsis: true,
-    render: (v) => (
-      <Typography.Text code style={{ fontSize: 12 }}>
-        {String(v).slice(0, 140)}
-      </Typography.Text>
-    ),
-  },
-  { title: '耗时', dataIndex: 'took_ms', width: 85, render: (v) => `${v} ms` },
-  { title: '结果数', dataIndex: 'result_count', width: 80 },
-  {
-    title: '状态',
-    dataIndex: 'ok',
-    width: 80,
-    render: (v) =>
-      v ? (
-        <Tag color="green" style={{ margin: 0 }}>
-          成功
-        </Tag>
-      ) : (
-        <Tag color="red" style={{ margin: 0 }}>
-          失败
-        </Tag>
-      ),
-  },
-  { title: '错误', dataIndex: 'error', ellipsis: true },
-]
+/** 源码视图：超过此体积不渲染，改为下载查看（REQ-93） */
+const LARGE_SOURCE = 1_000_000
+
+/** 版本原始源文件格式 → 展示名（与构建平面 original_format 口径一致） */
+const FORMAT_LABEL: Record<string, string> = {
+  turtle: 'Turtle',
+  owl_rdfxml: 'OWL / RDF-XML',
+  spec_json: 'Spec JSON',
+  csv: 'CSV',
+  graphml: 'GraphML',
+}
+
+/**
+ * Yasgui 实例挂载（vanilla JS → React 桥，REQ-92）：
+ *  - 以 endpoint / persistenceId 为生命周期边界，绑定方案变更即销毁重建；查询历史走 Yasgui 自带 localStorage；
+ *  - StrictMode 双挂载由 cleanup 的 destroy() 兜底（destroy 会移除其 rootEl 与全局监听）；
+ *  - method 用 GET（?query=）匹配运行平面反代：POST 侧要求 application/sparql-query 原文，
+ *    而 Yasgui 的 POST 会发 x-www-form-urlencoded，故改用 GET（两端点均支持）。
+ */
+function YasguiPane({ endpoint, persistenceId }: { endpoint: string; persistenceId: string }) {
+  const hostRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const y = new Yasgui(host, {
+      // Yasgui 对顶层 config 为浅合并：requestConfig 需给全量，否则会丢失 Accept / 参数默认值
+      requestConfig: {
+        endpoint,
+        method: 'GET',
+        acceptHeaderSelect: 'application/sparql-results+json,*/*;q=0.9',
+        acceptHeaderGraph: 'application/n-triples,*/*;q=0.9',
+        acceptHeaderUpdate: 'text/plain,*/*;q=0.9',
+        namedGraphs: [],
+        defaultGraphs: [],
+        args: [],
+        headers: {},
+        withCredentials: false,
+        adjustQueryBeforeRequest: false,
+      },
+      persistenceId,
+      autoAddOnInit: true,
+      copyEndpointOnNewTab: false,
+    })
+    const tab = y.getTab()
+    // 仅在空白新标签页填默认模板；已从 localStorage 恢复的查询保持原样
+    if (tab && !tab.getQuery().trim()) tab.setQuery(DEFAULT_SPARQL)
+    return () => {
+      try {
+        y.destroy()
+      } catch {
+        /* 已销毁 */
+      }
+      host.innerHTML = ''
+    }
+  }, [endpoint, persistenceId])
+
+  return <div ref={hostRef} className="onto-yasgui" />
+}
+
+/** S5「SPARQL」页签：按本体的运行方案选择器 + Yasgui（每方案一个实例） */
+function SparqlTab({ profiles, profilesErr }: { profiles: RuntimeProfile[]; profilesErr: boolean }) {
+  const [pid, setPid] = useState<string | undefined>(profiles[0]?.id)
+
+  useEffect(() => {
+    if (pid && !profiles.some((p) => p.id === pid)) setPid(profiles[0]?.id)
+    else if (!pid && profiles.length > 0) setPid(profiles[0]?.id)
+  }, [profiles, pid])
+
+  if (profiles.length === 0) {
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        style={{ margin: '24px 0' }}
+        description={profilesErr ? '运行平面暂不可达，无法加载运行方案' : '该本体暂无运行方案；先在「方案」页新建并启动'}
+      />
+    )
+  }
+
+  const cur = profiles.find((p) => p.id === pid) ?? null
+
+  return (
+    <>
+      <div className="onto-sec" style={{ marginTop: 4 }}>
+        <span className="onto-sec-title">SPARQL 工作台（Yasgui，REQ-92）</span>
+        <span className="hit-spacer" />
+        <Select
+          size="small"
+          value={pid}
+          onChange={setPid}
+          style={{ width: 260 }}
+          options={profiles.map((p) => ({ value: p.id, label: `${p.name}（${PROFILE_BADGE[p.status]?.text ?? p.status}）` }))}
+        />
+      </div>
+      {cur && cur.status !== 'running' && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message="该方案未运行：查询将被运行平面拒绝（409）"
+          description="在「方案」页启动后再执行查询；Yasgui 的查询历史仍保留在浏览器本地。"
+        />
+      )}
+      {cur && (
+        <>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            端点 <Typography.Text code style={{ fontSize: 12 }}>{api.sparqlEndpointUrl(cur.id)}</Typography.Text>
+            · 结果表格 / 图 / 原始响应三视图由 Yasgui 提供，查询历史存浏览器本地。
+          </Typography.Text>
+          <YasguiPane key={cur.id} endpoint={api.sparqlEndpointUrl(cur.id)} persistenceId={`onto-sparql-${cur.id}`} />
+        </>
+      )}
+    </>
+  )
+}
+
+/** S5「透视」页签：翻译透视表（REQ-94，时间倒序，行展开看 SPARQL 原文） */
+function TraceTab({ profiles }: { profiles: RuntimeProfile[] }) {
+  const { showToast } = useUI()
+  const [pid, setPid] = useState<string | undefined>(profiles[0]?.id)
+  const [traces, setTraces] = useState<TraceEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (pid && !profiles.some((p) => p.id === pid)) setPid(profiles[0]?.id)
+    else if (!pid && profiles.length > 0) setPid(profiles[0]?.id)
+  }, [profiles, pid])
+
+  const load = () => {
+    if (!pid) {
+      setTraces([])
+      return
+    }
+    setLoading(true)
+    setErr(null)
+    api
+      .listTraces(pid, 50)
+      .then((r) => setTraces(r.traces ?? []))
+      .catch((e: any) => {
+        setTraces([])
+        setErr(e.message)
+      })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid])
+
+  const copy = (text: string) => {
+    navigator.clipboard
+      ?.writeText(text ?? '')
+      .then(() => showToast('SPARQL 已复制'))
+      .catch(() => showToast('复制失败', 'err'))
+  }
+
+  const columns: ColumnsType<TraceEntry> = [
+    { title: '时间', dataIndex: 'ts', width: 170 },
+    { title: '工具', dataIndex: 'tool', width: 150, render: (v) => <Typography.Text code style={{ fontSize: 12 }}>{String(v)}</Typography.Text> },
+    { title: '本体', dataIndex: 'ontology_id', width: 160, ellipsis: true },
+    { title: '耗时', dataIndex: 'took_ms', width: 90, render: (v) => `${v} ms` },
+    { title: '结果数', dataIndex: 'result_count', width: 80 },
+    {
+      title: '状态',
+      dataIndex: 'ok',
+      width: 80,
+      render: (v: boolean) =>
+        v ? (
+          <Tag color="green" style={{ margin: 0 }}>
+            成功
+          </Tag>
+        ) : (
+          <Tag color="red" style={{ margin: 0 }}>
+            失败
+          </Tag>
+        ),
+    },
+    {
+      title: '错误',
+      dataIndex: 'error',
+      ellipsis: true,
+      render: (v?: string) =>
+        v ? (
+          <Tooltip title={v}>
+            <Typography.Text type="danger" style={{ fontSize: 12 }}>
+              {v}
+            </Typography.Text>
+          </Tooltip>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        ),
+    },
+  ]
+
+  if (profiles.length === 0) {
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        style={{ margin: '24px 0' }}
+        description="该本体暂无运行方案；执行 onto_* 工具后在此查看翻译透视"
+      />
+    )
+  }
+
+  return (
+    <>
+      <div className="onto-sec" style={{ marginTop: 4 }}>
+        <span className="onto-sec-title">翻译透视（REQ-94，最近 50 条，失败查询同样留痕）</span>
+        <span className="hit-spacer" />
+        <Select
+          size="small"
+          value={pid}
+          onChange={setPid}
+          style={{ width: 260 }}
+          options={profiles.map((p) => ({ value: p.id, label: `${p.name}（${PROFILE_BADGE[p.status]?.text ?? p.status}）` }))}
+        />
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>
+          刷新
+        </Button>
+      </div>
+      {err && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message="透视记录获取失败" description={err} />}
+      <Table<TraceEntry>
+        rowKey={(r) => String(r.id ?? `${r.ts}-${r.tool}-${r.ontology_id}`)}
+        columns={columns}
+        dataSource={traces}
+        loading={loading}
+        pagination={{ pageSize: 10, hideOnSinglePage: true }}
+        size="small"
+        locale={{ emptyText: '暂无透视记录（执行 onto_* 工具后生成）' }}
+        expandable={{
+          expandedRowRender: (r) => (
+            <div className="onto-trace-expand">
+              <div className="onto-sec" style={{ marginTop: 0 }}>
+                <span className="onto-sec-title">SPARQL 原文</span>
+                <span className="hit-spacer" />
+                <Button size="small" icon={<CopyOutlined />} onClick={() => copy(r.sparql)}>
+                  复制
+                </Button>
+              </div>
+              <pre className="onto-guide-pre">{r.sparql || '（空）'}</pre>
+            </div>
+          ),
+        }}
+      />
+    </>
+  )
+}
+
+/**
+ * 「查询 & 源码」标签组（REQ-92/93，§4.8.1 同页组织）——本体级入口：
+ *  查询 = 自动关联包含本体的 running 方案，绑定其 SPARQL 端点（无则提示 + 禁用态）；
+ *  源码 = 版本选择 + CodeMirror 只读源码 + Spec JSON 格式化视图。
+ */
+function QuerySourceEntry({
+  ontology,
+  profiles,
+  profilesErr,
+  spec,
+}: {
+  ontology: Ontology
+  profiles: RuntimeProfile[]
+  profilesErr: boolean
+  spec: Spec | null
+}) {
+  const [tab, setTab] = useState('query')
+  const running = profiles.find((p) => p.status === 'running' && (p.ontology_ids ?? []).includes(ontology.id)) ?? null
+
+  return (
+    <Card
+      className="work-card onto-stage-card"
+      size="small"
+      title={
+        <Space size={8} wrap>
+          <span>查询 &amp; 源码</span>
+          <Tag color="geekblue" style={{ margin: 0 }}>
+            REQ-92 / 93
+          </Tag>
+        </Space>
+      }
+    >
+      <Tabs
+        activeKey={tab}
+        onChange={setTab}
+        destroyOnHidden
+        items={[
+          {
+            key: 'query',
+            label: '查询',
+            children: running ? (
+              <>
+                <div className="onto-sec" style={{ marginTop: 4 }}>
+                  <span className="onto-sec-title">SPARQL 工作台</span>
+                  <Tag color="green" style={{ margin: 0 }}>
+                    {running.name} · 运行中
+                  </Tag>
+                  <span className="hit-spacer" />
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    端点 <Typography.Text code style={{ fontSize: 12 }}>{api.sparqlEndpointUrl(running.id)}</Typography.Text>
+                  </Typography.Text>
+                </div>
+                <YasguiPane endpoint={api.sparqlEndpointUrl(running.id)} persistenceId={`onto-query-${running.id}`} />
+              </>
+            ) : (
+              <>
+                <Alert
+                  type={profilesErr ? 'warning' : 'info'}
+                  showIcon
+                  message="启动包含本体的运行方案后可用"
+                  description={
+                    profilesErr
+                      ? '运行平面暂不可达（RUNTIME_MGR_URL :8090），无法自动关联运行方案。'
+                      : '在 S5 运行方式新建并启动一个包含本体的运行方案，查询工作台将自动关联该方案端点。'
+                  }
+                />
+                <div className="onto-disabled-pane">SPARQL 工作台未启用</div>
+              </>
+            ),
+          },
+          {
+            key: 'source',
+            label: '源码',
+            children: <SourceView ontologyId={ontology.id} currentVersion={ontology.version} spec={spec} />,
+          },
+        ]}
+      />
+    </Card>
+  )
+}
+
+/** 源码视图（REQ-93）：版本选择 + CodeMirror 只读渲染 + Spec JSON 格式化视图 */
+function SourceView({ ontologyId, currentVersion, spec }: { ontologyId: string; currentVersion?: number; spec: Spec | null }) {
+  const { showToast } = useUI()
+  const [list, setList] = useState<VersionMeta[] | null>(null)
+  const [listErr, setListErr] = useState<string | null>(null)
+  const [listLoading, setListLoading] = useState(false)
+  const [version, setVersion] = useState<number | null>(null)
+  const [original, setOriginal] = useState<string | null>(null)
+  const [origErr, setOrigErr] = useState<string | null>(null)
+  const [origLoading, setOrigLoading] = useState(false)
+  const [tooLarge, setTooLarge] = useState(false)
+  const [sub, setSub] = useState<'original' | 'spec'>('original')
+
+  // 版本列表（失败 → 回退仅当前版本，隐藏选择器）
+  useEffect(() => {
+    let alive = true
+    setListLoading(true)
+    setListErr(null)
+    api
+      .listVersions(ontologyId)
+      .then((r) => {
+        if (alive) setList(r.versions ?? [])
+      })
+      .catch((e: any) => {
+        if (alive) {
+          setList(null)
+          setListErr(e.message)
+        }
+      })
+      .finally(() => {
+        if (alive) setListLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [ontologyId])
+
+  // 默认选中最新含原始源文件的版本，否则最后一版
+  useEffect(() => {
+    if (!list || list.length === 0) {
+      setVersion(null)
+      return
+    }
+    const pick = [...list].reverse().find((v) => v.has_original) ?? list[list.length - 1]
+    setVersion(pick.version)
+  }, [list])
+
+  // 版本列表不可用 → 回退当前版本
+  useEffect(() => {
+    if (listErr && currentVersion) setVersion(currentVersion)
+  }, [listErr, currentVersion])
+
+  const meta = list?.find((v) => v.version === version) ?? null
+
+  // 原始源文件（按体积与 has_original 决定是否拉取）
+  useEffect(() => {
+    if (version == null) {
+      setOriginal(null)
+      setTooLarge(false)
+      return
+    }
+    if (meta && !meta.has_original) {
+      setOriginal(null)
+      setOrigErr(null)
+      setTooLarge(false)
+      return
+    }
+    if (meta && (meta.original_size ?? 0) > LARGE_SOURCE) {
+      setOriginal(null)
+      setTooLarge(true)
+      return
+    }
+    let alive = true
+    setOrigLoading(true)
+    setOrigErr(null)
+    setTooLarge(false)
+    api
+      .getVersionOriginal(ontologyId, version)
+      .then((t) => {
+        if (!alive) return
+        if (t.length > LARGE_SOURCE) {
+          setOriginal(null)
+          setTooLarge(true)
+        } else {
+          setOriginal(t)
+        }
+      })
+      .catch((e: any) => {
+        if (alive) {
+          setOriginal(null)
+          setOrigErr(e.message)
+        }
+      })
+      .finally(() => {
+        if (alive) setOrigLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [ontologyId, version, meta?.has_original, meta?.original_size])
+
+  const copyOriginal = () => {
+    navigator.clipboard
+      ?.writeText(original ?? '')
+      .then(() => showToast('源码已复制'))
+      .catch(() => showToast('复制失败', 'err'))
+  }
+
+  const specText = spec ? JSON.stringify(spec, null, 2) : ''
+  const dlUrl = api.versionOriginalUrl(ontologyId, version ?? currentVersion ?? 1)
+
+  return (
+    <Tabs
+      size="small"
+      activeKey={sub}
+      onChange={(k) => setSub(k as 'original' | 'spec')}
+      items={[
+        {
+          key: 'original',
+          label: '原始源文件',
+          children: (
+            <>
+              <div className="onto-sec" style={{ marginTop: 4 }}>
+                {listErr ? (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    版本列表不可用（{listErr}），仅显示当前版本 v{currentVersion ?? '—'}
+                  </Typography.Text>
+                ) : (
+                  <>
+                    <span className="onto-sec-title">版本</span>
+                    <Select
+                      size="small"
+                      value={version ?? undefined}
+                      loading={listLoading}
+                      onChange={setVersion}
+                      style={{ width: 260 }}
+                      placeholder="选择版本"
+                      options={(list ?? []).map((v) => ({
+                        value: v.version,
+                        label: `v${v.version} · ${v.created_at}${v.has_original ? '' : '（无源文件）'}`,
+                      }))}
+                    />
+                  </>
+                )}
+                <span className="hit-spacer" />
+                {meta?.original_format && (
+                  <Tag color="blue" style={{ margin: 0 }}>
+                    {FORMAT_LABEL[meta.original_format] ?? meta.original_format}
+                  </Tag>
+                )}
+                {original != null && (
+                  <Button size="small" icon={<CopyOutlined />} onClick={copyOriginal}>
+                    复制
+                  </Button>
+                )}
+              </div>
+              {origErr ? (
+                <Alert type="warning" showIcon message="原始源文件获取失败" description={origErr} />
+              ) : tooLarge ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="源文件超过 1MB，已切换为下载查看"
+                  description={
+                    <Button size="small" icon={<DownloadOutlined />} href={dlUrl} download target="_blank" rel="noreferrer">
+                      下载查看
+                    </Button>
+                  }
+                />
+              ) : origLoading ? (
+                <Spin size="small" />
+              ) : original != null ? (
+                <div className="onto-cm-wrap">
+                  <CodeMirror
+                    value={original}
+                    readOnly
+                    editable={false}
+                    height="360px"
+                    basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: false }}
+                    extensions={[EditorView.lineWrapping]}
+                  />
+                </div>
+              ) : meta && !meta.has_original ? (
+                <Typography.Text type="secondary">
+                  该版本无原始源文件（由编辑 / 灌装产生，仅存 Spec 快照）
+                </Typography.Text>
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择版本查看原始源文件" />
+              )}
+            </>
+          ),
+        },
+        {
+          key: 'spec',
+          label: 'Spec JSON',
+          children: spec ? (
+            <div className="onto-cm-wrap">
+              <CodeMirror
+                value={specText}
+                readOnly
+                editable={false}
+                height="360px"
+                basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: false }}
+                extensions={[EditorView.lineWrapping]}
+              />
+            </div>
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未保存 Spec（S2 保存后可在此查看格式化 JSON）" />
+          ),
+        },
+      ]}
+    />
+  )
+}
+
+// ---------------------------------------------------------------------------
+// S6 对外暴露
+// ---------------------------------------------------------------------------
 
 function S6Expose({ ontology, profiles }: { ontology: Ontology; profiles: RuntimeProfile[] }) {
   const { showToast } = useUI()
@@ -1783,39 +2324,6 @@ function S6Expose({ ontology, profiles }: { ontology: Ontology; profiles: Runtim
   const [guide, setGuide] = useState<string | null>(null)
   const [guideErr, setGuideErr] = useState<string | null>(null)
   const [guideLoading, setGuideLoading] = useState(false)
-
-  // SPARQL 工作台（REQ-92）
-  const [sparql, setSparql] = useState(DEFAULT_SPARQL)
-  const [sparqlBusy, setSparqlBusy] = useState(false)
-  const [sparqlErr, setSparqlErr] = useState<string | null>(null)
-  const [sparqlCols, setSparqlCols] = useState<string[]>([])
-  const [sparqlRows, setSparqlRows] = useState<Record<string, string>[]>([])
-  const [sparqlRaw, setSparqlRaw] = useState<string | null>(null)
-
-  // 翻译透视（REQ-94）
-  const [traces, setTraces] = useState<TraceEntry[]>([])
-  const [tracesLoading, setTracesLoading] = useState(false)
-
-  const loadTraces = async () => {
-    if (!running) {
-      setTraces([])
-      return
-    }
-    setTracesLoading(true)
-    try {
-      const r = await api.listTraces(running.id, 50)
-      setTraces(r.traces ?? [])
-    } catch {
-      setTraces([])
-    } finally {
-      setTracesLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadTraces()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running?.id])
 
   useEffect(() => {
     let alive = true
@@ -1842,45 +2350,6 @@ function S6Expose({ ontology, profiles }: { ontology: Ontology; profiles: Runtim
       ?.writeText(guide ?? '')
       .then(() => showToast('指引已复制'))
       .catch(() => showToast('复制失败', 'err'))
-  }
-
-  const runSparql = async () => {
-    if (!running) {
-      showToast('请先在 S5 启动运行方案', 'err')
-      return
-    }
-    if (!sparql.trim()) {
-      showToast('请输入 SPARQL 查询', 'err')
-      return
-    }
-    setSparqlBusy(true)
-    setSparqlErr(null)
-    setSparqlRaw(null)
-    setSparqlCols([])
-    setSparqlRows([])
-    try {
-      const r = await api.runSparql(running.id, sparql.trim())
-      const vars: string[] = r.json?.head?.vars ?? []
-      const binds: Record<string, { value?: string }>[] = r.json?.results?.bindings ?? []
-      if (vars.length && binds.length) {
-        setSparqlCols(vars)
-        setSparqlRows(
-          binds.map((b, i) => {
-            const row: Record<string, string> = { __key: String(i) }
-            for (const v of vars) row[v] = b[v]?.value ?? ''
-            return row
-          }),
-        )
-      } else {
-        setSparqlRaw((r.raw || '（空结果）').slice(0, 4000))
-      }
-      loadTraces()
-    } catch (e: any) {
-      setSparqlErr(e.message)
-      loadTraces()
-    } finally {
-      setSparqlBusy(false)
-    }
   }
 
   return (
@@ -1929,63 +2398,13 @@ function S6Expose({ ontology, profiles }: { ontology: Ontology; profiles: Runtim
         <pre className="onto-guide-pre">{guideLoading ? '加载中…' : guide || '（暂无指引）'}</pre>
       )}
 
-      <div className="onto-sec" style={{ marginTop: 18 }}>
-        <span className="onto-sec-title">SPARQL 工作台（REQ-92，直连方案端点 /api/runtime-profiles/{'{id}'}/sparql）</span>
-      </div>
-      {!running ? (
-        <Alert type="info" showIcon message="方案未运行：在 S5 启动后可在此直接执行 SPARQL（非 running 状态后端返回 409）。" />
-      ) : (
-        <>
-          <Input.TextArea
-            className="onto-spec-editor"
-            value={sparql}
-            onChange={(e) => setSparql(e.target.value)}
-            autoSize={{ minRows: 4, maxRows: 12 }}
-            spellCheck={false}
-          />
-          <Space style={{ marginTop: 8 }} size={10}>
-            <Button type="primary" icon={<PlayCircleOutlined />} loading={sparqlBusy} onClick={runSparql}>
-              执行查询
-            </Button>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              Accept: application/sparql-results+json · 状态码与错误原样透传引擎
-            </Typography.Text>
-          </Space>
-          {sparqlErr && <Alert type="error" showIcon style={{ marginTop: 10 }} message="查询失败（引擎返回）" description={sparqlErr} />}
-          {sparqlCols.length > 0 && (
-            <Table
-              rowKey="__key"
-              columns={sparqlCols.map((v) => ({ title: v, dataIndex: v }))}
-              dataSource={sparqlRows}
-              pagination={{ pageSize: 10, hideOnSinglePage: true }}
-              size="small"
-              style={{ marginTop: 10 }}
-              scroll={{ x: 'max-content' }}
-            />
-          )}
-          {sparqlRaw && <pre className="onto-guide-pre" style={{ marginTop: 10 }}>{sparqlRaw}</pre>}
-        </>
-      )}
-
-      <div className="onto-sec" style={{ marginTop: 18 }}>
-        <span className="onto-sec-title">翻译透视（REQ-94，最近 50 条，失败查询同样留痕）</span>
-        <span className="hit-spacer" />
-        <Button size="small" icon={<ReloadOutlined />} onClick={loadTraces} disabled={!running || tracesLoading}>
-          刷新
-        </Button>
-      </div>
-      {!running ? (
-        <Typography.Text type="secondary">方案未运行，暂无翻译记录。</Typography.Text>
-      ) : (
-        <Table<TraceEntry>
-          rowKey={(r) => String(r.id ?? `${r.ts}-${r.tool}`)}
-          columns={TRACE_COLUMNS}
-          dataSource={traces}
-          loading={tracesLoading}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
-          size="small"
-        />
-      )}
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginTop: 14 }}
+        message="SPARQL 工作台与翻译透视已迁至 S5 运行方式（方案 | SPARQL | 透视）与本页「查询 & 源码」入口"
+        description="SPARQL 工作台（REQ-92）按运行方案绑定；翻译透视（REQ-94）在 S5「透视」页签；源码视图（REQ-93）在「查询 & 源码 → 源码」。"
+      />
     </>
   )
 }

@@ -289,6 +289,12 @@ export interface RuntimeProfile {
 
 // ---- P1 尾适配（REQ-92/93/94 + 学习示例） ----
 
+/**
+ * 版本原始源文件格式（VersionMeta.original_format；REQ-93 源码视图按格式选渲染模式）。
+ * 与构建平面 SaveVersion 落库口径一致：turtle / owl_rdfxml / spec_json / csv / graphml。
+ */
+export type OriginalFormat = 'turtle' | 'owl_rdfxml' | 'spec_json' | 'csv' | 'graphml'
+
 /** 版本历史条目（GET /api/ontologies/{id}/versions，REQ-93） */
 export interface VersionMeta {
   version: number

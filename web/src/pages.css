@@ -240,3 +240,45 @@
 /* P1 尾适配：S1 学习示例行 */
 .onto-learn-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid #f0f0f0; border-radius: 8px; }
 .onto-learn-row .ant-btn { flex-shrink: 0; }
+
+/* ---- P1：SPARQL 工作台（Yasgui，REQ-92）---- */
+.onto-yasgui {
+  height: clamp(420px, 62vh, 640px);
+  margin-top: 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  overflow: auto;
+  background: #fff;
+}
+/* Yasgui 自带样式较素，收敛圆角与字号以贴合工作台观感 */
+.onto-yasgui .yasgui { border-radius: 10px; }
+.onto-yasgui .tabsList { background: #f6f7fb; }
+.onto-yasgui .yasqe .CodeMirror { font-family: var(--mono); font-size: 12.5px; }
+.onto-yasgui .yasr { font-size: 12.5px; }
+
+/* 未启用态占位（无 running 方案时的「查询」页签） */
+.onto-disabled-pane {
+  margin-top: 12px;
+  padding: 34px 16px;
+  border: 1px dashed var(--c-line);
+  border-radius: 10px;
+  background: #fbfbfd;
+  color: var(--c-ink-3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* ---- P1：翻译透视图表（REQ-94）---- */
+.onto-trace-expand { padding: 2px 6px 8px; }
+
+/* ---- P1：源码视图（CodeMirror 6，REQ-93）---- */
+.onto-cm-wrap {
+  margin-top: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.onto-cm-wrap .cm-editor { font-family: var(--mono); font-size: 12px; }
+.onto-cm-wrap .cm-editor.cm-focused { outline: none; }
+.onto-cm-wrap .cm-scroller { line-height: 1.6; }
