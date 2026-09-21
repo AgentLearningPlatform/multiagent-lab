@@ -1,3 +1,4 @@
+import '@xyflow/react/dist/style.css'
 import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
@@ -42,6 +43,19 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { api, ApiError } from '../api/client'
+import {
+  Background,
+  BackgroundVariant,
+  Controls,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Position,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+} from '@xyflow/react'
+import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import type {
   AiDraftResult,
   Conversation,
@@ -132,10 +146,6 @@ const TOOL_COLUMNS: ColumnsType<(typeof ONTO_TOOLS)[number]> = [
 
 function emptySpec(name: string): Spec {
   return { name, description: '', concepts: [], relations: [], instances: [] }
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s
 }
 
 function StageDots({ flags }: { flags: boolean[] }) {
@@ -1203,14 +1213,13 @@ function S3Validate({
 }
 
 // ---------------------------------------------------------------------------
-// S4 可视化（手绘 SVG，无新依赖）
+// S4 可视化（React Flow 交互式图谱，@xyflow/react v12）
 // ---------------------------------------------------------------------------
 
-const NODE_W = 150
-const NODE_H = 42
-const GAP_X = 34
-const GAP_Y = 74
-const PAD = 26
+const NODE_W = 168
+const COL_GAP = 46
+const ROW_STEP = 112
+const PAD = 32
 
 function computeDepths(concepts: SpecConcept[]): Map<string, number> {
   const byName = new Map(concepts.map((c) => [c.name, c]))
@@ -1237,7 +1246,7 @@ interface NodePos {
   y: number
 }
 
-function layoutGraph(spec: Spec): { nodes: NodePos[]; width: number; height: number } {
+function layoutGraph(spec: Spec): NodePos[] {
   const concepts = spec.concepts ?? []
   const depth = computeDepths(concepts)
   const levels = new Map<number, SpecConcept[]>()
@@ -1248,22 +1257,122 @@ function layoutGraph(spec: Spec): { nodes: NodePos[]; width: number; height: num
   }
   const rows = [...levels.entries()].sort((a, b) => a[0] - b[0])
   const maxCols = Math.max(1, ...rows.map(([, cs]) => cs.length))
-  const width = PAD * 2 + maxCols * NODE_W + Math.max(0, maxCols - 1) * GAP_X
+  const width = PAD * 2 + maxCols * NODE_W + Math.max(0, maxCols - 1) * COL_GAP
   const nodes: NodePos[] = []
   for (const [d, cs] of rows) {
     cs.sort((a, b) => a.name.localeCompare(b.name))
-    const rowW = cs.length * NODE_W + Math.max(0, cs.length - 1) * GAP_X
+    const rowW = cs.length * NODE_W + Math.max(0, cs.length - 1) * COL_GAP
     const startX = (width - rowW) / 2
-    cs.forEach((c, i) => nodes.push({ c, x: startX + i * (NODE_W + GAP_X), y: PAD + d * (NODE_H + GAP_Y) }))
+    cs.forEach((c, i) => nodes.push({ c, x: startX + i * (NODE_W + COL_GAP), y: PAD + d * ROW_STEP }))
   }
-  const height = PAD * 2 + rows.length * NODE_H + Math.max(0, rows.length - 1) * GAP_Y
-  return { nodes, width, height }
+  return nodes
 }
 
-function S4Graph({ spec }: { spec: Spec | null }) {
-  const graph = useMemo(() => (spec ? layoutGraph(spec) : null), [spec])
+/** 节点数据（React Flow node.data）：显示名 + 原名 + 实例数 + 定义（悬停/详情） */
+interface ConceptData extends Record<string, unknown> {
+  label: string
+  name: string
+  count: number
+  definition?: string
+}
+type ConceptFlowNode = Node<ConceptData, 'concept'>
 
-  if (!spec || (spec.concepts?.length ?? 0) === 0) {
+/** 每个概念的实例数（节点徽标 / 详情） */
+function instanceCounts(spec: Spec): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const inst of spec.instances ?? []) m.set(inst.concept, (m.get(inst.concept) ?? 0) + 1)
+  return m
+}
+
+/** Spec → React Flow 节点：沿用「按父深度分层」布局给初始坐标，之后由 React Flow 接管拖拽/缩放 */
+function buildNodes(spec: Spec): ConceptFlowNode[] {
+  const counts = instanceCounts(spec)
+  return layoutGraph(spec).map(({ c, x, y }) => ({
+    id: c.name,
+    type: 'concept' as const,
+    position: { x, y },
+    style: { width: NODE_W },
+    data: { label: c.label || c.name, name: c.name, count: counts.get(c.name) ?? 0, definition: c.definition },
+  }))
+}
+
+/**
+ * Spec → React Flow 边：
+ *  - 关系：实线 + 标签 + 箭头（source=from → target=to）；
+ *  - 父子：虚线（source=父 → target=子，保证自上而下走向）。
+ */
+function buildEdges(spec: Spec): Edge[] {
+  const names = new Set((spec.concepts ?? []).map((c) => c.name))
+  const edges: Edge[] = []
+  for (const r of spec.relations ?? []) {
+    if (!names.has(r.from) || !names.has(r.to)) continue
+    edges.push({
+      id: `rel:${r.name}:${r.from}:${r.to}`,
+      source: r.from,
+      target: r.to,
+      label: r.label || r.name,
+      type: 'smoothstep',
+      className: 'onto-flow-edge-rel',
+      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+    })
+  }
+  for (const c of spec.concepts ?? []) {
+    for (const p of c.parents ?? []) {
+      if (!names.has(p)) continue
+      edges.push({
+        id: `parent:${p}:${c.name}`,
+        source: p,
+        target: c.name,
+        type: 'smoothstep',
+        className: 'onto-flow-edge-parent',
+        style: { strokeDasharray: '5 4' },
+      })
+    }
+  }
+  return edges
+}
+
+/** 自定义概念节点：名称 + 实例数徽标；title 承载定义 */
+function ConceptNode({ data, selected }: NodeProps<ConceptFlowNode>) {
+  return (
+    <div className={`onto-flow-node${selected ? ' selected' : ''}`} title={data.definition || data.label}>
+      <Handle type="target" position={Position.Top} className="onto-flow-handle" />
+      <span className="onto-flow-node-label">{data.label}</span>
+      {data.count > 0 && <span className="onto-flow-node-badge">{data.count}</span>}
+      <Handle type="source" position={Position.Bottom} className="onto-flow-handle" />
+    </div>
+  )
+}
+
+// nodeTypes 必须定义在组件外，避免每次渲染重建导致 React Flow 重挂载
+const nodeTypes: NodeTypes = { concept: ConceptNode }
+
+function S4Graph({ spec }: { spec: Spec | null }) {
+  const hasConcepts = !!spec && (spec.concepts?.length ?? 0) > 0
+  const initialNodes = useMemo(() => (spec ? buildNodes(spec) : []), [spec])
+  const initialEdges = useMemo(() => (spec ? buildEdges(spec) : []), [spec])
+  const [nodes, setNodes, onNodesChange] = useNodesState<ConceptFlowNode>(initialNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Spec 变化时重置图谱（拖拽后的坐标不跨 Spec 版本保留）
+  useEffect(() => {
+    setNodes(initialNodes)
+    setEdges(initialEdges)
+    setSelectedId(null)
+  }, [initialNodes, initialEdges, setNodes, setEdges])
+
+  const counts = useMemo(() => (spec ? instanceCounts(spec) : new Map<string, number>()), [spec])
+  const selected = useMemo(
+    () => (spec && selectedId ? spec.concepts.find((c) => c.name === selectedId) ?? null : null),
+    [spec, selectedId],
+  )
+  const selectedInstances = useMemo(
+    () => (spec && selected ? (spec.instances ?? []).filter((i) => i.concept === selected.name) : []),
+    [spec, selected],
+  )
+
+  if (!hasConcepts || !spec) {
     return (
       <div className="work-empty" style={{ minHeight: 220 }}>
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无概念可可视化；请先在 S1 创建 / 导入，或到 S2 保存 Spec" />
@@ -1271,87 +1380,96 @@ function S4Graph({ spec }: { spec: Spec | null }) {
     )
   }
 
-  const nodes = graph!.nodes
-  const pos = new Map(nodes.map((n) => [n.c.name, n]))
-  const center = (n: NodePos) => ({ x: n.x + NODE_W / 2, y: n.y + NODE_H / 2 })
-  const instCount = new Map<string, number>()
-  for (const inst of spec.instances ?? []) instCount.set(inst.concept, (instCount.get(inst.concept) ?? 0) + 1)
-
-  const edges: { key: string; a: NodePos; b: NodePos; label?: string; parent?: boolean }[] = []
-  for (const r of spec.relations ?? []) {
-    const a = pos.get(r.from)
-    const b = pos.get(r.to)
-    if (a && b) edges.push({ key: `r-${r.name}-${r.from}-${r.to}`, a, b, label: r.label || r.name, parent: false })
-  }
-  for (const c of spec.concepts) {
-    for (const p of c.parents ?? []) {
-      const a = pos.get(c.name)
-      const b = pos.get(p)
-      if (a && b) edges.push({ key: `p-${c.name}-${p}`, a, b, parent: true })
-    }
-  }
-
   return (
-    <div className="onto-graph-wrap">
-      <div className="onto-graph-legend">
-        <Tag color="blue" style={{ margin: 0 }}>概念 {spec.concepts.length}</Tag>
-        <Tag color="geekblue" style={{ margin: 0 }}>关系 {spec.relations?.length ?? 0}</Tag>
-        <Tag color="purple" style={{ margin: 0 }}>实例 {spec.instances?.length ?? 0}</Tag>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          实线 = 关系（from → to）；虚线 = 父子（parents）；节点右上角数字为该概念的实例数；悬停查看定义。
-        </Typography.Text>
-      </div>
-      <svg className="onto-graph" viewBox={`0 0 ${graph!.width} ${graph!.height}`} preserveAspectRatio="xMidYMid meet" role="img">
-        <defs>
-          <marker id="onto-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" className="onto-arrow-head" />
-          </marker>
-        </defs>
-        {edges.map((e) => {
-          const ca = center(e.a)
-          const cb = center(e.b)
-          const mx = (ca.x + cb.x) / 2
-          const my = (ca.y + cb.y) / 2
-          return (
-            <g key={e.key}>
-              <line
-                x1={ca.x}
-                y1={ca.y}
-                x2={cb.x}
-                y2={cb.y}
-                className={`onto-edge${e.parent ? ' parent' : ''}`}
-                markerEnd="url(#onto-arrow)"
-              />
-              {e.label && !e.parent && (
-                <text x={mx} y={my - 4} textAnchor="middle" className="onto-edge-label">
-                  {truncate(e.label, 14)}
-                </text>
+    <Splitter className="onto-flow-split" orientation="horizontal">
+      <Splitter.Panel defaultSize="68%" min="40%">
+        <div className="onto-flow-pane">
+          <ReactFlow
+            key={initialNodes.map((n) => n.id).join('|')}
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.2}
+            maxZoom={2}
+            nodesConnectable={false}
+            onNodeClick={(_, n) => setSelectedId(n.id)}
+            onPaneClick={() => setSelectedId(null)}
+            className="onto-flow"
+          >
+            <Background variant={BackgroundVariant.Dots} gap={18} size={1.5} color="#c9cee0" />
+            <MiniMap position="top-right" pannable zoomable nodeColor="#c9cef3" maskColor="rgba(246, 247, 251, 0.72)" />
+            <Controls showInteractive={false} position="bottom-left" />
+          </ReactFlow>
+        </div>
+      </Splitter.Panel>
+      <Splitter.Panel min="22%">
+        <div className="onto-flow-info">
+          <div className="onto-flow-info-title">图例</div>
+          <div className="onto-flow-legend">
+            <span className="onto-flow-legend-line rel" />
+            <span>实线 = 关系（from → to）</span>
+          </div>
+          <div className="onto-flow-legend">
+            <span className="onto-flow-legend-line parent" />
+            <span>虚线 = 继承（父 → 子）</span>
+          </div>
+          <div className="onto-flow-legend">
+            <span className="onto-flow-legend-badge">n</span>
+            <span>节点徽标 = 实例数</span>
+          </div>
+
+          <div className="onto-flow-info-title spaced">统计</div>
+          <div className="onto-flow-stats">
+            <span>概念 <b>{spec.concepts.length}</b></span>
+            <span>关系 <b>{spec.relations?.length ?? 0}</b></span>
+            <span>实例 <b>{spec.instances?.length ?? 0}</b></span>
+          </div>
+
+          <div className="onto-flow-info-title spaced">选中节点</div>
+          {selected ? (
+            <div className="onto-flow-detail">
+              <div className="onto-flow-detail-name">{selected.label || selected.name}</div>
+              <div className="onto-flow-detail-key">{selected.name}</div>
+              <p className={`onto-flow-detail-def${selected.definition ? '' : ' muted'}`}>
+                {selected.definition || '未填写定义'}
+              </p>
+              <div className="onto-flow-detail-row">
+                <span className="onto-flow-detail-label">父概念</span>
+                {selected.parents && selected.parents.length > 0 ? (
+                  <Space size={4} wrap>
+                    {selected.parents.map((p) => (
+                      <Tag key={p} style={{ margin: 0 }}>{p}</Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>—</Typography.Text>
+                )}
+              </div>
+              <div className="onto-flow-detail-row">
+                <span className="onto-flow-detail-label">实例</span>
+                <Typography.Text style={{ fontSize: 12 }}>{counts.get(selected.name) ?? 0} 个</Typography.Text>
+              </div>
+              {selectedInstances.length > 0 && (
+                <Space size={4} wrap style={{ marginTop: 6 }}>
+                  {selectedInstances.slice(0, 12).map((i) => (
+                    <Tag key={i.name} color="purple" style={{ margin: 0 }}>{i.name}</Tag>
+                  ))}
+                  {selectedInstances.length > 12 && (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>等 {selectedInstances.length} 个</Typography.Text>
+                  )}
+                </Space>
               )}
-            </g>
-          )
-        })}
-        {nodes.map((n) => {
-          const cnt = instCount.get(n.c.name) ?? 0
-          return (
-            <g key={n.c.name} transform={`translate(${n.x},${n.y})`} className="onto-node">
-              <title>{n.c.definition || n.c.label || n.c.name}</title>
-              <rect width={NODE_W} height={NODE_H} rx={9} />
-              <text x={NODE_W / 2} y={NODE_H / 2 + 1} textAnchor="middle" dominantBaseline="middle">
-                {truncate(n.c.label || n.c.name, 16)}
-              </text>
-              {cnt > 0 && (
-                <g transform={`translate(${NODE_W - 8}, 8)`} className="onto-node-badge">
-                  <circle r={9} />
-                  <text textAnchor="middle" dominantBaseline="middle">
-                    {cnt}
-                  </text>
-                </g>
-              )}
-            </g>
-          )
-        })}
-      </svg>
-    </div>
+            </div>
+          ) : (
+            <p className="onto-flow-hint">点击图中节点查看定义、父概念与实例；滚轮缩放、拖拽平移 / 节点。</p>
+          )}
+        </div>
+      </Splitter.Panel>
+    </Splitter>
   )
 }
 
