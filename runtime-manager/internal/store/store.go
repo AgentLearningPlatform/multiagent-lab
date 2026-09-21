@@ -64,8 +64,13 @@ func (s *Store) migrate(dir string) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", f, err)
 		}
-		if _, err := s.db.Exec(string(bts)); err != nil {
-			return fmt.Errorf("apply migration %s: %w", f, err)
+		for _, stmt := range splitSQL(string(bts)) {
+			if strings.TrimSpace(stmt) == "" {
+				continue
+			}
+			if _, err := s.db.Exec(stmt); err != nil {
+				return fmt.Errorf("apply migration %s: %w", f, err)
+			}
 		}
 	}
 	return nil
@@ -243,4 +248,26 @@ func (s *Store) ListTraces(profileID string, limit int) ([]*Trace, error) {
 		out = append(out, &t)
 	}
 	return out, rows.Err()
+}
+
+// splitSQL 将多语句迁移脚本按分号拆分为独立语句（modernc sqlite 的 Exec 只执行第一条）。
+func splitSQL(script string) []string {
+	var stmts []string
+	var cur strings.Builder
+	inStr := false
+	for _, r := range script {
+		switch {
+		case r == '\'':
+			inStr = !inStr
+		case r == ';' && !inStr:
+			stmts = append(stmts, cur.String())
+			cur.Reset()
+			continue
+		}
+		cur.WriteRune(r)
+	}
+	if strings.TrimSpace(cur.String()) != "" {
+		stmts = append(stmts, cur.String())
+	}
+	return stmts
 }

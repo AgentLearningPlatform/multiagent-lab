@@ -44,6 +44,10 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/ontologies/{id}/guide", s.guide)
 	m.HandleFunc("POST /api/ontologies/seed-sample", s.seedSample)
 	m.HandleFunc("POST /api/ontologies/ai-draft", s.aiDraft)
+	m.HandleFunc("GET /api/ontologies/seed-learning", s.listLearning)
+	m.HandleFunc("POST /api/ontologies/seed-learning", s.seedLearning)
+	m.HandleFunc("GET /api/ontologies/{id}/versions", s.listVersions)
+	m.HandleFunc("GET /api/ontologies/{id}/versions/{version}/original", s.versionOriginal)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -161,6 +165,7 @@ func (s *Server) saveSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, _ := s.Store.BumpVersion(id)
+	_ = s.Store.SaveVersion(id, v, string(bts), "", "")
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "version": v})
 }
 
@@ -253,12 +258,8 @@ func (s *Server) importOntology(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	v, _ := s.Store.BumpVersion(id)
-	if origFormat != "" {
-		_ = s.Store.SaveVersion(id, v, string(bts), origFormat, content)
-	} else {
-		_ = s.Store.SaveVersion(id, v, string(bts), "", "")
-	}
+	// 导入即首次入库：CreateOntology 初始 version=1，此处不再 Bump（REQ-93 版本语义）
+	_ = s.Store.SaveVersion(id, 1, string(bts), origFormat, content)
 	o, _ := s.Store.GetOntology(id)
 	writeJSON(w, http.StatusCreated, map[string]any{"ontology": o, "report": rep})
 }
@@ -391,10 +392,26 @@ func (s *Server) aiDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "LLM 辅助创建未配置（PLATFORM_URL）"})
 		return
 	}
-	var req struct{ Description, ExtraHint string }
+	var req struct {
+		Description         string   `json:"description"`
+		ExtraHint           string   `json:"extra_hint"`
+		CapabilityQuestions []string `json:"capability_questions"` // 可选：AI 创建的能力问题引导（§4.8.3）
+	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Description) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "description 必填"})
 		return
+	}
+	if len(req.CapabilityQuestions) > 0 {
+		var b strings.Builder
+		b.WriteString("请重点让本体具备回答以下能力问题的潜力（据此补充概念/关系/属性建模）：")
+		for i, q := range req.CapabilityQuestions {
+			fmt.Fprintf(&b, "\n%d. %s", i+1, strings.TrimSpace(q))
+		}
+		if req.ExtraHint == "" {
+			req.ExtraHint = b.String()
+		} else {
+			req.ExtraHint += "\n\n" + b.String()
+		}
 	}
 	res, err := s.LLM.Draft(req.Description, req.ExtraHint)
 	if res == nil {
