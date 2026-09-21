@@ -612,7 +612,16 @@ export default function ChatWindow({
 
       <div className="composer">
         <div className="composer-inner">
-          {/* 会话级快捷切换（常驻发送框上方）：本体方案 / 知识库（含检索开关与参数） / 已挂技能 */}
+          <Sender
+            value={input}
+            onChange={setInput}
+            onSubmit={() => send()}
+            onCancel={stop}
+            loading={running}
+            placeholder={placeholder}
+            disabled={!canSend}
+          />
+          {/* 会话级快捷切换（常驻发送框下方）：本体方案 / 知识库（含检索开关与参数） / 已挂技能 */}
           <div className="quickbar">
             <div className="qb-item">
               <span className="qb-label">本体</span>
@@ -693,17 +702,8 @@ export default function ChatWindow({
               </Space>
             )}
           </div>
-          <Sender
-            value={input}
-            onChange={setInput}
-            onSubmit={() => send()}
-            onCancel={stop}
-            loading={running}
-            placeholder={placeholder}
-            disabled={!canSend}
-          />
           <div className="tips">
-            Enter 发送 · Shift+Enter 换行 · 运行过程（开始/思考/工具/用量/完成）以卡片显示，「调试」可查看原始事件
+            Enter 发送 · Shift+Enter 换行 · 运行过程以卡片显示，「调试」可查看原始事件
           </div>
         </div>
       </div>

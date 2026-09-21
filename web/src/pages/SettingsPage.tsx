@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Menu, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Form, Input, Menu, Modal, Popconfirm, Select, Space, Splitter, Switch, Table, Tabs, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../api/client'
 import type { ModelConnection } from '../api/types'
@@ -216,112 +216,119 @@ export default function SettingsPage() {
   ]
 
   return (
-    <div className="main">
-      <aside className="sidebar">
-        <div className="side-head">
-          <span className="side-title">设置</span>
-        </div>
-        <Menu
-          mode="vertical"
-          selectedKeys={[category]}
-          onClick={({ key }) => setCategory(key as Category)}
-          style={{ padding: '0 10px', background: 'transparent' }}
-          items={[
-            { key: 'models', label: '模型管理' },
-            { key: 'global', label: <Space size={6}>全局参数<Tag style={{ margin: 0 }}>P1 预留</Tag></Space>, disabled: true },
-            { key: 'security', label: <Space size={6}>数据与安全<Tag style={{ margin: 0 }}>P2 预留</Tag></Space>, disabled: true },
-          ]}
-        />
-        <div className="settings-note">
-          模型连接集中在此维护，智能体配置只做<strong>引用</strong>（chat / embedding 各至多一条默认）。
-        </div>
-      </aside>
+    <Splitter
+      className="main sidebar-splitter"
+      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+    >
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+        <aside className="sidebar">
+          <div className="side-head">
+            <span className="side-title">设置</span>
+          </div>
+          <Menu
+            mode="vertical"
+            selectedKeys={[category]}
+            onClick={({ key }) => setCategory(key as Category)}
+            style={{ padding: '0 10px', background: 'transparent' }}
+            items={[
+              { key: 'models', label: '模型管理' },
+              { key: 'global', label: <Space size={6}>全局参数<Tag style={{ margin: 0 }}>P1 预留</Tag></Space>, disabled: true },
+              { key: 'security', label: <Space size={6}>数据与安全<Tag style={{ margin: 0 }}>P2 预留</Tag></Space>, disabled: true },
+            ]}
+          />
+          <div className="settings-note">
+            模型连接集中在此维护，智能体配置只做<strong>引用</strong>（chat / embedding 各至多一条默认）。
+          </div>
+        </aside>
+      </Splitter.Panel>
+      <Splitter.Panel className="content-panel">
 
-      <div className="settings-main">
-        <div className="settings-head">
-          <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>模型管理</Typography.Title>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            提供商按 Base URL 聚合（同一 Base URL 下的多个模型共享提供商身份）；chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。
-          </Typography.Paragraph>
-        </div>
+        <div className="settings-main">
+          <div className="settings-head">
+            <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>模型管理</Typography.Title>
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+              提供商按 Base URL 聚合（同一 Base URL 下的多个模型共享提供商身份）；chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。
+            </Typography.Paragraph>
+          </div>
 
-        {!hasChat && (
-          <Alert
-            type="warning"
-            showIcon
+          {!hasChat && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="尚未配置可用的对话模型"
+              description="预置了「DeepSeek（预置）」连接：填入 API Key 并启用、设为默认，即可开始对话。"
+            />
+          )}
+
+          <Tabs
             style={{ marginTop: 12 }}
-            message="尚未配置可用的对话模型"
-            description="预置了「DeepSeek（预置）」连接：填入 API Key 并启用、设为默认，即可开始对话。"
+            activeKey={tab}
+            onChange={(k) => setTab(k as 'providers' | 'models')}
+            items={[
+              {
+                key: 'providers',
+                label: `模型提供商 (${groups.length})`,
+                children: (
+                  <>
+                    <Table<ProviderGroup>
+                      rowKey="key"
+                      columns={providerColumns}
+                      dataSource={groups}
+                      pagination={false}
+                      size="middle"
+                      locale={{ emptyText: '暂无提供商，点击下方按钮添加' }}
+                    />
+                    <div className="tab-footer">
+                      <Button type="primary" onClick={() => setProviderModal('new')}>＋ 添加提供商</Button>
+                      <span className="hint">名称 · 协议 · Base URL · API Key（掩码输入）· 启用；编辑将批量应用到该提供商下全部模型连接</span>
+                    </div>
+                  </>
+                ),
+              },
+              {
+                key: 'models',
+                label: `模型 (${conns.length})`,
+                children: (
+                  <>
+                    <Table<ModelConnection>
+                      rowKey="id"
+                      columns={modelColumns}
+                      dataSource={conns}
+                      pagination={false}
+                      size="middle"
+                      locale={{ emptyText: '暂无模型，点击下方按钮添加' }}
+                    />
+                    <div className="tab-footer">
+                      <Button type="primary" onClick={() => setModelModal('new')}>＋ 添加模型</Button>
+                      <span className="hint">所属提供商（引用「模型提供商」页签的分组）· 模型名 · 类型 · 设为该类型默认</span>
+                    </div>
+                  </>
+                ),
+              },
+            ]}
+          />
+        </div>
+
+        {providerModal !== undefined && (
+          <ProviderModal
+            group={providerModal}
+            conns={conns}
+            onClose={() => setProviderModal(undefined)}
+            onSaved={() => { setProviderModal(undefined); reload() }}
           />
         )}
-
-        <Tabs
-          style={{ marginTop: 12 }}
-          activeKey={tab}
-          onChange={(k) => setTab(k as 'providers' | 'models')}
-          items={[
-            {
-              key: 'providers',
-              label: `模型提供商 (${groups.length})`,
-              children: (
-                <>
-                  <Table<ProviderGroup>
-                    rowKey="key"
-                    columns={providerColumns}
-                    dataSource={groups}
-                    pagination={false}
-                    size="middle"
-                    locale={{ emptyText: '暂无提供商，点击下方按钮添加' }}
-                  />
-                  <div className="tab-footer">
-                    <Button type="primary" onClick={() => setProviderModal('new')}>＋ 添加提供商</Button>
-                    <span className="hint">名称 · 协议 · Base URL · API Key（掩码输入）· 启用；编辑将批量应用到该提供商下全部模型连接</span>
-                  </div>
-                </>
-              ),
-            },
-            {
-              key: 'models',
-              label: `模型 (${conns.length})`,
-              children: (
-                <>
-                  <Table<ModelConnection>
-                    rowKey="id"
-                    columns={modelColumns}
-                    dataSource={conns}
-                    pagination={false}
-                    size="middle"
-                    locale={{ emptyText: '暂无模型，点击下方按钮添加' }}
-                  />
-                  <div className="tab-footer">
-                    <Button type="primary" onClick={() => setModelModal('new')}>＋ 添加模型</Button>
-                    <span className="hint">所属提供商（引用「模型提供商」页签的分组）· 模型名 · 类型 · 设为该类型默认</span>
-                  </div>
-                </>
-              ),
-            },
-          ]}
-        />
-      </div>
-
-      {providerModal !== undefined && (
-        <ProviderModal
-          group={providerModal}
-          conns={conns}
-          onClose={() => setProviderModal(undefined)}
-          onSaved={() => { setProviderModal(undefined); reload() }}
-        />
-      )}
-      {modelModal !== undefined && (
-        <ModelModal
-          conn={modelModal}
-          groups={groups}
-          conns={conns}
-          onClose={() => setModelModal(undefined)}
-          onSaved={() => { setModelModal(undefined); reload() }}
-        />
-      )}
-    </div>
+        {modelModal !== undefined && (
+          <ModelModal
+            conn={modelModal}
+            groups={groups}
+            conns={conns}
+            onClose={() => setModelModal(undefined)}
+            onSaved={() => { setModelModal(undefined); reload() }}
+          />
+        )}
+      </Splitter.Panel>
+    </Splitter>
   )
 }
 

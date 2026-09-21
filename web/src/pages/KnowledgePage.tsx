@@ -13,6 +13,7 @@ import {
   Result,
   Select,
   Space,
+  Splitter,
   Table,
   Tag,
   Tooltip,
@@ -235,232 +236,239 @@ export default function KnowledgePage() {
   ]
 
   return (
-    <div className="main">
-      <aside className="sidebar">
-        <div className="side-head">
-          <span className="side-title">知识库</span>
-          <span className="side-count">{kbs.length}</span>
-        </div>
-        <div className="side-actions">
-          <Button type="primary" block icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建库
-          </Button>
-        </div>
-        <div className="side-list">
-          {kbs.map((k) => (
-            <div key={k.id} className={`side-item${k.id === activeId ? ' active' : ''}`} onClick={() => setActiveId(k.id)}>
-              <div className="side-item-top">
-                <span className="side-item-name" title={k.name}>
-                  {k.name}
-                </span>
-              </div>
-              <div className="side-item-meta">
-                <span>文档 {k.doc_count ?? '—'}</span>
-                <span className="dot">·</span>
-                <span>chunks {k.chunk_count ?? '—'}</span>
-              </div>
-            </div>
-          ))}
-          {kbs.length === 0 && <div className="empty-hint">{loadErr ? '知识库接口未就绪' : '暂无知识库，点击上方新建'}</div>}
-        </div>
-      </aside>
-
-      <div className="work-main">
-        {loadErr ? (
-          <div className="work-empty">
-            <Result
-              status="warning"
-              title="知识库后端未就绪"
-              subTitle={`${loadErr}（M6 后端另行部署）`}
-              extra={<Button onClick={reloadKBs}>重试</Button>}
-            />
+    <Splitter
+      className="main sidebar-splitter"
+      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+    >
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+        <aside className="sidebar">
+          <div className="side-head">
+            <span className="side-title">知识库</span>
+            <span className="side-count">{kbs.length}</span>
           </div>
-        ) : !active ? (
-          <div className="work-empty">
-            <Result
-              icon={null}
-              title="选择左侧知识库查看详情"
-              subTitle="或点击「新建库」：上传 txt / md → 切分 → 向量化 → 检索试运行（对齐 02 文档 §6.9）。"
-            />
+          <div className="side-actions">
+            <Button type="primary" block icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建库
+            </Button>
           </div>
-        ) : (
-          <>
-            <div className="work-head">
-              <div className="work-head-text">
-                <div className="work-head-title">
-                  <Typography.Title level={4} style={{ margin: 0 }}>
-                    {active.name}
-                  </Typography.Title>
+          <div className="side-list">
+            {kbs.map((k) => (
+              <div key={k.id} className={`side-item${k.id === activeId ? ' active' : ''}`} onClick={() => setActiveId(k.id)}>
+                <div className="side-item-top">
+                  <span className="side-item-name" title={k.name}>
+                    {k.name}
+                  </span>
                 </div>
-                <p className="work-head-desc">{active.description || '未填写描述'}</p>
+                <div className="side-item-meta">
+                  <span>文档 {k.doc_count ?? '—'}</span>
+                  <span className="dot">·</span>
+                  <span>chunks {k.chunk_count ?? '—'}</span>
+                </div>
               </div>
-              <Popconfirm
-                title={`删除知识库「${active.name}」？`}
-                description="将删除其全部文档、chunk 与向量数据。"
-                okText="删除"
-                okButtonProps={{ danger: true }}
-                cancelText="取消"
-                onConfirm={removeKB}
+            ))}
+            {kbs.length === 0 && <div className="empty-hint">{loadErr ? '知识库接口未就绪' : '暂无知识库，点击上方新建'}</div>}
+          </div>
+        </aside>
+      </Splitter.Panel>
+      <Splitter.Panel className="content-panel">
+
+        <div className="work-main">
+          {loadErr ? (
+            <div className="work-empty">
+              <Result
+                status="warning"
+                title="知识库后端未就绪"
+                subTitle={`${loadErr}（M6 后端另行部署）`}
+                extra={<Button onClick={reloadKBs}>重试</Button>}
+              />
+            </div>
+          ) : !active ? (
+            <div className="work-empty">
+              <Result
+                icon={null}
+                title="选择左侧知识库查看详情"
+                subTitle="或点击「新建库」：上传 txt / md → 切分 → 向量化 → 检索试运行（对齐 02 文档 §6.9）。"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="work-head">
+                <div className="work-head-text">
+                  <div className="work-head-title">
+                    <Typography.Title level={4} style={{ margin: 0 }}>
+                      {active.name}
+                    </Typography.Title>
+                  </div>
+                  <p className="work-head-desc">{active.description || '未填写描述'}</p>
+                </div>
+                <Popconfirm
+                  title={`删除知识库「${active.name}」？`}
+                  description="将删除其全部文档、chunk 与向量数据。"
+                  okText="删除"
+                  okButtonProps={{ danger: true }}
+                  cancelText="取消"
+                  onConfirm={removeKB}
+                >
+                  <Button danger>删除库</Button>
+                </Popconfirm>
+              </div>
+
+              <div className="stat-strip">
+                <StatTile k="文档" v={docs.length} />
+                <StatTile k="Chunks" v={docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0)} />
+                <StatTile k="TopK" v={active.top_k ?? '—'} />
+                <StatTile k="min_score" v={active.min_score ?? '—'} />
+              </div>
+
+              <Card
+                className="work-card"
+                size="small"
+                title="检索参数"
+                extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>保存后用于对话召回（§6.9）</Typography.Text>}
               >
-                <Button danger>删除库</Button>
-              </Popconfirm>
-            </div>
+                <div className="cfg-row">
+                  <label className="cfg-field">
+                    <span className="cfg-label">TopK（返回片段数）</span>
+                    <InputNumber
+                      min={1}
+                      max={20}
+                      value={topK}
+                      onChange={(v) => setTopK(typeof v === 'number' ? v : null)}
+                      style={{ width: 140 }}
+                    />
+                  </label>
+                  <label className="cfg-field">
+                    <span className="cfg-label">min_score（相似度下限 0~1）</span>
+                    <InputNumber
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      precision={2}
+                      value={minScore}
+                      onChange={(v) => setMinScore(typeof v === 'number' ? v : null)}
+                      style={{ width: 160 }}
+                    />
+                  </label>
+                  <Button type="primary" loading={savingCfg} onClick={saveConfig}>
+                    保存
+                  </Button>
+                </div>
+              </Card>
 
-            <div className="stat-strip">
-              <StatTile k="文档" v={docs.length} />
-              <StatTile k="Chunks" v={docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0)} />
-              <StatTile k="TopK" v={active.top_k ?? '—'} />
-              <StatTile k="min_score" v={active.min_score ?? '—'} />
-            </div>
+              <Card
+                className="work-card"
+                size="small"
+                title={`文档（${docs.length}）`}
+                extra={
+                  <Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>
+                    上传文档
+                  </Button>
+                }
+              >
+                <Table<KBDoc>
+                  rowKey="id"
+                  columns={columns}
+                  dataSource={docs}
+                  loading={docsLoading}
+                  pagination={false}
+                  size="middle"
+                  locale={{ emptyText: '暂无文档，点击右上「上传文档」导入 txt / md' }}
+                />
+              </Card>
 
-            <Card
-              className="work-card"
-              size="small"
-              title="检索参数"
-              extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>保存后用于对话召回（§6.9）</Typography.Text>}
-            >
-              <div className="cfg-row">
-                <label className="cfg-field">
-                  <span className="cfg-label">TopK（返回片段数）</span>
+              <Card
+                className="work-card"
+                size="small"
+                title="检索试运行"
+                extra={
+                  hasReady ? (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      命中按相似度排序
+                    </Typography.Text>
+                  ) : (
+                    <Tag color="warning" style={{ margin: 0 }}>
+                      索引未就绪，暂不可检索
+                    </Tag>
+                  )
+                }
+              >
+                <div className="search-row">
+                  <Input
+                    allowClear
+                    value={query}
+                    disabled={!hasReady}
+                    placeholder={hasReady ? '输入检索词，回车试运行' : '需至少一篇「就绪」文档'}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onPressEnter={doSearch}
+                    style={{ maxWidth: 420 }}
+                  />
                   <InputNumber
                     min={1}
                     max={20}
                     value={topK}
+                    disabled={!hasReady}
                     onChange={(v) => setTopK(typeof v === 'number' ? v : null)}
-                    style={{ width: 140 }}
+                    style={{ width: 128 }}
+                    prefix={<Typography.Text type="secondary" style={{ fontSize: 12 }}>TopK</Typography.Text>}
                   />
-                </label>
-                <label className="cfg-field">
-                  <span className="cfg-label">min_score（相似度下限 0~1）</span>
-                  <InputNumber
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    precision={2}
-                    value={minScore}
-                    onChange={(v) => setMinScore(typeof v === 'number' ? v : null)}
-                    style={{ width: 160 }}
-                  />
-                </label>
-                <Button type="primary" loading={savingCfg} onClick={saveConfig}>
-                  保存
-                </Button>
-              </div>
-            </Card>
-
-            <Card
-              className="work-card"
-              size="small"
-              title={`文档（${docs.length}）`}
-              extra={
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>
-                  上传文档
-                </Button>
-              }
-            >
-              <Table<KBDoc>
-                rowKey="id"
-                columns={columns}
-                dataSource={docs}
-                loading={docsLoading}
-                pagination={false}
-                size="middle"
-                locale={{ emptyText: '暂无文档，点击右上「上传文档」导入 txt / md' }}
-              />
-            </Card>
-
-            <Card
-              className="work-card"
-              size="small"
-              title="检索试运行"
-              extra={
-                hasReady ? (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    命中按相似度排序
-                  </Typography.Text>
-                ) : (
-                  <Tag color="warning" style={{ margin: 0 }}>
-                    索引未就绪，暂不可检索
-                  </Tag>
-                )
-              }
-            >
-              <div className="search-row">
-                <Input
-                  allowClear
-                  value={query}
-                  disabled={!hasReady}
-                  placeholder={hasReady ? '输入检索词，回车试运行' : '需至少一篇「就绪」文档'}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onPressEnter={doSearch}
-                  style={{ maxWidth: 420 }}
-                />
-                <InputNumber
-                  min={1}
-                  max={20}
-                  value={topK}
-                  disabled={!hasReady}
-                  onChange={(v) => setTopK(typeof v === 'number' ? v : null)}
-                  style={{ width: 128 }}
-                  prefix={<Typography.Text type="secondary" style={{ fontSize: 12 }}>TopK</Typography.Text>}
-                />
-                <Button type="primary" icon={<SearchOutlined />} disabled={!hasReady} loading={searching} onClick={doSearch}>
-                  检索
-                </Button>
-              </div>
-
-              {hits && hits.length === 0 && (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无命中（可尝试降低 min_score 或补充文档）" style={{ marginTop: 16 }} />
-              )}
-              {hits && hits.length > 0 && (
-                <div className="hits">
-                  {hits.map((h, i) => {
-                    const score = Number(h.score)
-                    const band = score >= 0.8 ? 'hi' : score >= 0.5 ? 'mid' : 'lo'
-                    return (
-                      <div className={`hit ${band}`} key={`${h.doc}-${h.seq}-${i}`}>
-                        <div className="hit-top">
-                          <span className="hit-doc">{h.doc}</span>
-                          <span className="hit-seq">#{h.seq}</span>
-                          <span className="hit-spacer" />
-                          <Tag className="hit-score" color={band === 'hi' ? 'green' : band === 'mid' ? 'blue' : 'gold'} style={{ margin: 0 }}>
-                            score {fmtScore(h.score)}
-                          </Tag>
-                        </div>
-                        <div className="hit-excerpt">{h.excerpt}</div>
-                      </div>
-                    )
-                  })}
+                  <Button type="primary" icon={<SearchOutlined />} disabled={!hasReady} loading={searching} onClick={doSearch}>
+                    检索
+                  </Button>
                 </div>
-              )}
-            </Card>
-          </>
-        )}
-      </div>
 
-      {createOpen && (
-        <CreateKBModal
-          onClose={() => setCreateOpen(false)}
-          onCreated={(kb) => {
-            setCreateOpen(false)
-            bumpData()
-            setActiveId(kb.id)
-            reloadKBs()
-          }}
-        />
-      )}
-      {uploadOpen && active && (
-        <UploadDocModal
-          kb={active}
-          onClose={() => setUploadOpen(false)}
-          onUploaded={() => {
-            setUploadOpen(false)
-            reloadDocs(active.id)
-            reloadKBs()
-          }}
-        />
-      )}
-    </div>
+                {hits && hits.length === 0 && (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无命中（可尝试降低 min_score 或补充文档）" style={{ marginTop: 16 }} />
+                )}
+                {hits && hits.length > 0 && (
+                  <div className="hits">
+                    {hits.map((h, i) => {
+                      const score = Number(h.score)
+                      const band = score >= 0.8 ? 'hi' : score >= 0.5 ? 'mid' : 'lo'
+                      return (
+                        <div className={`hit ${band}`} key={`${h.doc}-${h.seq}-${i}`}>
+                          <div className="hit-top">
+                            <span className="hit-doc">{h.doc}</span>
+                            <span className="hit-seq">#{h.seq}</span>
+                            <span className="hit-spacer" />
+                            <Tag className="hit-score" color={band === 'hi' ? 'green' : band === 'mid' ? 'blue' : 'gold'} style={{ margin: 0 }}>
+                              score {fmtScore(h.score)}
+                            </Tag>
+                          </div>
+                          <div className="hit-excerpt">{h.excerpt}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </Card>
+            </>
+          )}
+        </div>
+
+        {createOpen && (
+          <CreateKBModal
+            onClose={() => setCreateOpen(false)}
+            onCreated={(kb) => {
+              setCreateOpen(false)
+              bumpData()
+              setActiveId(kb.id)
+              reloadKBs()
+            }}
+          />
+        )}
+        {uploadOpen && active && (
+          <UploadDocModal
+            kb={active}
+            onClose={() => setUploadOpen(false)}
+            onUploaded={() => {
+              setUploadOpen(false)
+              reloadDocs(active.id)
+              reloadKBs()
+            }}
+          />
+        )}
+      </Splitter.Panel>
+    </Splitter>
   )
 }
 

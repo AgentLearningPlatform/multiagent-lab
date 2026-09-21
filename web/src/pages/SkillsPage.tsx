@@ -10,6 +10,7 @@ import {
   Result,
   Select,
   Space,
+  Splitter,
   Switch,
   Tag,
   Tooltip,
@@ -94,171 +95,178 @@ export default function SkillsPage() {
   }
 
   return (
-    <div className="main">
-      <aside className="sidebar">
-        <div className="side-head">
-          <span className="side-title">技能筛选</span>
-        </div>
-        <Menu
-          mode="vertical"
-          selectedKeys={[filter]}
-          onClick={({ key }) => setFilter(key as FilterKey)}
-          style={{ padding: '0 10px', background: 'transparent' }}
-          items={[
-            { key: 'all', label: <Space size={6}>全部<Tag style={{ margin: 0 }}>{counts.all}</Tag></Space> },
-            { key: 'mounted', label: <Space size={6}>已挂载<Tag color="green" style={{ margin: 0 }}>{counts.mounted}</Tag></Space> },
-            { key: 'unmounted', label: <Space size={6}>未挂载<Tag style={{ margin: 0 }}>{counts.unmounted}</Tag></Space> },
-          ]}
-        />
-        <Menu
-          mode="vertical"
-          selectable={false}
-          style={{ padding: '0 10px', background: 'transparent' }}
-          items={[
-            {
-              key: 'reserve',
-              type: 'group',
-              label: (
-                <Space size={6}>
-                  预留区
-                  <Tag color="purple" style={{ margin: 0 }}>
-                    规划中
-                  </Tag>
-                </Space>
-              ),
-              children: [
-                { key: 'reserve-group', label: '技能分组 / 标签', disabled: true },
-                { key: 'reserve-version', label: '版本历史', disabled: true },
-                { key: 'reserve-market', label: '技能市场导入', disabled: true },
-              ],
-            },
-          ]}
-        />
-        <div className="side-reserve-wrap">
-          <div className="reserve-note">
-            「已挂载 / 未挂载」为真实过滤：挂载 = 技能出现在任一智能体的技能列表中。
+    <Splitter
+      className="main sidebar-splitter"
+      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+    >
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+        <aside className="sidebar">
+          <div className="side-head">
+            <span className="side-title">技能筛选</span>
           </div>
-        </div>
-      </aside>
-
-      <div className="work-main">
-        <div className="work-head">
-          <div className="work-head-text">
-            <div className="work-head-title">
-              <Typography.Title level={4} style={{ margin: 0 }}>
-                技能
-              </Typography.Title>
-              <Tag style={{ margin: 0 }}>{filtered.length}</Tag>
+          <Menu
+            mode="vertical"
+            selectedKeys={[filter]}
+            onClick={({ key }) => setFilter(key as FilterKey)}
+            style={{ padding: '0 10px', background: 'transparent' }}
+            items={[
+              { key: 'all', label: <Space size={6}>全部<Tag style={{ margin: 0 }}>{counts.all}</Tag></Space> },
+              { key: 'mounted', label: <Space size={6}>已挂载<Tag color="green" style={{ margin: 0 }}>{counts.mounted}</Tag></Space> },
+              { key: 'unmounted', label: <Space size={6}>未挂载<Tag style={{ margin: 0 }}>{counts.unmounted}</Tag></Space> },
+            ]}
+          />
+          <Menu
+            mode="vertical"
+            selectable={false}
+            style={{ padding: '0 10px', background: 'transparent' }}
+            items={[
+              {
+                key: 'reserve',
+                type: 'group',
+                label: (
+                  <Space size={6}>
+                    预留区
+                    <Tag color="purple" style={{ margin: 0 }}>
+                      规划中
+                    </Tag>
+                  </Space>
+                ),
+                children: [
+                  { key: 'reserve-group', label: '技能分组 / 标签', disabled: true },
+                  { key: 'reserve-version', label: '版本历史', disabled: true },
+                  { key: 'reserve-market', label: '技能市场导入', disabled: true },
+                ],
+              },
+            ]}
+          />
+          <div className="side-reserve-wrap">
+            <div className="reserve-note">
+              「已挂载 / 未挂载」为真实过滤：挂载 = 技能出现在任一智能体的技能列表中。
             </div>
-            <p className="work-head-desc">
-              技能是<strong>配置级能力包</strong>（提示词 + 工具白名单），不提供脚本执行环境；装配期按「主指令 + # 启用技能」拼接注入（§6.12）。
-            </p>
           </div>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModal('new')}>
-            新建技能
-          </Button>
-        </div>
+        </aside>
+      </Splitter.Panel>
+      <Splitter.Panel className="content-panel">
 
-        {loadErr ? (
-          <div className="work-empty">
-            <Result
-              status="warning"
-              title="技能后端未就绪"
-              subTitle={`${loadErr}（M7 后端另行部署）`}
-              extra={<Button onClick={reload}>重试</Button>}
-            />
+        <div className="work-main">
+          <div className="work-head">
+            <div className="work-head-text">
+              <div className="work-head-title">
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  技能
+                </Typography.Title>
+                <Tag style={{ margin: 0 }}>{filtered.length}</Tag>
+              </div>
+              <p className="work-head-desc">
+                技能是<strong>配置级能力包</strong>（提示词 + 工具白名单），不提供脚本执行环境；装配期按「主指令 + # 启用技能」拼接注入（§6.12）。
+              </p>
+            </div>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModal('new')}>
+              新建技能
+            </Button>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="work-empty">
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={skills.length === 0 ? '暂无技能，点击右上「新建技能」' : '该筛选下暂无技能'}
-            />
-          </div>
-        ) : (
-          <div className="skill-grid">
-            {filtered.map((s) => (
-              <div className="skill-card" key={s.id}>
-                <div className="skill-card-top">
-                  <span className="skill-card-icon">
-                    <ThunderboltOutlined />
-                  </span>
-                  <span className="skill-card-name" title={s.name}>
-                    {s.name}
-                  </span>
-                  {s.builtin && (
-                    <Tag color="gold" style={{ margin: 0 }}>
-                      内置
+
+          {loadErr ? (
+            <div className="work-empty">
+              <Result
+                status="warning"
+                title="技能后端未就绪"
+                subTitle={`${loadErr}（M7 后端另行部署）`}
+                extra={<Button onClick={reload}>重试</Button>}
+              />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="work-empty">
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={skills.length === 0 ? '暂无技能，点击右上「新建技能」' : '该筛选下暂无技能'}
+              />
+            </div>
+          ) : (
+            <div className="skill-grid">
+              {filtered.map((s) => (
+                <div className="skill-card" key={s.id}>
+                  <div className="skill-card-top">
+                    <span className="skill-card-icon">
+                      <ThunderboltOutlined />
+                    </span>
+                    <span className="skill-card-name" title={s.name}>
+                      {s.name}
+                    </span>
+                    {s.builtin && (
+                      <Tag color="gold" style={{ margin: 0 }}>
+                        内置
+                      </Tag>
+                    )}
+                    <Tag color={s.enabled ? 'blue' : 'default'} style={{ margin: 0 }}>
+                      {s.enabled ? '启用' : '停用'}
                     </Tag>
-                  )}
-                  <Tag color={s.enabled ? 'blue' : 'default'} style={{ margin: 0 }}>
-                    {s.enabled ? '启用' : '停用'}
-                  </Tag>
-                  {mountedIds.has(s.id) ? (
-                    <Tag color="green" style={{ margin: 0 }}>
-                      已挂载
-                    </Tag>
-                  ) : (
-                    <Tag style={{ margin: 0 }}>未挂载</Tag>
-                  )}
-                </div>
-                <p className="skill-card-desc">{s.description || '未填写描述'}</p>
-                <div className="skill-card-meta">
-                  <span>工具 {s.tools?.length ?? 0}</span>
-                  <span className="dot">·</span>
-                  <span>资源 {s.resources?.length ?? 0}</span>
-                </div>
-                <div className="skill-card-ops">
-                  <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openPreview(s)}>
-                    注入预览
-                  </Button>
-                  <Button type="link" size="small" onClick={() => setModal(s)}>
-                    编辑
-                  </Button>
-                  {s.builtin ? (
-                    <Tooltip title="内置技能不可删除">
-                      <span>
-                        <Button type="link" size="small" danger disabled>
+                    {mountedIds.has(s.id) ? (
+                      <Tag color="green" style={{ margin: 0 }}>
+                        已挂载
+                      </Tag>
+                    ) : (
+                      <Tag style={{ margin: 0 }}>未挂载</Tag>
+                    )}
+                  </div>
+                  <p className="skill-card-desc">{s.description || '未填写描述'}</p>
+                  <div className="skill-card-meta">
+                    <span>工具 {s.tools?.length ?? 0}</span>
+                    <span className="dot">·</span>
+                    <span>资源 {s.resources?.length ?? 0}</span>
+                  </div>
+                  <div className="skill-card-ops">
+                    <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openPreview(s)}>
+                      注入预览
+                    </Button>
+                    <Button type="link" size="small" onClick={() => setModal(s)}>
+                      编辑
+                    </Button>
+                    {s.builtin ? (
+                      <Tooltip title="内置技能不可删除">
+                        <span>
+                          <Button type="link" size="small" danger disabled>
+                            删除
+                          </Button>
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      <Popconfirm
+                        title={`删除技能「${s.name}」？`}
+                        description="已挂载该技能的智能体将失去对应能力。"
+                        okText="删除"
+                        okButtonProps={{ danger: true }}
+                        cancelText="取消"
+                        onConfirm={() => remove(s)}
+                      >
+                        <Button type="link" size="small" danger>
                           删除
                         </Button>
-                      </span>
-                    </Tooltip>
-                  ) : (
-                    <Popconfirm
-                      title={`删除技能「${s.name}」？`}
-                      description="已挂载该技能的智能体将失去对应能力。"
-                      okText="删除"
-                      okButtonProps={{ danger: true }}
-                      cancelText="取消"
-                      onConfirm={() => remove(s)}
-                    >
-                      <Button type="link" size="small" danger>
-                        删除
-                      </Button>
-                    </Popconfirm>
-                  )}
+                      </Popconfirm>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-      {modal !== undefined && (
-        <SkillModal
-          skill={modal}
-          tools={tools}
-          onClose={() => setModal(undefined)}
-          onSaved={() => {
-            setModal(undefined)
-            bumpData()
-            reload()
-          }}
-          onPreview={openPreview}
-        />
-      )}
-      {preview && <PreviewModal skill={preview.skill} instruction={preview.instruction} onClose={() => setPreview(null)} />}
-    </div>
+        {modal !== undefined && (
+          <SkillModal
+            skill={modal}
+            tools={tools}
+            onClose={() => setModal(undefined)}
+            onSaved={() => {
+              setModal(undefined)
+              bumpData()
+              reload()
+            }}
+            onPreview={openPreview}
+          />
+        )}
+        {preview && <PreviewModal skill={preview.skill} instruction={preview.instruction} onClose={() => setPreview(null)} />}
+      </Splitter.Panel>
+    </Splitter>
   )
 }
 

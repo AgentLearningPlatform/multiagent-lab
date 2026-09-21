@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Result } from 'antd'
+import { Button, Result, Splitter } from 'antd'
 import { api } from '../api/client'
 import type { Agent, Conversation } from '../api/types'
 import { useUI } from '../store/ui'
@@ -71,52 +71,59 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="main">
-      <Sidebar
-        mode="agent"
-        agents={agents}
-        projects={[]}
-        conversations={convs}
-        activeAgentId={activeAgentId}
-        activeProjectId={null}
-        onSelectAgent={setActiveAgentId}
-        onSelectProject={() => {}}
-        onNewAgent={() => setCreateOpen(true)}
-        onNewProject={() => {}}
-        onNewConversation={newConversation}
-        onConfigureAgent={configureAgent}
-        onConfigureProject={() => {}}
-      />
-
-      {currentConv && currentConv.scope === 'agent' ? (
-        <ChatWindow
-          conversation={currentConv}
+    <Splitter
+      className="main sidebar-splitter"
+      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+    >
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+        <Sidebar
+          mode="agent"
           agents={agents}
           projects={[]}
-          onOpenAgentDrawer={() => setConfigOpen(true)}
-          onOpenProjectDrawer={() => {}}
-          onConversationUpdated={reload}
+          conversations={convs}
+          activeAgentId={activeAgentId}
+          activeProjectId={null}
+          onSelectAgent={setActiveAgentId}
+          onSelectProject={() => {}}
+          onNewAgent={() => setCreateOpen(true)}
+          onNewProject={() => {}}
+          onNewConversation={newConversation}
+          onConfigureAgent={configureAgent}
+          onConfigureProject={() => {}}
         />
-      ) : (
-        <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Result
-            icon={null}
-            title="选择左侧智能体，与其开始对话"
-            subTitle="每个智能体可挂多个对话；左侧节点上的 ＋ 可直接新建对话。"
-            extra={
-              <Button type="primary" disabled={!activeAgent} onClick={() => activeAgent && newConversation(activeAgent.id)}>
-                ＋ 为「{activeAgent?.name ?? '当前智能体'}」新建对话
-              </Button>
-            }
+      </Splitter.Panel>
+      <Splitter.Panel className="content-panel">
+
+        {currentConv && currentConv.scope === 'agent' ? (
+          <ChatWindow
+            conversation={currentConv}
+            agents={agents}
+            projects={[]}
+            onOpenAgentDrawer={() => setConfigOpen(true)}
+            onOpenProjectDrawer={() => {}}
+            onConversationUpdated={reload}
           />
-        </div>
-      )}
+        ) : (
+          <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Result
+              icon={null}
+              title="选择左侧智能体，与其开始对话"
+              subTitle="每个智能体可挂多个对话；左侧节点上的 ＋ 可直接新建对话。"
+              extra={
+                <Button type="primary" disabled={!activeAgent} onClick={() => activeAgent && newConversation(activeAgent.id)}>
+                  ＋ 为「{activeAgent?.name ?? '当前智能体'}」新建对话
+                </Button>
+              }
+            />
+          </div>
+        )}
 
-      {configOpen && activeAgent && (
-        <AgentModal agent={activeAgent} onClose={() => setConfigOpen(false)} onChanged={reload} />
-      )}
+        {configOpen && activeAgent && (
+          <AgentModal agent={activeAgent} onClose={() => setConfigOpen(false)} onChanged={reload} />
+        )}
 
-      <NameModal open={createOpen} title="新建智能体" placeholder="智能体名称" onCancel={() => setCreateOpen(false)} onSubmit={createAgent} />
-    </div>
+        <NameModal open={createOpen} title="新建智能体" placeholder="智能体名称" onCancel={() => setCreateOpen(false)} onSubmit={createAgent} />
+      </Splitter.Panel>
+    </Splitter>
   )
 }

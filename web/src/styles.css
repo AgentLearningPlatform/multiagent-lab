@@ -111,10 +111,18 @@ body { font-size: 14px; background: var(--c-bg); }
 
 .main { flex: 1; display: flex; min-height: 0; height: 100%; }
 
-/* ---- 左栏：浅色调面板 + 统一节奏的树 ---- */
+/* ---- 左右分栏（可拖拽调宽）：所有「左列表 + 右主区」工作台共用 ----
+   antd Splitter 面板默认 overflow:auto，会与各栏内部滚动冲突，改为 hidden 交由子栏自行滚动；
+   拖拽条常驻发丝线用设计令牌，悬停/拖拽沿用 antd 的品牌色强调（由 colorPrimary 派生） */
+.sidebar-splitter .ant-splitter-panel { display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-splitter.ant-splitter .ant-splitter-bar .ant-splitter-bar-dragger::before { background: var(--c-line); }
+.sidebar-splitter.ant-splitter .ant-splitter-bar .ant-splitter-bar-dragger::after { background: #cfd3e2; }
+
+/* ---- 左栏：浅色调面板 + 统一节奏的树 ----
+   宽度由外层 Splitter 面板控制（可拖拽调宽，见各页面），此处只负责铺满面板 */
 .sidebar {
-  width: 280px; flex: none; border-right: 1px solid var(--c-line);
-  background: #f7f8fc; display: flex; flex-direction: column; min-height: 0; height: 100%;
+  width: 100%; flex: 1; min-width: 0; min-height: 0;
+  background: #f7f8fc; display: flex; flex-direction: column;
 }
 .side-head { display: flex; align-items: center; gap: 8px; padding: 16px 16px 8px; }
 .side-title { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--c-ink-3); }
@@ -316,11 +324,11 @@ pre.raw-json {
 .member-hint { font-size: 12px; color: var(--c-ink-3); margin-bottom: 10px; }
 .member-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 
-/* ---- M8 会话快捷配置条（发送框上方常驻）：本体 / 知识库（含检索开关与参数） / 已挂技能 ---- */
+/* ---- M8 会话快捷配置条（发送框下方常驻）：本体 / 知识库（含检索开关与参数） / 已挂技能 ---- */
 .quickbar {
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; min-width: 0; overflow: hidden;
-  padding: 0 2px 8px; margin-bottom: 8px;
-  border-bottom: 1px solid var(--c-line);
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid var(--c-line);
 }
 .qb-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: none; }
 .qb-label { flex: none; font-size: 11.5px; color: var(--c-ink-3); }

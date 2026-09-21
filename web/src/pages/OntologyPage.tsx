@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Descriptions, Progress, Result, Space, Steps, Tag, Typography } from 'antd'
+import { Button, Card, Descriptions, Progress, Result, Space, Splitter, Steps, Tag, Typography } from 'antd'
 import { api } from '../api/client'
 import type { OntologyDetail, OntologyStage, OntologySummary } from '../api/types'
 
@@ -169,120 +169,127 @@ export default function OntologyPage() {
   const activeSummary = list.find((o) => o.id === activeId)
 
   return (
-    <div className="main">
-      <aside className="sidebar">
-        <div className="side-head">
-          <span className="side-title">本体流水线</span>
-          <span className="side-count">{list.length}</span>
-        </div>
-        <div className="side-list">
-          {list.map((o) => (
-            <div key={o.id} className={`side-item${o.id === activeId ? ' active' : ''}`} onClick={() => setActiveId(o.id)}>
-              <div className="side-item-top">
-                <span className="side-item-name" title={o.name}>
-                  {o.name}
-                </span>
-                <OntoStatusTag status={o.status} />
-              </div>
-              <div className="side-item-progress">
-                <Progress percent={Math.round(((o.progress ?? 0) / STAGE_ORDER.length) * 100)} size="small" showInfo={false} strokeColor="#4f46e5" />
-                <span className="side-item-meta">{o.progress ?? 0}/7</span>
-              </div>
-            </div>
-          ))}
-          {list.length === 0 && <div className="empty-hint">{listErr ? '本体平面未就绪' : '暂无本体流水线'}</div>}
-        </div>
-      </aside>
-
-      <div className="work-main">
-        {listErr ? (
-          <div className="work-empty">
-            <Result
-              status="warning"
-              title="本体平面未就绪（M8 后端另行部署）"
-              subTitle={listErr}
-              extra={<Button onClick={reload}>重试</Button>}
-            />
+    <Splitter
+      className="main sidebar-splitter"
+      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+    >
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+        <aside className="sidebar">
+          <div className="side-head">
+            <span className="side-title">本体流水线</span>
+            <span className="side-count">{list.length}</span>
           </div>
-        ) : !activeId ? (
-          <div className="work-empty">
-            <Result
-              icon={null}
-              title="选择左侧本体流水线"
-              subTitle="本体视图由本体平面（构建平面 + 运行平面）反代同源提供，主平台按只读契约展示 S1~S7 七阶段。"
-            />
-          </div>
-        ) : detailErr ? (
-          <div className="work-empty">
-            <Result
-              status="warning"
-              title="本体详情加载失败"
-              subTitle={detailErr}
-              extra={<Button onClick={() => setTick((t) => t + 1)}>重试</Button>}
-            />
-          </div>
-        ) : (
-          <>
-            <div className="work-head">
-              <div className="work-head-text">
-                <div className="work-head-title">
-                  <Typography.Title level={4} style={{ margin: 0 }}>
-                    {activeSummary?.name ?? detail?.name ?? '本体流水线'}
-                  </Typography.Title>
-                  <OntoStatusTag status={activeSummary?.status ?? detail?.status} />
-                  <Tag style={{ margin: 0 }}>进度 {activeSummary?.progress ?? detail?.progress ?? 0}/7</Tag>
+          <div className="side-list">
+            {list.map((o) => (
+              <div key={o.id} className={`side-item${o.id === activeId ? ' active' : ''}`} onClick={() => setActiveId(o.id)}>
+                <div className="side-item-top">
+                  <span className="side-item-name" title={o.name}>
+                    {o.name}
+                  </span>
+                  <OntoStatusTag status={o.status} />
                 </div>
-                <p className="work-head-desc">
-                  本体流水线（D-O7 七阶段）：来源 → 编辑 → 校验 → 可视化 → 运行方式 → 对外暴露 → 对接智能体；每阶段标注执行模式（内置 / 引导 / 托管）。主平台经反代只读展示。
-                </p>
+                <div className="side-item-progress">
+                  <Progress percent={Math.round(((o.progress ?? 0) / STAGE_ORDER.length) * 100)} size="small" showInfo={false} strokeColor="#4f46e5" />
+                  <span className="side-item-meta">{o.progress ?? 0}/7</span>
+                </div>
               </div>
-            </div>
+            ))}
+            {list.length === 0 && <div className="empty-hint">{listErr ? '本体平面未就绪' : '暂无本体流水线'}</div>}
+          </div>
+        </aside>
+      </Splitter.Panel>
+      <Splitter.Panel className="content-panel">
 
-            <div className="onto-steps">
-              <Steps
-                size="small"
-                orientation="horizontal"
-                titlePlacement="vertical"
-                current={step}
-                onChange={(i) => setStep(i)}
-                items={stages.map((s, i) => ({
-                  key: s.key,
-                  title: s.title,
-                  status: stepStatus(s.status),
-                  className: i === step ? 'onto-step-selected' : undefined,
-                  content: s.mode ? (
-                    <Tag color={MODE[s.mode]?.color} style={{ margin: 0, fontSize: 11 }}>
-                      {MODE[s.mode]?.text ?? s.mode}
-                    </Tag>
-                  ) : undefined,
-                }))}
+        <div className="work-main">
+          {listErr ? (
+            <div className="work-empty">
+              <Result
+                status="warning"
+                title="本体平面未就绪（M8 后端另行部署）"
+                subTitle={listErr}
+                extra={<Button onClick={reload}>重试</Button>}
               />
             </div>
+          ) : !activeId ? (
+            <div className="work-empty">
+              <Result
+                icon={null}
+                title="选择左侧本体流水线"
+                subTitle="本体视图由本体平面（构建平面 + 运行平面）反代同源提供，主平台按只读契约展示 S1~S7 七阶段。"
+              />
+            </div>
+          ) : detailErr ? (
+            <div className="work-empty">
+              <Result
+                status="warning"
+                title="本体详情加载失败"
+                subTitle={detailErr}
+                extra={<Button onClick={() => setTick((t) => t + 1)}>重试</Button>}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="work-head">
+                <div className="work-head-text">
+                  <div className="work-head-title">
+                    <Typography.Title level={4} style={{ margin: 0 }}>
+                      {activeSummary?.name ?? detail?.name ?? '本体流水线'}
+                    </Typography.Title>
+                    <OntoStatusTag status={activeSummary?.status ?? detail?.status} />
+                    <Tag style={{ margin: 0 }}>进度 {activeSummary?.progress ?? detail?.progress ?? 0}/7</Tag>
+                  </div>
+                  <p className="work-head-desc">
+                    本体流水线（D-O7 七阶段）：来源 → 编辑 → 校验 → 可视化 → 运行方式 → 对外暴露 → 对接智能体；每阶段标注执行模式（内置 / 引导 / 托管）。主平台经反代只读展示。
+                  </p>
+                </div>
+              </div>
 
-            {selectedStage && (
-              <Card
-                className="work-card onto-stage-card"
-                size="small"
-                loading={detailLoading}
-                title={
-                  <Space size={8} wrap>
-                    {selectedStage.title}
-                    {selectedStage.mode && (
-                      <Tag color={MODE[selectedStage.mode]?.color} style={{ margin: 0 }}>
-                        {MODE[selectedStage.mode]?.text ?? selectedStage.mode}
+              <div className="onto-steps">
+                <Steps
+                  size="small"
+                  orientation="horizontal"
+                  titlePlacement="vertical"
+                  current={step}
+                  onChange={(i) => setStep(i)}
+                  items={stages.map((s, i) => ({
+                    key: s.key,
+                    title: s.title,
+                    status: stepStatus(s.status),
+                    className: i === step ? 'onto-step-selected' : undefined,
+                    content: s.mode ? (
+                      <Tag color={MODE[s.mode]?.color} style={{ margin: 0, fontSize: 11 }}>
+                        {MODE[s.mode]?.text ?? s.mode}
                       </Tag>
-                    )}
-                    <StageStatusTag status={selectedStage.status} />
-                  </Space>
-                }
-                extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>阶段配置（只读）</Typography.Text>}
-              >
-                <StageDetail stage={selectedStage} />
-              </Card>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+                    ) : undefined,
+                  }))}
+                />
+              </div>
+
+              {selectedStage && (
+                <Card
+                  className="work-card onto-stage-card"
+                  size="small"
+                  loading={detailLoading}
+                  title={
+                    <Space size={8} wrap>
+                      {selectedStage.title}
+                      {selectedStage.mode && (
+                        <Tag color={MODE[selectedStage.mode]?.color} style={{ margin: 0 }}>
+                          {MODE[selectedStage.mode]?.text ?? selectedStage.mode}
+                        </Tag>
+                      )}
+                      <StageStatusTag status={selectedStage.status} />
+                    </Space>
+                  }
+                  extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>阶段配置（只读）</Typography.Text>}
+                >
+                  <StageDetail stage={selectedStage} />
+                </Card>
+              )}
+            </>
+          )}
+        </div>
+      </Splitter.Panel>
+    </Splitter>
   )
 }

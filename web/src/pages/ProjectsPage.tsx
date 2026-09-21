@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Result } from 'antd'
+import { Button, Result, Splitter } from 'antd'
 import { api } from '../api/client'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
@@ -79,61 +79,68 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="main">
-      <Sidebar
-        mode="project"
-        agents={[]}
-        projects={projects}
-        conversations={convs}
-        activeAgentId={null}
-        activeProjectId={activeProjectId}
-        onSelectAgent={() => {}}
-        onSelectProject={setActiveProjectId}
-        onNewAgent={() => {}}
-        onNewProject={() => setCreateOpen(true)}
-        onNewConversation={newConversation}
-        onConfigureAgent={() => {}}
-        onConfigureProject={configureProject}
-      />
-
-      {currentConv && currentConv.scope === 'project' ? (
-        <ChatWindow
-          conversation={currentConv}
-          agents={agents}
+    <Splitter
+      className="main sidebar-splitter"
+      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+    >
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+        <Sidebar
+          mode="project"
+          agents={[]}
           projects={projects}
-          onOpenAgentDrawer={() => {}}
-          onOpenProjectDrawer={() => activeProject && setConfigProjectId(activeProject.id)}
-          onConversationUpdated={reload}
+          conversations={convs}
+          activeAgentId={null}
+          activeProjectId={activeProjectId}
+          onSelectAgent={() => {}}
+          onSelectProject={setActiveProjectId}
+          onNewAgent={() => {}}
+          onNewProject={() => setCreateOpen(true)}
+          onNewConversation={newConversation}
+          onConfigureAgent={() => {}}
+          onConfigureProject={configureProject}
         />
-      ) : (
-        <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Result
-            icon={null}
-            title="选择左侧项目，与其开始对话"
-            subTitle="会话界面与智能体视图一致；项目对话由成员智能体协作处理（M4 起生效）。"
-            extra={
-              <Button type="primary" disabled={!activeProject} onClick={() => activeProject && newConversation(activeProject.id)}>
-                ＋ 为「{activeProject?.name ?? '当前项目'}」新建对话
-              </Button>
-            }
+      </Splitter.Panel>
+      <Splitter.Panel className="content-panel">
+
+        {currentConv && currentConv.scope === 'project' ? (
+          <ChatWindow
+            conversation={currentConv}
+            agents={agents}
+            projects={projects}
+            onOpenAgentDrawer={() => {}}
+            onOpenProjectDrawer={() => activeProject && setConfigProjectId(activeProject.id)}
+            onConversationUpdated={reload}
           />
-        </div>
-      )}
+        ) : (
+          <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Result
+              icon={null}
+              title="选择左侧项目，与其开始对话"
+              subTitle="会话界面与智能体视图一致；项目对话由成员智能体协作处理（M4 起生效）。"
+              extra={
+                <Button type="primary" disabled={!activeProject} onClick={() => activeProject && newConversation(activeProject.id)}>
+                  ＋ 为「{activeProject?.name ?? '当前项目'}」新建对话
+                </Button>
+              }
+            />
+          </div>
+        )}
 
-      {configProject && (
-        <ProjectModal
-          project={configProject}
-          agents={agents}
-          onClose={() => setConfigProjectId(null)}
-          onChanged={reload}
-          onDeleted={() => {
-            setConfigProjectId(null)
-            reload()
-          }}
-        />
-      )}
+        {configProject && (
+          <ProjectModal
+            project={configProject}
+            agents={agents}
+            onClose={() => setConfigProjectId(null)}
+            onChanged={reload}
+            onDeleted={() => {
+              setConfigProjectId(null)
+              reload()
+            }}
+          />
+        )}
 
-      <NameModal open={createOpen} title="新建项目" placeholder="项目名称" onCancel={() => setCreateOpen(false)} onSubmit={createProject} />
-    </div>
+        <NameModal open={createOpen} title="新建项目" placeholder="项目名称" onCancel={() => setCreateOpen(false)} onSubmit={createProject} />
+      </Splitter.Panel>
+    </Splitter>
   )
 }
