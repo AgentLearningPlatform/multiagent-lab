@@ -19,8 +19,14 @@ if ! command -v python3 >/dev/null 2>&1; then
 elif ! python3 -c "import rdflib" >/dev/null 2>&1; then
   echo "[run-dev] 警告: python3 缺少 rdflib，本体导入(OWL/TTL)与导出不可用（pip install rdflib）" >&2
 fi
-if ! command -v oxigraph_server >/dev/null 2>&1; then
-  echo "[run-dev] 警告: 未找到 oxigraph_server，运行方案启动(start)不可用（见 docs/04 §4.2）" >&2
+if command -v oxigraph_server >/dev/null 2>&1; then
+  OXIGRAPH_BIN_CMD="oxigraph_server"
+elif [ -x data/bin/oxigraph_server ]; then
+  OXIGRAPH_BIN_CMD="$PWD/data/bin/oxigraph_server"
+  echo "[run-dev] 使用本地引擎二进制: $OXIGRAPH_BIN_CMD"
+else
+  OXIGRAPH_BIN_CMD="oxigraph_server"
+  echo "[run-dev] 警告: 未找到 oxigraph_server，运行方案启动(start)不可用。安装: https://github.com/oxigraph/oxigraph/releases 下载后加入 PATH，或放到 data/bin/oxigraph_server，或设置 OXIGRAPH_BIN（见 docs/04 §4.2）" >&2
 fi
 
 # 前端构建：dist 缺失、源码比 dist 新（如 git pull 之后）、或 FORCE_BUILD=1 时执行
@@ -51,7 +57,7 @@ ONT_PID=$!
 
 echo "[run-dev] 启动 runtime-manager: http://localhost:8090"
 ADDR=":8090" DB_PATH=data/runtime.db MIGRATIONS_DIR=runtime-manager/migrations \
-  BUILD_SVC_URL="http://127.0.0.1:8091" OXIGRAPH_BIN="oxigraph_server" \
+  BUILD_SVC_URL="http://127.0.0.1:8091" OXIGRAPH_BIN="$OXIGRAPH_BIN_CMD" \
   ENGINE_DATA_DIR=data/engines ENGINE_LOG_DIR=data/engine_logs \
   data/bin/runtimed >data/runtime-manager.log 2>&1 &
 RT_PID=$!
