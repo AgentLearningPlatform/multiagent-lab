@@ -144,9 +144,16 @@ export const api = {
 
   /**
    * 使用统计（ASSUMED 契约，接口可能未就绪 → 抛错由 UI 降级）。
-   * GET /api/stats/usage?group_by=model|agent|project → { rows: UsageRow[] }
+   * GET /api/stats/usage?group_by=model|agent|project[&from=YYYY-MM-DD&to=YYYY-MM-DD]
+   * from/to 可选且含首尾；空值不拼入查询串。
    */
-  usageStats: (groupBy: UsageGroupBy) => req<UsageStats>(`/api/stats/usage?group_by=${groupBy}`),
+  usageStats: (groupBy: UsageGroupBy, range?: { from?: string; to?: string }) => {
+    const params = new URLSearchParams()
+    params.set('group_by', groupBy)
+    if (range?.from) params.set('from', range.from)
+    if (range?.to) params.set('to', range.to)
+    return req<UsageStats>(`/api/stats/usage?${params.toString()}`)
+  },
 
   // ---- M6 知识库（§8：/api/kb 系列） ----
   listKBs: () => req<KnowledgeBase[]>('/api/kb'),

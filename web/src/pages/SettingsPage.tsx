@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Checkbox, Form, Input, Menu, Modal, Popconfirm, Result, Segmented, Select, Space, Splitter, Spin, Switch, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Checkbox, DatePicker, Form, Input, Menu, Modal, Popconfirm, Result, Segmented, Select, Space, Splitter, Spin, Switch, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import type { Dayjs } from 'dayjs'
 import { api } from '../api/client'
 import type { ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
 import { useUI } from '../store/ui'
 
-type Category = 'models' | 'global' | 'security'
-type SettingsTab = 'models' | 'stats'
+type Category = 'models' | 'stats' | 'global' | 'security'
+/** 统计维度：供应商为前端归并（后端无提供商实体），其余直接映射后端 group_by */
+type StatsDimension = 'model' | 'supplier' | 'agent' | 'project'
 
 /**
  * 提供商分组：后端为扁平 model_connection（无独立提供商实体），
@@ -51,14 +53,14 @@ const fmtNum = (n?: number) => (n ?? 0).toLocaleString()
 
 /**
  * 设置页（原型 06 §3.6 v0.4 布局）：
- * - 左栏：设置分类——模型管理（默认选中）/ 全局参数（P1 预留）/ 数据与安全（P2 预留）；
- * - 右栏「模型管理」：① 提供商与模型合并为单个可折叠列表；② 使用统计。
+ * - 左栏设置分类：模型管理（默认选中）/ 使用统计 / 全局参数（P1 预留）/ 数据与安全（P2 预留），同级独立；
+ * - 右栏「模型管理」：提供商与模型合并为单个可折叠列表；
+ * - 右栏「使用统计」：按模型 / 供应商 / 智能体 / 项目聚合 + 时间范围筛选。
  */
 export default function SettingsPage() {
   const { showToast } = useUI()
   const [conns, setConns] = useState<ModelConnection[]>([])
   const [category, setCategory] = useState<Category>('models')
-  const [tab, setTab] = useState<SettingsTab>('models')
   // undefined = 关闭；'new' = 新建；对象 = 编辑
   const [providerModal, setProviderModal] = useState<ProviderGroup | 'new' | undefined>(undefined)
   const [modelModal, setModelModal] = useState<ModelConnection | 'new' | undefined>(undefined)
@@ -275,6 +277,7 @@ export default function SettingsPage() {
             style={{ padding: '0 10px', background: 'transparent' }}
             items={[
               { key: 'models', label: '模型管理' },
+              { key: 'stats', label: '使用统计' },
               { key: 'global', label: <Space size={6}>全局参数<Tag style={{ margin: 0 }}>P1 预留</Tag></Space>, disabled: true },
               { key: 'security', label: <Space size={6}>数据与安全<Tag style={{ margin: 0 }}>P2 预留</Tag></Space>, disabled: true },
             ]}
@@ -287,66 +290,64 @@ export default function SettingsPage() {
       <Splitter.Panel className="content-panel">
 
         <div className="settings-main">
-          <div className="settings-head">
-            <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>模型管理</Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              提供商按 Base URL 聚合（同一 Base URL 下的多个模型共享提供商身份）；chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。
-            </Typography.Paragraph>
-          </div>
+          {category === 'stats' ? (
+            <>
+              <div className="settings-head">
+                <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>使用统计</Typography.Title>
+                <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                  按模型 / 供应商 / 智能体 / 项目聚合调用次数与 token 消耗；「按供应商」在前端按 Base URL 归并（后端无提供商实体）。支持按时间范围（含首尾）筛选。
+                </Typography.Paragraph>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <StatsView />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="settings-head">
+                <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>模型管理</Typography.Title>
+                <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                  提供商按 Base URL 聚合（同一 Base URL 下的多个模型共享提供商身份）；chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。
+                </Typography.Paragraph>
+              </div>
 
-          {!hasChat && (
-            <Alert
-              type="warning"
-              showIcon
-              style={{ marginTop: 12 }}
-              message="尚未配置可用的对话模型"
-              description="预置了「DeepSeek（预置）」连接：填入 API Key 并启用、设为默认，即可开始对话。"
-            />
+              {!hasChat && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginTop: 12 }}
+                  message="尚未配置可用的对话模型"
+                  description="预置了「DeepSeek（预置）」连接：填入 API Key 并启用、设为默认，即可开始对话。"
+                />
+              )}
+
+              <div style={{ marginTop: 12 }}>
+                <Table<ProviderGroup>
+                  rowKey="key"
+                  columns={providerColumns}
+                  dataSource={groups}
+                  pagination={false}
+                  size="middle"
+                  scroll={{ x: 960 }}
+                  expandable={{
+                    expandedRowKeys: expandedKeys,
+                    onExpandedRowsChange: (keys) => {
+                      const arr = keys as string[]
+                      setExpandedKeys(arr)
+                      if (discoverKey && !arr.includes(discoverKey)) setDiscoverKey(null)
+                    },
+                    expandedRowRender,
+                  }}
+                  locale={{ emptyText: '暂无提供商，点击下方按钮添加' }}
+                />
+                <div className="tab-footer">
+                  <Button type="primary" onClick={() => setProviderModal('new')}>＋ 添加提供商</Button>
+                  <Button onClick={() => openModelModal('new')}>＋ 添加模型</Button>
+                  <span className="hint">展开提供商行查看其模型；「自动获取模型」从接入点拉取可用模型并批量创建连接</span>
+                </div>
+              </div>
+            </>
           )}
-
-          <Tabs
-            style={{ marginTop: 12 }}
-            activeKey={tab}
-            onChange={(k) => setTab(k as SettingsTab)}
-            items={[
-              {
-                key: 'models',
-                label: `模型 (${groups.length} 提供商 / ${conns.length} 模型)`,
-                children: (
-                  <>
-                    <Table<ProviderGroup>
-                      rowKey="key"
-                      columns={providerColumns}
-                      dataSource={groups}
-                      pagination={false}
-                      size="middle"
-                      scroll={{ x: 960 }}
-                      expandable={{
-                        expandedRowKeys: expandedKeys,
-                        onExpandedRowsChange: (keys) => {
-                          const arr = keys as string[]
-                          setExpandedKeys(arr)
-                          if (discoverKey && !arr.includes(discoverKey)) setDiscoverKey(null)
-                        },
-                        expandedRowRender,
-                      }}
-                      locale={{ emptyText: '暂无提供商，点击下方按钮添加' }}
-                    />
-                    <div className="tab-footer">
-                      <Button type="primary" onClick={() => setProviderModal('new')}>＋ 添加提供商</Button>
-                      <Button onClick={() => openModelModal('new')}>＋ 添加模型</Button>
-                      <span className="hint">展开提供商行查看其模型；「自动获取模型」从接入点拉取可用模型并批量创建连接</span>
-                    </div>
-                  </>
-                ),
-              },
-              {
-                key: 'stats',
-                label: '使用统计',
-                children: <StatsView />,
-              },
-            ]}
-          />
         </div>
 
         {providerModal !== undefined && (
@@ -514,30 +515,82 @@ function DiscoverPanel({ group, conns, onManualAdd, onClose, onAdded }: {
   )
 }
 
+const UNMATCHED_PROVIDER = '未匹配供应商'
+
 /**
- * 使用统计（ASSUMED 契约 `GET /api/stats/usage?group_by=…`）：
- * 维度切换（按模型 / 按智能体 / 按项目）+ 明细表；总 tokens 用纯 CSS 横条表示（不引入图表依赖）。
- * 接口未就绪 → Result 提示 + 重试。
+ * 按供应商聚合（前端归并，后端无提供商实体）：
+ * - 以 `model_name → 提供商名` 建立索引（提供商名沿用命名约定 `{提供商}·{模型}` 的前缀，复用 providerOfName）；
+ * - 将 group_by=model 的统计行按提供商累加 calls / tokens；
+ * - 未匹配到任何连接的模型归入「未匹配供应商」（恒排末位），其余按总 tokens 降序。
+ */
+function aggregateByProvider(rows: UsageRow[], conns: ModelConnection[]): UsageRow[] {
+  const modelToProvider = new Map<string, string>()
+  for (const c of conns) {
+    if (!modelToProvider.has(c.model_name)) modelToProvider.set(c.model_name, providerOfName(c.name))
+  }
+  const acc = new Map<string, UsageRow>()
+  for (const r of rows) {
+    const label = modelToProvider.get(r.label) ?? UNMATCHED_PROVIDER
+    const key = `provider::${label}`
+    let a = acc.get(key)
+    if (!a) {
+      a = { key, label, calls: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+      acc.set(key, a)
+    }
+    a.calls += r.calls || 0
+    a.prompt_tokens += r.prompt_tokens || 0
+    a.completion_tokens += r.completion_tokens || 0
+    a.total_tokens += r.total_tokens || 0
+  }
+  return [...acc.values()].sort((a, b) => {
+    if (a.label === UNMATCHED_PROVIDER) return 1
+    if (b.label === UNMATCHED_PROVIDER) return -1
+    return b.total_tokens - a.total_tokens
+  })
+}
+
+/**
+ * 使用统计（ASSUMED 契约 `GET /api/stats/usage?group_by=…&from=…&to=…`）：
+ * - 维度切换：按模型 / 按供应商（前端归并）/ 按智能体 / 按项目；
+ * - 时间范围：DatePicker.RangePicker（含首尾），转为 YYYY-MM-DD 传给后端；
+ * - 总 tokens 用纯 CSS 横条表示（不引入图表依赖）；接口未就绪 → Result 提示 + 重试。
  */
 function StatsView() {
-  const [groupBy, setGroupBy] = useState<UsageGroupBy>('model')
+  const [dimension, setDimension] = useState<StatsDimension>('model')
+  const [range, setRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [rows, setRows] = useState<UsageRow[] | null>(null)
+  const [conns, setConns] = useState<ModelConnection[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [tick, setTick] = useState(0)
+
+  // 供应商为前端维度：数据仍取后端 model 维度行（label = model_name）
+  const apiGroupBy: UsageGroupBy = dimension === 'supplier' ? 'model' : dimension
+  const from = range ? range[0].format('YYYY-MM-DD') : undefined
+  const to = range ? range[1].format('YYYY-MM-DD') : undefined
 
   useEffect(() => {
     let alive = true
     setLoading(true)
     setError(null)
-    api.usageStats(groupBy)
+    api.usageStats(apiGroupBy, { from, to })
       .then((r) => { if (alive) setRows(Array.isArray(r.rows) ? r.rows : []) })
       .catch((e: any) => { if (alive) { setError(e?.message ?? '请求失败'); setRows(null) } })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [groupBy, tick])
+  }, [apiGroupBy, from, to, tick])
 
-  const list = rows ?? []
+  // 「按供应商」需连接列表做归并；连接拉取失败仅退化为「未匹配供应商」，不影响统计本身
+  useEffect(() => {
+    if (dimension !== 'supplier') return
+    let alive = true
+    api.listConnections()
+      .then((c) => { if (alive) setConns(c) })
+      .catch(() => { if (alive) setConns([]) })
+    return () => { alive = false }
+  }, [dimension, tick])
+
+  const list = dimension === 'supplier' ? aggregateByProvider(rows ?? [], conns) : (rows ?? [])
   const totalCalls = list.reduce((s, r) => s + (r.calls || 0), 0)
   const totalTokens = list.reduce((s, r) => s + (r.total_tokens || 0), 0)
   const maxTotal = Math.max(1, ...list.map((r) => r.total_tokens || 0))
@@ -579,15 +632,32 @@ function StatsView() {
     <div className="usage-main">
       <div className="usage-toolbar">
         <Segmented
-          value={groupBy}
-          onChange={(v) => setGroupBy(v as UsageGroupBy)}
+          value={dimension}
+          onChange={(v) => setDimension(v as StatsDimension)}
           options={[
             { label: '按模型', value: 'model' },
+            { label: '按供应商', value: 'supplier' },
             { label: '按智能体', value: 'agent' },
             { label: '按项目', value: 'project' },
           ]}
         />
-        <span className="usage-hint">数据来自 GET /api/stats/usage，按维度聚合调用记录</span>
+        <DatePicker.RangePicker
+          value={range}
+          onChange={(dates) => {
+            const s = dates?.[0]
+            const e = dates?.[1]
+            setRange(s && e ? [s, e] : null)
+          }}
+          placeholder={['开始日期', '结束日期']}
+          allowClear
+        />
+        {range && (
+          <>
+            <Tag color="blue" style={{ margin: 0 }}>{from} ~ {to}</Tag>
+            <Button type="link" size="small" onClick={() => setRange(null)}>清除</Button>
+          </>
+        )}
+        <span className="usage-hint">时间范围含首尾；留空为全部</span>
         <Button size="small" style={{ marginLeft: 'auto' }} loading={loading} onClick={() => setTick((t) => t + 1)}>刷新</Button>
       </div>
       <div className="usage-summary">
