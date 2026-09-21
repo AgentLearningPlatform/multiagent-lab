@@ -43,11 +43,13 @@ Key 仅存本地（AES-256-GCM 加密，密钥文件 `backend/data/secret.key`�
 ```
 go.work
 backend/            Go 后端（:8080，含前端静态托管）
-  cmd/backend/      入口
+  cmd/
+    backend/        主服务入口
+    agentd/         沙箱镜像入口（M10，manifest 拉取配置后容器内装配）
   internal/
     store/          SQLite + migrations（001~006：业务/模型连接/知识库/技能/项目文件/技能开关）
     api/            REST API（agents / projects / conversations / model-connections / kb / skills /
-                    tools / stats / ontologies 反代 / runs SSE）
+                    tools / stats / ontologies 反代 / runs SSE，含连接测试探针）
     chat/           Eino ADK 装配（inprocess + docker 分发）+ SSE 运行器
     kb/             向量索引 / 检索 / 对话召回
     skill/          技能注入与工具合并
@@ -55,8 +57,6 @@ backend/            Go 后端（:8080，含前端静态托管）
     ontology/       本体双反代 + 运行方案挂载
     runtime/        执行后端抽象（inprocess / docker）
     secrets/        AES-256-GCM
-    llm/            ChatModel/Embedder 工厂 + 连接测试
-  agentd/           沙箱镜像入口（M10）
 ontology-service/   本体构建平面（独立维护，见 docs/04）
 runtime-manager/    本体运行平面（独立维护）
 web/                React 18 + Vite + TS + antd 6 + Ant Design X + zustand
