@@ -286,3 +286,45 @@ export interface RuntimeProfile {
   created_at?: string
   updated_at?: string
 }
+
+// ---- P1 尾适配（REQ-92/93/94 + 学习示例） ----
+
+/** 版本历史条目（GET /api/ontologies/{id}/versions，REQ-93） */
+export interface VersionMeta {
+  version: number
+  created_at: string
+  has_original: boolean
+  original_format?: string
+  original_size?: number
+}
+
+export interface VersionsResponse {
+  ontology_id: string
+  versions: VersionMeta[] | null
+}
+
+/** 翻译透视条目（GET /api/runtime-profiles/{id}/trace，REQ-94；失败查询也留痕） */
+export interface TraceEntry {
+  id?: number
+  ts: string
+  tool: string
+  profile_id: string
+  ontology_id: string
+  sparql: string
+  took_ms: number
+  result_count: number
+  ok: boolean
+  error?: string
+}
+
+export interface TraceResponse {
+  profile_id: string
+  traces: TraceEntry[] | null
+}
+
+/** 内置学习示例（GET /api/ontologies/seed-learning） */
+export interface LearningExample {
+  key: string
+  name: string
+  description: string
+}

@@ -30,6 +30,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   ApiOutlined,
   CheckCircleOutlined,
+  CodeOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -45,11 +46,15 @@ import type {
   AiDraftResult,
   Conversation,
   ImportReport,
+  LearningExample,
   Ontology,
   RuntimeProfile,
   Spec,
   SpecConcept,
+  TraceEntry,
   ValidationError,
+  VersionMeta,
+  VersionsResponse,
 } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -481,11 +486,22 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
 
   const [aiDesc, setAiDesc] = useState('')
   const [aiHint, setAiHint] = useState('')
+  const [aiCq, setAiCq] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
   const [aiResult, setAiResult] = useState<AiDraftResult | null>(null)
   const [aiName, setAiName] = useState('')
 
   const [sampleBusy, setSampleBusy] = useState(false)
+
+  // 学习示例库（seed-learning，REQ §4.8.3 内置领域示例）
+  const [learnList, setLearnList] = useState<LearningExample[] | null>(null)
+  const [learnBusy, setLearnBusy] = useState('')
+  useEffect(() => {
+    api
+      .listLearningExamples()
+      .then((r) => setLearnList(r))
+      .catch(() => setLearnList([]))
+  }, [])
 
   const [blankName, setBlankName] = useState('')
   const [blankDesc, setBlankDesc] = useState('')
@@ -533,7 +549,11 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
     setAiBusy(true)
     setAiResult(null)
     try {
-      const r = await api.aiDraftOntology(aiDesc.trim(), aiHint.trim() || undefined)
+      const cqs = aiCq
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const r = await api.aiDraftOntology(aiDesc.trim(), aiHint.trim() || undefined, cqs.length ? cqs : undefined)
       setAiResult(r)
       setAiName(r.spec?.name ?? '')
       showToast('草案已生成，请确认后创建')
@@ -560,6 +580,7 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
       setAiResult(null)
       setAiDesc('')
       setAiHint('')
+      setAiCq('')
       onChanged(created.id)
     } catch (e: any) {
       if (e instanceof ApiError && e.validationErrors?.length) showToast(`草案校验未通过：${e.validationErrors[0].message}`, 'err')
@@ -584,6 +605,20 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
       showToast(e.message, 'err')
     } finally {
       setSampleBusy(false)
+    }
+  }
+
+  const doLearn = async (key: string) => {
+    setLearnBusy(key)
+    try {
+      const o = await api.seedLearningExample(key)
+      if ((o as unknown as { seeded?: boolean }).seeded === false) showToast('该学习示例已存在')
+      else showToast(`学习示例「${o.name}」已创建`)
+      onChanged(o.id)
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setLearnBusy('')
     }
   }
 
@@ -709,6 +744,15 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
                   onChange={(e) => setAiHint(e.target.value)}
                   placeholder="额外提示（可选，如：聚焦 Deployment / Service / Pod 三类）"
                 />
+                <Input.TextArea
+                  style={{ marginTop: 8 }}
+                  value={aiCq}
+                  onChange={(e) => setAiCq(e.target.value)}
+                  autoSize={{ minRows: 2, maxRows: 5 }}
+                  placeholder={
+                    '能力问题 CQ（可选，每行一条）：本体应能回答的关键问题\n如：某缺陷源于哪个需求？某故障应采取什么维护措施？'
+                  }
+                />
                 <Button
                   type="primary"
                   icon={<ThunderboltOutlined />}
@@ -752,6 +796,30 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
                 <Button type="primary" loading={sampleBusy} onClick={doSeed}>
                   创建内置示例
                 </Button>
+                <div className="onto-sec" style={{ marginTop: 18 }}>
+                  <span className="onto-sec-title">学习示例库（领域本体样例，POST /api/ontologies/seed-learning，幂等灌装）</span>
+                </div>
+                {learnList === null ? (
+                  <Spin size="small" />
+                ) : learnList.length === 0 ? (
+                  <Typography.Text type="secondary">构建平面未返回学习示例（需 ontology-service ≥ P1 尾版本）。</Typography.Text>
+                ) : (
+                  <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                    {learnList.map((le) => (
+                      <div key={le.key} className="onto-learn-row">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Typography.Text strong>{le.name}</Typography.Text>
+                          <Typography.Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                            {le.description}
+                          </Typography.Paragraph>
+                        </div>
+                        <Button size="small" loading={learnBusy === le.key} onClick={() => doLearn(le.key)}>
+                          一键灌装
+                        </Button>
+                      </div>
+                    ))}
+                  </Space>
+                )}
               </>
             ),
           },
@@ -801,6 +869,7 @@ function S2Edit({
   const [savingMeta, setSavingMeta] = useState(false)
   const [savingSpec, setSavingSpec] = useState(false)
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
+  const [vhRefresh, setVhRefresh] = useState(0)
 
   useEffect(() => {
     metaForm.setFieldsValue({ name: ontology.name, description: ontology.description ?? '' })
@@ -846,6 +915,7 @@ function S2Edit({
       const r = await api.saveSpec(ontology.id, parsed)
       showToast(`Spec 已保存（version ${r.version}）`)
       onSpecSaved(r.version)
+      setVhRefresh((x) => x + 1)
     } catch (e: any) {
       if (e instanceof ApiError && e.validationErrors?.length) {
         setValidationErrors(e.validationErrors)
@@ -944,6 +1014,126 @@ function S2Edit({
               />
             </>
           )}
+        </>
+      )}
+
+      <div style={{ marginTop: 16 }}>
+        <VersionHistory ontologyId={ontology.id} refreshSignal={vhRefresh} />
+      </div>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 版本历史 + 源码视图（REQ-93：GET /versions、GET /versions/{v}/original）
+// ---------------------------------------------------------------------------
+
+function VersionHistory({ ontologyId, refreshSignal }: { ontologyId: string; refreshSignal: number }) {
+  const { showToast } = useUI()
+  const [list, setList] = useState<VersionsResponse | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [tick, setTick] = useState(0)
+  const [original, setOriginal] = useState<{ version: number; text: string } | null>(null)
+  const [origLoading, setOrigLoading] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    setErr(null)
+    api
+      .listVersions(ontologyId)
+      .then((r) => {
+        if (alive) setList(r)
+      })
+      .catch((e: any) => {
+        if (alive) setErr(e.message)
+      })
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [ontologyId, refreshSignal, tick])
+
+  const viewOriginal = async (v: number) => {
+    setOrigLoading(true)
+    try {
+      const text = await api.getVersionOriginal(ontologyId, v)
+      setOriginal({ version: v, text })
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 404) showToast('该版本无原始源文件（由编辑/灌装产生，仅存 spec 快照）', 'err')
+      else showToast(e.message, 'err')
+    } finally {
+      setOrigLoading(false)
+    }
+  }
+
+  const copyOrig = () => {
+    navigator.clipboard
+      ?.writeText(original?.text ?? '')
+      .then(() => showToast('源码已复制'))
+      .catch(() => showToast('复制失败', 'err'))
+  }
+
+  const columns: ColumnsType<VersionMeta> = [
+    { title: '版本', dataIndex: 'version', width: 70 },
+    { title: '保存时间', dataIndex: 'created_at', width: 180 },
+    {
+      title: '原始源文件',
+      width: 140,
+      render: (_, r) =>
+        r.has_original ? (
+          <Tag color="blue" style={{ margin: 0 }}>
+            {r.original_format} · {r.original_size ?? 0}B
+          </Tag>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        ),
+    },
+    {
+      title: '操作',
+      width: 120,
+      render: (_, r) => (
+        <Button size="small" icon={<CodeOutlined />} disabled={!r.has_original} loading={origLoading} onClick={() => viewOriginal(r.version)}>
+          查看源码
+        </Button>
+      ),
+    },
+  ]
+
+  return (
+    <>
+      <div className="onto-sec">
+        <span className="onto-sec-title">版本历史（REQ-93，每次保存 / 导入 / 灌装自动留快照）</span>
+        <span className="hit-spacer" />
+        <Button size="small" icon={<ReloadOutlined />} onClick={() => setTick((t) => t + 1)} disabled={loading}>
+          刷新
+        </Button>
+      </div>
+      {err ? (
+        <Alert type="warning" showIcon message="版本列表获取失败" description={err} />
+      ) : (
+        <Table<VersionMeta>
+          rowKey="version"
+          columns={columns}
+          dataSource={list?.versions ?? []}
+          loading={loading}
+          pagination={false}
+          size="small"
+        />
+      )}
+      {original && (
+        <>
+          <div className="onto-sec" style={{ marginTop: 14 }}>
+            <span className="onto-sec-title">版本 {original.version} 的原始源文件</span>
+            <span className="hit-spacer" />
+            <Button size="small" icon={<CopyOutlined />} onClick={copyOrig}>
+              复制
+            </Button>
+          </div>
+          <pre className="onto-guide-pre">{original.text}</pre>
         </>
       )}
     </>
@@ -1431,12 +1621,83 @@ function RuntimeLogs({ profiles }: { profiles: RuntimeProfile[] }) {
 // S6 对外暴露
 // ---------------------------------------------------------------------------
 
+/** SPARQL 工作台默认模板（REQ-92：POST /api/runtime-profiles/{id}/sparql，引擎直连） */
+const DEFAULT_SPARQL = `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?s ?o WHERE { ?s rdf:type ?o } LIMIT 20`
+
+const TRACE_COLUMNS: ColumnsType<TraceEntry> = [
+  { title: '时间', dataIndex: 'ts', width: 165 },
+  { title: '工具', dataIndex: 'tool', width: 130 },
+  {
+    title: 'SPARQL',
+    dataIndex: 'sparql',
+    ellipsis: true,
+    render: (v) => (
+      <Typography.Text code style={{ fontSize: 12 }}>
+        {String(v).slice(0, 140)}
+      </Typography.Text>
+    ),
+  },
+  { title: '耗时', dataIndex: 'took_ms', width: 85, render: (v) => `${v} ms` },
+  { title: '结果数', dataIndex: 'result_count', width: 80 },
+  {
+    title: '状态',
+    dataIndex: 'ok',
+    width: 80,
+    render: (v) =>
+      v ? (
+        <Tag color="green" style={{ margin: 0 }}>
+          成功
+        </Tag>
+      ) : (
+        <Tag color="red" style={{ margin: 0 }}>
+          失败
+        </Tag>
+      ),
+  },
+  { title: '错误', dataIndex: 'error', ellipsis: true },
+]
+
 function S6Expose({ ontology, profiles }: { ontology: Ontology; profiles: RuntimeProfile[] }) {
   const { showToast } = useUI()
   const running = profiles.find((p) => p.status === 'running' && (p.ontology_ids ?? []).includes(ontology.id))
   const [guide, setGuide] = useState<string | null>(null)
   const [guideErr, setGuideErr] = useState<string | null>(null)
   const [guideLoading, setGuideLoading] = useState(false)
+
+  // SPARQL 工作台（REQ-92）
+  const [sparql, setSparql] = useState(DEFAULT_SPARQL)
+  const [sparqlBusy, setSparqlBusy] = useState(false)
+  const [sparqlErr, setSparqlErr] = useState<string | null>(null)
+  const [sparqlCols, setSparqlCols] = useState<string[]>([])
+  const [sparqlRows, setSparqlRows] = useState<Record<string, string>[]>([])
+  const [sparqlRaw, setSparqlRaw] = useState<string | null>(null)
+
+  // 翻译透视（REQ-94）
+  const [traces, setTraces] = useState<TraceEntry[]>([])
+  const [tracesLoading, setTracesLoading] = useState(false)
+
+  const loadTraces = async () => {
+    if (!running) {
+      setTraces([])
+      return
+    }
+    setTracesLoading(true)
+    try {
+      const r = await api.listTraces(running.id, 50)
+      setTraces(r.traces ?? [])
+    } catch {
+      setTraces([])
+    } finally {
+      setTracesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadTraces()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running?.id])
 
   useEffect(() => {
     let alive = true
@@ -1463,6 +1724,45 @@ function S6Expose({ ontology, profiles }: { ontology: Ontology; profiles: Runtim
       ?.writeText(guide ?? '')
       .then(() => showToast('指引已复制'))
       .catch(() => showToast('复制失败', 'err'))
+  }
+
+  const runSparql = async () => {
+    if (!running) {
+      showToast('请先在 S5 启动运行方案', 'err')
+      return
+    }
+    if (!sparql.trim()) {
+      showToast('请输入 SPARQL 查询', 'err')
+      return
+    }
+    setSparqlBusy(true)
+    setSparqlErr(null)
+    setSparqlRaw(null)
+    setSparqlCols([])
+    setSparqlRows([])
+    try {
+      const r = await api.runSparql(running.id, sparql.trim())
+      const vars: string[] = r.json?.head?.vars ?? []
+      const binds: Record<string, { value?: string }>[] = r.json?.results?.bindings ?? []
+      if (vars.length && binds.length) {
+        setSparqlCols(vars)
+        setSparqlRows(
+          binds.map((b, i) => {
+            const row: Record<string, string> = { __key: String(i) }
+            for (const v of vars) row[v] = b[v]?.value ?? ''
+            return row
+          }),
+        )
+      } else {
+        setSparqlRaw((r.raw || '（空结果）').slice(0, 4000))
+      }
+      loadTraces()
+    } catch (e: any) {
+      setSparqlErr(e.message)
+      loadTraces()
+    } finally {
+      setSparqlBusy(false)
+    }
   }
 
   return (
@@ -1509,6 +1809,64 @@ function S6Expose({ ontology, profiles }: { ontology: Ontology; profiles: Runtim
         <Alert type="warning" showIcon message="指引获取失败" description={guideErr} />
       ) : (
         <pre className="onto-guide-pre">{guideLoading ? '加载中…' : guide || '（暂无指引）'}</pre>
+      )}
+
+      <div className="onto-sec" style={{ marginTop: 18 }}>
+        <span className="onto-sec-title">SPARQL 工作台（REQ-92，直连方案端点 /api/runtime-profiles/{'{id}'}/sparql）</span>
+      </div>
+      {!running ? (
+        <Alert type="info" showIcon message="方案未运行：在 S5 启动后可在此直接执行 SPARQL（非 running 状态后端返回 409）。" />
+      ) : (
+        <>
+          <Input.TextArea
+            className="onto-spec-editor"
+            value={sparql}
+            onChange={(e) => setSparql(e.target.value)}
+            autoSize={{ minRows: 4, maxRows: 12 }}
+            spellCheck={false}
+          />
+          <Space style={{ marginTop: 8 }} size={10}>
+            <Button type="primary" icon={<PlayCircleOutlined />} loading={sparqlBusy} onClick={runSparql}>
+              执行查询
+            </Button>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              Accept: application/sparql-results+json · 状态码与错误原样透传引擎
+            </Typography.Text>
+          </Space>
+          {sparqlErr && <Alert type="error" showIcon style={{ marginTop: 10 }} message="查询失败（引擎返回）" description={sparqlErr} />}
+          {sparqlCols.length > 0 && (
+            <Table
+              rowKey="__key"
+              columns={sparqlCols.map((v) => ({ title: v, dataIndex: v }))}
+              dataSource={sparqlRows}
+              pagination={{ pageSize: 10, hideOnSinglePage: true }}
+              size="small"
+              style={{ marginTop: 10 }}
+              scroll={{ x: 'max-content' }}
+            />
+          )}
+          {sparqlRaw && <pre className="onto-guide-pre" style={{ marginTop: 10 }}>{sparqlRaw}</pre>}
+        </>
+      )}
+
+      <div className="onto-sec" style={{ marginTop: 18 }}>
+        <span className="onto-sec-title">翻译透视（REQ-94，最近 50 条，失败查询同样留痕）</span>
+        <span className="hit-spacer" />
+        <Button size="small" icon={<ReloadOutlined />} onClick={loadTraces} disabled={!running || tracesLoading}>
+          刷新
+        </Button>
+      </div>
+      {!running ? (
+        <Typography.Text type="secondary">方案未运行，暂无翻译记录。</Typography.Text>
+      ) : (
+        <Table<TraceEntry>
+          rowKey={(r) => String(r.id ?? `${r.ts}-${r.tool}`)}
+          columns={TRACE_COLUMNS}
+          dataSource={traces}
+          loading={tracesLoading}
+          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          size="small"
+        />
       )}
     </>
   )
