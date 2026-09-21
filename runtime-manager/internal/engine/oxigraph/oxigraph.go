@@ -32,6 +32,10 @@ func New(binary, dataDir, logDir string) *Runtime {
 
 // Start 装载并启动。ttls: ontology_id → TTL 内容。
 func (r *Runtime) Start(ctx context.Context, profileID string, port int, ttls map[string]string) (*engine.Process, error) {
+	// 预检引擎二进制：缺失时给出可自助的安装指引，而非裸 exec 错误
+	if _, err := exec.LookPath(r.Binary); err != nil {
+		return nil, fmt.Errorf("未找到引擎可执行文件 %q（不在 PATH，环境变量 OXIGRAPH_BIN 也未指向有效路径）: 请从 https://github.com/oxigraph/oxigraph/releases 下载对应平台的 oxigraph_server 并加入 PATH，或将其放到 data/bin/ 下，或设置 OXIGRAPH_BIN 为完整路径后重启 runtimed", r.Binary)
+	}
 	dir := filepath.Join(r.DataDir, profileID)
 	// 幂等：重建数据目录
 	_ = os.RemoveAll(dir)
