@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Avatar, Badge, Button, Collapse, InputNumber, Popover, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
-import { BugOutlined, BulbOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
+import type { ReactNode } from 'react'
+import { Avatar, Button, Collapse, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import { BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
@@ -13,7 +14,6 @@ import type {
   Message,
   Project,
   RuntimeProfile,
-  Skill,
 } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -126,26 +126,28 @@ function eventSource(evType: string | undefined, evData: any): EventSource {
   return 'builtin'
 }
 
-// M8：本体运行方案状态 → 状态点（Badge）/ 文案；仅 running 可选（draft 禁选，PRD FR-11）
-function profileBadge(status?: string): 'success' | 'processing' | 'error' | 'default' | 'warning' {
-  if (status === 'running') return 'success'
-  if (status === 'error') return 'error'
-  if (status === 'draft') return 'warning'
-  return 'default'
-}
-function profileStatusText(status?: string): string {
-  switch (status) {
-    case 'running':
-      return '运行中'
-    case 'stopped':
-      return '已停止'
-    case 'draft':
-      return '草稿'
-    case 'error':
-      return '异常'
-    default:
-      return ''
-  }
+/** 会话配置 chip（渲染在 Sender footer 内）：ON = 品牌填充，OFF = 浅色描边；禁用置灰 + Tooltip 说明 */
+function ChatChip({ on, disabled, icon, label, title, onClick }: {
+  on: boolean
+  disabled: boolean
+  icon: ReactNode
+  label: string
+  title: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`chat-chip${on ? ' on' : ''}${disabled ? ' disabled' : ''}`}
+      aria-pressed={on}
+      aria-disabled={disabled || undefined}
+      title={disabled ? undefined : title}
+      onClick={onClick}
+    >
+      <span className="chat-chip-icon">{icon}</span>
+      <span>{label}</span>
+    </button>
+  )
 }
 
 // Bubble 角色映射（X 2.x：role 单数；条目 role 必须命中此处定义的 key）
@@ -192,8 +194,9 @@ const BUBBLE_ROLES: BubbleListProps['role'] = {
  * - agent 直聊：头部显示智能体名，「配置」打开智能体弹窗；
  * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」；
  * - 执行细节：历史事件回放、token 用量与耗时、深度思考 ThoughtChain、工具调用 JSON、原始事件调试开关
- * - M4-M8：子智能体 / 知识召回 / 本体事件卡（实时与回放共用 describeEvent）；会话级配置（本体运行方案 /
- *   知识库 / 已挂技能）收进发送框上方的常驻快捷条，随改随存（merge-safe patchConv）
+ * - M4-M8：子智能体 / 知识召回 / 本体事件卡（实时与回放共用 describeEvent）；
+ *   会话级配置为输入卡内底部的三个开关 chip（知识库 / 本体 / 技能，X Sender footer），
+ *   随改随存（merge-safe patchConv）；具体参数在「知识库」页与智能体属性中维护
  */
 export default function ChatWindow({
   conversation,
@@ -285,37 +288,19 @@ export default function ChatWindow({
     }
   }, [conversation.id])
 
-  // ---- M8 会话级快捷配置 + M5/M6/M7 选项数据 ----
+  // ---- 会话配置 chips 的选项数据（知识库 / 本体运行方案）----
   const [profiles, setProfiles] = useState<RuntimeProfile[]>([])
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
-  const [skills, setSkills] = useState<Skill[]>([])
   const [profilesErr, setProfilesErr] = useState(false)
   const [kbsErr, setKbsErr] = useState(false)
+  const [picker, setPicker] = useState<'kb' | 'onto' | null>(null)
 
-  // 选项列表（本体运行方案 / 知识库 / 技能）：挂载时拉取；失败降级为空 + 提示
+  // 选项列表：挂载时拉取；失败降级为空 + chip 置灰说明
   const loadCfgOptions = () => {
     api.listRuntimeProfiles().then((ps) => { setProfiles(ps); setProfilesErr(false) }).catch(() => setProfilesErr(true))
     api.listKBs().then((ks) => { setKbs(ks); setKbsErr(false) }).catch(() => setKbsErr(true))
-    api.listSkills().then(setSkills).catch(() => {})
   }
   useEffect(loadCfgOptions, [])
-
-  const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id
-  const agentSkills = agent?.skills ?? []
-
-  // 本体运行方案选项：仅 running 可选（draft 禁选，FR-11）；选中态带状态点
-  const profileOptions = profiles.map((p) => ({
-    value: p.id,
-    name: p.name,
-    status: p.status,
-    disabled: p.status !== 'running',
-    label: (
-      <span className="qb-opt">
-        <Badge status={profileBadge(p.status)} />
-        <span className="qb-opt-name">{p.name}</span>
-      </span>
-    ),
-  }))
 
   // 对话级配置落库（M8）：后端 PUT 为 full-replace，必须合并当前会话字段，避免重置 title/kb_id/top_k 等
   const patchConv = async (patch: Partial<Conversation>) => {
@@ -327,6 +312,77 @@ export default function ChatWindow({
       showToast(e.message, 'err')
     }
   }
+
+  // ---- 会话配置 chips（Sender footer 内）：纯开关，ON = 品牌填充 / OFF = 浅色描边 ----
+  // 规则：ON 时若已绑定则直接启用；未绑定则弹轻量单选列表（选后记住绑定，写入会话字段）
+  const agentSkills = agent?.skills ?? []
+  const runningProfiles = profiles.filter((p) => p.status === 'running')
+  const kbBound = conversation.kb_id ? kbs.find((k) => k.id === conversation.kb_id) ?? null : null
+  const ontoBound = conversation.runtime_profile_id ? profiles.find((p) => p.id === conversation.runtime_profile_id) ?? null : null
+  const skillsOn = conversation.enable_skills ?? true // 后端列待跟进：默认开，保持既有行为
+
+  const kbDisabled = kbs.length === 0
+  const ontoDisabled = runningProfiles.length === 0
+  const skillsDisabled = agentSkills.length === 0
+
+  const kbHint = kbDisabled
+    ? (kbsErr ? '知识库列表暂不可用' : '暂无可用知识库，请先在「知识库」页创建')
+    : (conversation.enable_kb ? `知识检索已开启${kbBound ? `（${kbBound.name}）` : ''}` : '开启知识检索')
+  const ontoHint = ontoDisabled
+    ? (profilesErr ? '本体运行方案列表暂不可用' : '暂无 running 状态的本体运行方案，请先在本体页启动')
+    : (conversation.ontology_enabled ? `本体增强已开启${ontoBound ? `（${ontoBound.name}）` : ''}` : '开启本体增强')
+  const skillsHint = skillsDisabled
+    ? '该智能体未挂载技能，请在智能体属性中配置'
+    : (skillsOn ? `技能已启用（${agentSkills.length} 个）` : '技能已停用')
+
+  const toggleKb = () => {
+    if (picker === 'kb') { setPicker(null); return }
+    if (kbDisabled) return
+    if (conversation.enable_kb) { patchConv({ enable_kb: false }); return } // 关闭但保留 kb_id 绑定
+    if (conversation.kb_id) { patchConv({ enable_kb: true }); return }
+    setPicker('kb')
+  }
+  const toggleOnto = () => {
+    if (picker === 'onto') { setPicker(null); return }
+    if (ontoDisabled) return
+    if (conversation.ontology_enabled) { patchConv({ ontology_enabled: false }); return }
+    if (conversation.runtime_profile_id) { patchConv({ ontology_enabled: true }); return }
+    setPicker('onto')
+  }
+  const toggleSkills = () => {
+    if (skillsDisabled) return
+    patchConv({ enable_skills: !skillsOn })
+  }
+
+  // 轻量单选列表（Popover 内容）：Esc / 点击外部关闭，非 Modal
+  const pickerList = (
+    title: string,
+    items: { id: string; name: string; meta?: string }[],
+    current: string | null,
+    onPick: (id: string) => void,
+  ) => (
+    <div className="chip-picker" onKeyDown={(e) => { if (e.key === 'Escape') setPicker(null) }}>
+      <div className="chip-picker-title">{title}</div>
+      <div className="chip-picker-list">
+        {items.map((it, i) => (
+          <button
+            key={it.id}
+            type="button"
+            autoFocus={i === 0}
+            className={`chip-picker-item${it.id === current ? ' current' : ''}`}
+            onClick={() => { setPicker(null); onPick(it.id) }}
+          >
+            <span className="chip-picker-name">{it.name}</span>
+            {it.meta ? <span className="chip-picker-meta">{it.meta}</span> : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
+  const kbChip = <ChatChip on={conversation.enable_kb} disabled={kbDisabled} icon={<BookOutlined />} label="知识库" title={kbHint} onClick={toggleKb} />
+  const ontoChip = <ChatChip on={conversation.ontology_enabled} disabled={ontoDisabled} icon={<ClusterOutlined />} label="本体" title={ontoHint} onClick={toggleOnto} />
+  const skillsChip = <ChatChip on={skillsOn} disabled={skillsDisabled} icon={<ThunderboltOutlined />} label="技能" title={skillsHint} onClick={toggleSkills} />
 
   // 事件卡渲染（ThoughtChain 深度思考 / 工具详情 / 终态摘要）：
   // 紧凑、左侧色条区分来源、与助手文本列对齐（margin-left 44 = 头像 32 + 间距 12）
@@ -612,6 +668,7 @@ export default function ChatWindow({
 
       <div className="composer">
         <div className="composer-inner">
+          {/* 会话配置 chips 渲染在输入卡内底部（X Sender footer）：知识库 / 本体 / 技能 三个纯开关 */}
           <Sender
             value={input}
             onChange={setInput}
@@ -620,91 +677,51 @@ export default function ChatWindow({
             loading={running}
             placeholder={placeholder}
             disabled={!canSend}
+            footer={
+              <div className="chat-chips">
+                {kbDisabled ? (
+                  <Tooltip title={kbHint}><span className="chip-slot">{kbChip}</span></Tooltip>
+                ) : (
+                  <Popover
+                    open={picker === 'kb'}
+                    onOpenChange={(o) => { if (!o) setPicker(null) }}
+                    trigger="click"
+                    placement="topLeft"
+                    arrow={false}
+                    content={pickerList(
+                      '选择知识库',
+                      kbs.map((k) => ({ id: k.id, name: k.name, meta: typeof k.doc_count === 'number' ? `${k.doc_count} 文档` : undefined })),
+                      conversation.kb_id,
+                      (id) => patchConv({ kb_id: id, enable_kb: true }),
+                    )}
+                  >
+                    <span className="chip-slot">{kbChip}</span>
+                  </Popover>
+                )}
+                {ontoDisabled ? (
+                  <Tooltip title={ontoHint}><span className="chip-slot">{ontoChip}</span></Tooltip>
+                ) : (
+                  <Popover
+                    open={picker === 'onto'}
+                    onOpenChange={(o) => { if (!o) setPicker(null) }}
+                    trigger="click"
+                    placement="topLeft"
+                    arrow={false}
+                    content={pickerList(
+                      '选择本体运行方案',
+                      runningProfiles.map((p) => ({ id: p.id, name: p.name, meta: p.engine })),
+                      conversation.runtime_profile_id,
+                      (id) => patchConv({ runtime_profile_id: id, ontology_enabled: true }),
+                    )}
+                  >
+                    <span className="chip-slot">{ontoChip}</span>
+                  </Popover>
+                )}
+                {skillsDisabled ? <Tooltip title={skillsHint}><span className="chip-slot">{skillsChip}</span></Tooltip> : skillsChip}
+                <span className="chat-chips-hint">Enter 发送 · Shift+Enter 换行</span>
+              </div>
+            }
           />
-          {/* 会话级快捷切换（常驻发送框下方）：本体方案 / 知识库（含检索开关与参数） / 已挂技能 */}
-          <div className="quickbar">
-            <div className="qb-item">
-              <span className="qb-label">本体</span>
-              <Select
-                className="qb-select"
-                size="small"
-                variant="filled"
-                allowClear
-                placeholder="未挂载"
-                value={conversation.runtime_profile_id ?? undefined}
-                onChange={(v) => patchConv({ runtime_profile_id: v ?? null, ontology_enabled: !!v })}
-                options={profileOptions}
-                notFoundContent={profilesErr ? '运行方案列表暂不可用' : '暂无运行方案'}
-                optionRender={(opt) => (
-                  <Space size={8} style={{ width: '100%' }}>
-                    <Badge status={profileBadge(opt.data?.status)} />
-                    <span>{opt.data?.name}</span>
-                    <span className="cfg-opt-status">{profileStatusText(opt.data?.status)}</span>
-                  </Space>
-                )}
-              />
-            </div>
-            <span className="qb-sep" />
-            <div className="qb-item">
-              <span className="qb-label">知识库</span>
-              <Select
-                className="qb-select"
-                size="small"
-                variant="filled"
-                allowClear
-                placeholder="未选择"
-                value={conversation.kb_id ?? undefined}
-                onChange={(v) => patchConv({ kb_id: v ?? null })}
-                options={kbs.map((k) => ({ value: k.id, label: k.name }))}
-                notFoundContent={kbsErr ? '知识库列表暂不可用' : '暂无知识库'}
-              />
-              <Tooltip title={conversation.kb_id ? '启用知识检索' : '先选择知识库'}>
-                {/* 包一层：禁用态控件不接收指针事件，Tooltip 需挂在包裹元素上 */}
-                <span className="qb-switch-wrap">
-                  <Switch
-                    size="small"
-                    checked={conversation.enable_kb}
-                    disabled={!conversation.kb_id}
-                    onChange={(v) => patchConv({ enable_kb: v })}
-                  />
-                </span>
-              </Tooltip>
-              <Popover
-                trigger="click"
-                placement="topRight"
-                title="检索参数"
-                content={
-                  <div className="qb-adv">
-                    <div className="cfg-row">
-                      <span className="cfg-row-label">召回条数 top_k</span>
-                      <InputNumber size="small" min={1} max={20} value={conversation.top_k} onChange={(v) => patchConv({ top_k: typeof v === 'number' ? v : conversation.top_k })} />
-                    </div>
-                    <div className="cfg-row">
-                      <span className="cfg-row-label">最低分 min_score</span>
-                      <InputNumber size="small" min={0} max={1} step={0.05} value={conversation.min_score} onChange={(v) => patchConv({ min_score: typeof v === 'number' ? v : conversation.min_score })} />
-                    </div>
-                    <div className="cfg-hint">「启用检索」开启且已选知识库时生效。</div>
-                  </div>
-                }
-              >
-                <Button type="text" size="small" className="qb-gear" icon={<SettingOutlined />} aria-label="检索参数" />
-              </Popover>
-            </div>
-            <span className="qb-spacer" />
-            {agentSkills.length > 0 && (
-              <Space size={[4, 4]} className="qb-skills">
-                {agentSkills.slice(0, 2).map((id) => <Tag key={id} className="qb-skill">{skillName(id)}</Tag>)}
-                {agentSkills.length > 2 && (
-                  <Tooltip title={agentSkills.slice(2).map(skillName).join('、')}>
-                    <Tag className="qb-skill">+{agentSkills.length - 2}</Tag>
-                  </Tooltip>
-                )}
-              </Space>
-            )}
-          </div>
-          <div className="tips">
-            Enter 发送 · Shift+Enter 换行 · 运行过程以卡片显示，「调试」可查看原始事件
-          </div>
         </div>
       </div>
     </div>

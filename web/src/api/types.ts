@@ -40,6 +40,8 @@ export interface Conversation {
   enable_kb: boolean
   runtime_profile_id: string | null
   ontology_enabled: boolean
+  /** 会话级技能开关（后端列待跟进；前端按 `?? true` 兼容默认开） */
+  enable_skills?: boolean
   top_k: number
   min_score: number
   created_at: string
