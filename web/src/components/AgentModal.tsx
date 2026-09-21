@@ -59,6 +59,9 @@ export default function AgentModal({
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
         tools: v.tools ?? [],
+        // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
+        skills: agent.skills ?? [],
+        mcp_servers: agent.mcp_servers ?? [],
       })
       showToast('已保存，下次运行生效')
       onChanged()

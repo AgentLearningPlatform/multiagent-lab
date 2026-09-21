@@ -75,18 +75,18 @@ export const api = {
   deleteKB: (id: string) => req<{ deleted: string }>(`/api/kb/${id}`, { method: 'DELETE' }),
   listKBDocs: (kbId: string) => req<KBDoc[]>(`/api/kb/${kbId}/docs`),
   uploadKBDoc: (kbId: string, doc: { name: string; content: string }) =>
-    req<KBDoc>(`/api/kb/${kbId}/docs`, { method: 'POST', body: JSON.stringify(doc) }),
+    req<KBDoc>(`/api/kb/${kbId}/docs`, { method: 'POST', body: JSON.stringify({ title: doc.name, content: doc.content }) }),
   deleteKBDoc: (kbId: string, docId: string) => req<{ deleted: string }>(`/api/kb/${kbId}/docs/${docId}`, { method: 'DELETE' }),
   reindexKBDoc: (kbId: string, docId: string) => req<KBDoc>(`/api/kb/${kbId}/docs/${docId}/reindex`, { method: 'POST' }),
-  searchPreview: (kbId: string, q: string, topK?: number) =>
-    req<{ hits: KBHit[] }>(`/api/kb/${kbId}/search-preview`, { method: 'POST', body: JSON.stringify({ q, top_k: topK }) }),
+  searchPreview: (kbId: string, q: string, topK?: number, minScore?: number) =>
+    req<{ hits: KBHit[] }>(`/api/kb/${kbId}/search-preview`, { method: 'POST', body: JSON.stringify({ query: q, top_k: topK, min_score: minScore }) }),
 
   // ---- M7 技能（§8：/api/skills 系列 + 注入预览） ----
   listSkills: () => req<Skill[]>('/api/skills'),
   createSkill: (s: Partial<Skill>) => req<Skill>('/api/skills', { method: 'POST', body: JSON.stringify(s) }),
   updateSkill: (id: string, s: Partial<Skill>) => req<Skill>(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(s) }),
   deleteSkill: (id: string) => req<{ deleted: string }>(`/api/skills/${id}`, { method: 'DELETE' }),
-  skillPreview: (id: string) => req<{ instruction: string }>(`/api/skills/${id}/preview`),
+  skillPreview: (id: string) => req<{ instruction_block: string; enabled?: boolean }>(`/api/skills/${id}/preview`),
 
   // ---- M5 工具注册表（§6.8：前端勾选落 agent.tools） ----
   listTools: () => req<ToolInfo[]>('/api/tools'),

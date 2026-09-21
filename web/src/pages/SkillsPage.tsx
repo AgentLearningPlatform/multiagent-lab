@@ -10,6 +10,7 @@ import {
   Result,
   Select,
   Space,
+  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -75,7 +76,7 @@ export default function SkillsPage() {
   const openPreview = async (s: Skill) => {
     try {
       const r = await api.skillPreview(s.id)
-      setPreview({ skill: s, instruction: r.instruction ?? '' })
+      setPreview({ skill: s, instruction: r.instruction_block ?? (r as { instruction?: string }).instruction ?? '' })
     } catch (e: any) {
       showToast(e.message, 'err')
     }
@@ -190,6 +191,9 @@ export default function SkillsPage() {
                       内置
                     </Tag>
                   )}
+                  <Tag color={s.enabled ? 'blue' : 'default'} style={{ margin: 0 }}>
+                    {s.enabled ? '启用' : '停用'}
+                  </Tag>
                   {mountedIds.has(s.id) ? (
                     <Tag color="green" style={{ margin: 0 }}>
                       已挂载
@@ -285,9 +289,10 @@ function SkillModal({
         instruction: edit.instruction,
         tools: edit.tools ?? [],
         resources: edit.resources ?? [],
+        enabled: edit.enabled,
       })
     } else {
-      form.setFieldsValue({ name: '', description: '', instruction: '', tools: [], resources: [] })
+      form.setFieldsValue({ name: '', description: '', instruction: '', tools: [], resources: [], enabled: true })
     }
   }, [skill, form, edit])
 
@@ -307,6 +312,8 @@ function SkillModal({
       instruction: v.instruction,
       tools: v.tools ?? [],
       resources,
+      // 缺省视为启用：避免后端 full-replace 因字段缺失把技能停用
+      enabled: typeof v.enabled === 'boolean' ? v.enabled : edit ? edit.enabled : true,
     }
     setBusy(true)
     try {
@@ -349,6 +356,9 @@ function SkillModal({
         </Form.Item>
         <Form.Item name="description" label="描述">
           <Input.TextArea autoSize={{ minRows: 2, maxRows: 3 }} placeholder="用途与触发场景（供智能体理解何时启用）" />
+        </Form.Item>
+        <Form.Item name="enabled" label="启用" valuePropName="checked" extra="停用后不参与装配注入；保存时后端按 full-replace 处理，缺省视为停用。">
+          <Switch />
         </Form.Item>
         <Form.Item
           name="instruction"

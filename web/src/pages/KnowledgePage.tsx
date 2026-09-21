@@ -26,20 +26,12 @@ import { api } from '../api/client'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
 
-/** 字节数友好展示（size 缺失时回退占位符） */
-function formatBytes(n?: number): string {
-  if (n === undefined || n === null || Number.isNaN(n)) return '—'
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(2)} MB`
-}
-
 /** 文档索引状态 → antd Badge 状态（后端未知状态优雅回退） */
 const DOC_STATUS: Record<string, { status: BadgeProps['status']; text: string }> = {
   pending: { status: 'default', text: '待索引' },
   indexing: { status: 'processing', text: '索引中' },
-  ready: { status: 'success', text: '就绪' },
-  error: { status: 'error', text: '失败' },
+  success: { status: 'success', text: '成功' },
+  failed: { status: 'error', text: '失败' },
 }
 function docStatusOf(s?: string): { status: BadgeProps['status']; text: string } {
   return DOC_STATUS[s ?? ''] ?? { status: 'default', text: s || '未知' }
@@ -53,7 +45,7 @@ function fmtScore(v: unknown): string {
 
 /**
  * 知识库视图（原型 06 §3.4 / 02 文档 §10）：
- * 左栏库列表（名称 / 向量后端 / 文档·chunk 计数）→ 右栏库详情
+ * 左栏库列表（名称 / 文档·chunk 计数）→ 右栏库详情
  * （文档表 + 上传入口 + 检索试运行（索引未就绪禁用）+ TopK / min_score 配置）。
  */
 export default function KnowledgePage() {
@@ -77,7 +69,7 @@ export default function KnowledgePage() {
   const [savingCfg, setSavingCfg] = useState(false)
 
   const active = useMemo(() => kbs.find((k) => k.id === activeId) ?? null, [kbs, activeId])
-  const hasReady = docs.some((d) => d.status === 'ready')
+  const hasReady = docs.some((d) => d.status === 'success')
 
   const reloadKBs = () => {
     api.listKBs()
@@ -125,7 +117,7 @@ export default function KnowledgePage() {
     if (!active) return
     setSavingCfg(true)
     try {
-      await api.updateKB(active.id, { top_k: topK ?? active.top_k, min_score: minScore ?? active.min_score })
+      await api.updateKB(active.id, { ...active, top_k: topK ?? active.top_k, min_score: minScore ?? active.min_score })
       showToast('检索参数已保存')
       bumpData()
       reloadKBs()
@@ -145,7 +137,7 @@ export default function KnowledgePage() {
     }
     setSearching(true)
     try {
-      const r = await api.searchPreview(active.id, q, topK ?? undefined)
+      const r = await api.searchPreview(active.id, q, topK ?? undefined, minScore ?? undefined)
       setHits(r.hits ?? [])
     } catch (e: any) {
       showToast(e.message, 'err')
@@ -195,15 +187,9 @@ export default function KnowledgePage() {
   const columns: ColumnsType<KBDoc> = [
     {
       title: '文档',
-      dataIndex: 'name',
+      dataIndex: 'title',
       ellipsis: true,
       render: (v: string) => <Typography.Text strong>{v}</Typography.Text>,
-    },
-    {
-      title: '大小',
-      dataIndex: 'size',
-      width: 100,
-      render: (v?: number) => <Typography.Text type="secondary">{formatBytes(v)}</Typography.Text>,
     },
     {
       title: 'Chunks',
@@ -219,7 +205,7 @@ export default function KnowledgePage() {
       render: (_, d: KBDoc) => {
         const st = docStatusOf(d.status)
         const badge = <Badge status={st.status} text={st.text} />
-        return d.status === 'error' && d.error ? <Tooltip title={d.error}>{badge}</Tooltip> : badge
+        return d.status === 'failed' && d.error ? <Tooltip title={d.error}>{badge}</Tooltip> : badge
       },
     },
     {
@@ -232,7 +218,7 @@ export default function KnowledgePage() {
             重建索引
           </Button>
           <Popconfirm
-            title={`删除文档「${d.name}」？`}
+            title={`删除文档「${d.title}」？`}
             description="将级联删除其全部 chunk 与向量。"
             okText="删除"
             okButtonProps={{ danger: true }}
@@ -267,9 +253,6 @@ export default function KnowledgePage() {
                 <span className="side-item-name" title={k.name}>
                   {k.name}
                 </span>
-                <Tag color={k.store_backend === 'qdrant' ? 'geekblue' : 'default'} style={{ margin: 0 }}>
-                  {k.store_backend}
-                </Tag>
               </div>
               <div className="side-item-meta">
                 <span>文档 {k.doc_count ?? '—'}</span>
@@ -308,9 +291,6 @@ export default function KnowledgePage() {
                   <Typography.Title level={4} style={{ margin: 0 }}>
                     {active.name}
                   </Typography.Title>
-                  <Tag color={active.store_backend === 'qdrant' ? 'geekblue' : 'default'} style={{ margin: 0 }}>
-                    {active.store_backend}
-                  </Tag>
                 </div>
                 <p className="work-head-desc">{active.description || '未填写描述'}</p>
               </div>

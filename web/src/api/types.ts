@@ -94,7 +94,8 @@ export interface KnowledgeBase {
   id: string
   name: string
   description?: string
-  store_backend: 'qdrant' | 'sqlite'
+  /** @deprecated 后端已移除该字段，仅新建表单兼容保留 */
+  store_backend?: 'qdrant' | 'sqlite'
   top_k: number
   min_score: number
   doc_count?: number
@@ -106,10 +107,9 @@ export interface KnowledgeBase {
 export interface KBDoc {
   id: string
   kb_id: string
-  name: string
-  size?: number
+  title: string
   chunk_count?: number
-  status: 'pending' | 'indexing' | 'ready' | 'error'
+  status: 'pending' | 'indexing' | 'success' | 'failed'
   error?: string
   created_at: string
 }
@@ -137,6 +137,7 @@ export interface Skill {
   tools: string[]
   resources: SkillResource[]
   builtin: boolean
+  enabled: boolean
   created_at: string
   updated_at: string
 }

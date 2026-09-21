@@ -34,9 +34,10 @@ interface ChatItem {
   metaAgent?: string
   eventText?: string
   eventErr?: boolean
+  eventWarn?: boolean
   streaming?: boolean
   // 执行细节增强（06 §4 执行可观测）
-  evType?: string // reasoning | run.started | run.finished | run.error | tool.call | tool.result | skill.loaded | subagent.enter | subagent.exit | retrieval | ontology.query | ontology.unavailable
+  evType?: string // reasoning | run.started | run.finished | run.warning | run.error | tool.call | tool.result | skill.loaded | subagent.enter | subagent.exit | retrieval | ontology.query | ontology.unavailable
   evData?: any // 事件 data（解析后，供详情展开与调试面板）
   reasoning?: string // 深度思考累积内容
   evKey?: string // 稳定卡片键（深度思考展开状态按它记录，历史/实时各自生成）
@@ -49,12 +50,14 @@ function subagentName(d: any): string {
 }
 
 // 事件卡文案（实时流与历史回放共用：新增事件必须在此登记，两条路径才一致）
-function describeEvent(type: string, d: any): { text: string; err?: boolean } {
+function describeEvent(type: string, d: any): { text: string; err?: boolean; warn?: boolean } {
   switch (type) {
     case 'run.started':
       return { text: `▶ 运行开始 · ${d?.agent_name ?? ''} · ${d?.model ?? ''}`.replace(/ ·\s*$/, '') }
     case 'run.finished':
       return d?.reason === 'stopped' ? { text: '⏹ 已停止' } : { text: finishSummary(d) }
+    case 'run.warning':
+      return { text: `⚠ 运行警告 · ${d?.message ?? ''}`.replace(/ ·\s*$/, ''), warn: true }
     case 'run.error':
       return { text: `⚠ ${d?.message ?? '运行失败'}`, err: true }
     case 'tool.call':
@@ -110,7 +113,7 @@ type EventSource = 'builtin' | 'skill' | 'mcp' | 'onto' | 'subagent' | 'retrieva
 /**
  * 事件来源分类（原型 06 §10 色彩语义：内置 灰 / 技能 绿 / MCP 紫 / 本体 青 / 异常 红；
  * 子智能体取紫族、知识召回取绿族）。
- * §6.5 v0.6：tool.call/result 已带 source（builtin/skill/mcp/{profile_id}），优先采信；
+ * §6.5：tool.call/result 已带 source（builtin | skill:{id} | mcp:{server} | ontology:facade | agent:{id}），按前缀采信；
  * 缺失时回退到 tool_name 命名约定：onto_* → 本体；mcp_ 前缀或 server__tool 双下划线 → MCP。
  */
 function eventSource(evType: string | undefined, evData: any): EventSource {
@@ -120,7 +123,11 @@ function eventSource(evType: string | undefined, evData: any): EventSource {
   if (evType === 'ontology.query' || evType === 'ontology.unavailable') return 'onto'
   const src = evData?.source
   if (typeof src === 'string' && src) {
-    if (src === 'builtin' || src === 'skill' || src === 'mcp') return src
+    if (src === 'builtin') return 'builtin'
+    if (src.startsWith('skill:')) return 'skill'
+    if (src.startsWith('mcp:')) return 'mcp'
+    if (src.startsWith('ontology:')) return 'onto'
+    if (src.startsWith('agent:')) return 'subagent'
     return 'onto' // 其余 source 视为本体运行方案 profile_id（§6.5）
   }
   const name = String(evData?.tool_name ?? '')
@@ -272,7 +279,7 @@ export default function ChatWindow({
           const desc = describeEvent(e.type, d)
           timeline.push({
             ts: e.created_at,
-            item: { kind: 'event', evType: e.type, eventText: desc.text, eventErr: desc.err, evData: d },
+            item: { kind: 'event', evType: e.type, eventText: desc.text, eventErr: desc.err, eventWarn: desc.warn, evData: d },
           })
         }
         timeline.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
@@ -323,10 +330,10 @@ export default function ChatWindow({
 
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id
 
-  // 对话级配置落库（M8）：仅 conversation 字段；成功后由父级刷新会话数据
+  // 对话级配置落库（M8）：后端 PUT 为 full-replace，必须合并当前会话字段，避免重置 title/kb_id/top_k 等
   const patchConv = async (patch: Partial<Conversation>) => {
     try {
-      await api.updateConversation(conversation.id, patch)
+      await api.updateConversation(conversation.id, { ...conversation, ...patch })
       showToast('对话配置已更新')
       onConversationUpdated()
     } catch (e: any) {
@@ -399,10 +406,10 @@ export default function ChatWindow({
     }
 
     return (
-      <div key={i} className={`event-card src-${eventSource(it.evType, it.evData)}${it.eventErr ? ' err' : ''}`}>
+      <div key={i} className={`event-card src-${eventSource(it.evType, it.evData)}${it.eventErr ? ' err' : ''}${it.eventWarn ? ' warn' : ''}`}>
         <span>{it.eventText}</span>
-        {it.evType === 'ontology.unavailable' && it.evData?.detail != null && (
-          <div className="event-detail">{String(it.evData.detail)}</div>
+        {it.evType === 'ontology.unavailable' && (it.evData?.reason != null || it.evData?.detail != null) && (
+          <div className="event-detail">{String(it.evData.reason ?? it.evData.detail)}</div>
         )}
         {isTool && it.evData && (
           <Collapse
@@ -518,12 +525,13 @@ export default function ChatWindow({
           if (
             event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded' ||
             event === 'subagent.enter' || event === 'subagent.exit' ||
-            event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable'
+            event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable' ||
+            event === 'run.warning'
           ) {
             const desc = describeEvent(event, payload)
             setItems((prev) => {
               const next = [...prev]
-              const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, eventErr: desc.err, evData: payload }
+              const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, eventErr: desc.err, eventWarn: desc.warn, evData: payload }
               next.splice(next.length - 1, 0, ev) // 流式助手消息存在时插到其前
               return next
             })
@@ -651,7 +659,7 @@ export default function ChatWindow({
             allowClear
             placeholder="未挂载（不启用本体）"
             value={conversation.runtime_profile_id ?? undefined}
-            onChange={(v) => patchConv({ runtime_profile_id: v ?? null })}
+            onChange={(v) => patchConv({ runtime_profile_id: v ?? null, ontology_enabled: !!v })}
             options={profiles.map((p) => ({ value: p.id, label: p.name, disabled: p.status !== 'running', status: p.status }))}
             optionRender={(opt) => (
               <Space size={8} style={{ width: '100%' }}>

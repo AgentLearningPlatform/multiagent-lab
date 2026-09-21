@@ -120,7 +120,7 @@ export default function Sidebar({
     setRenaming(null)
     if (!target) return
     try {
-      await api.updateConversation(target.id, { title: name })
+      await api.updateConversation(target.id, { ...target, title: name })
       bumpData()
     } catch (e: any) {
       showToast(e.message, 'err')
