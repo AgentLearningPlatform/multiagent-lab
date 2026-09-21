@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button, Col, Divider, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space } from 'antd'
 import { api } from '../api/client'
@@ -7,6 +7,12 @@ import { useUI } from '../store/ui'
 
 /** 连接名已按 `{提供商}·{模型}` 约定时直接展示，否则补上模型名（兼容老数据） */
 const connLabel = (c: ModelConnection) => (c.name.endsWith(`·${c.model_name}`) ? c.name : `${c.name} · ${c.model_name}`)
+
+/** 模型身份展示用：连接名按 `{提供商}·{模型}` 约定时取提供商前缀，否则取整名 */
+const providerOfConn = (c: ModelConnection) => {
+  const i = c.name.indexOf('·')
+  return i > 0 ? c.name.slice(0, i) : c.name
+}
 
 /** 弹窗小节标题（左对齐小标题；inline 边距覆盖 antd Divider 默认间距） */
 function Section({ children, first }: { children: ReactNode; first?: boolean }) {
@@ -20,7 +26,8 @@ function Section({ children, first }: { children: ReactNode; first?: boolean }) 
 /**
  * 智能体属性弹窗（P0 字段），保存后下次运行生效（配置驱动）；与 NameModal 同一弹窗范式。
  * 布局分组：基本信息 → 模型 → 采样参数 → 工具 → 执行；短字段走两列 Row/Col，长文本整行 autoSize。
- * M5：工具白名单来自工具注册表（api.listTools），勾选落 agent.tools；模型连接留空 = 跟随全局默认（M3）。
+ * M5：工具白名单来自工具注册表（api.listTools），勾选落 agent.tools；模型连接留空 = 跟随全局默认（M3），
+ * 选择后在其下方展示解析出的「提供商 · 模型」身份，留空则提示将使用的同类型默认连接。
  */
 export default function AgentModal({
   agent,
@@ -33,17 +40,27 @@ export default function AgentModal({
 }) {
   const { showToast } = useUI()
   const [form] = Form.useForm()
-  const [conns, setConns] = useState<ModelConnection[]>([])
+  const [allConns, setAllConns] = useState<ModelConnection[]>([])
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [toolsErr, setToolsErr] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     form.setFieldsValue(agent)
-    api.listConnections().then((cs) => setConns(cs.filter((c) => c.conn_type === 'chat' && c.enabled))).catch(() => {})
+    api.listConnections().then(setAllConns).catch(() => {})
     // M5：工具注册表（失败降级为空 + 提示，不阻塞保存）
     api.listTools().then((ts) => { setTools(ts); setToolsErr(false) }).catch(() => setToolsErr(true))
   }, [agent.id, form])
+
+  // 可选 chat 连接（启用中）与生效的全局默认（默认连接须启用，与后端 GetDefaultConnection 语义一致）
+  const conns = useMemo(() => allConns.filter((c) => c.conn_type === 'chat' && c.enabled), [allConns])
+  const defaultConn = useMemo(
+    () => allConns.find((c) => c.conn_type === 'chat' && c.is_default && c.enabled) ?? null,
+    [allConns],
+  )
+  // 当前选中连接（含已停用的历史绑定，便于如实展示身份）
+  const modelConnId = Form.useWatch('model_conn_id', form)
+  const selectedConn = modelConnId ? allConns.find((c) => c.id === modelConnId) ?? null : null
 
   const save = async () => {
     try {
@@ -88,7 +105,12 @@ export default function AgentModal({
     <Modal
       open
       onCancel={onClose}
-      title="智能体属性"
+      title={
+        <span className="modal-title">
+          <span className="agent-tile agent-tile-sm"><span className="agent-glyph" /></span>
+          智能体属性
+        </span>
+      }
       width={680}
       centered
       styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingRight: 8 } }}
@@ -121,9 +143,21 @@ export default function AgentModal({
           name="model_conn_id"
           label="模型连接"
           extra={
-            conns.length === 0
-              ? '留空 = 跟随全局默认（设置中 chat 类型的默认连接）；当前无可用 chat 连接，可到「设置-模型管理」新增。'
-              : '留空 = 跟随全局默认（设置中 chat 类型的默认连接）。'
+            selectedConn ? (
+              <span className="model-meta" title={selectedConn.base_url}>
+                当前模型：{providerOfConn(selectedConn)} · <span className="model-meta-name">{selectedConn.model_name}</span>
+              </span>
+            ) : defaultConn ? (
+              <span className="model-meta" title={defaultConn.base_url}>
+                留空 = 跟随全局默认：{providerOfConn(defaultConn)} · <span className="model-meta-name">{defaultConn.model_name}</span>
+              </span>
+            ) : (
+              <span className="model-meta warn">
+                {conns.length === 0
+                  ? '留空 = 跟随全局默认；当前无可用 chat 连接，可到「设置-模型管理」新增。'
+                  : '留空 = 跟随全局默认；当前无启用的 chat 默认连接，可到「设置-模型管理」设置默认。'}
+              </span>
+            )
           }
         >
           <Select

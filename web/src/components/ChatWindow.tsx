@@ -1,15 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Avatar, Badge, Button, Collapse, Drawer, InputNumber, Select, Space, Switch, Tag, Typography } from 'antd'
-import {
-  ApartmentOutlined,
-  BugOutlined,
-  BulbOutlined,
-  DatabaseOutlined,
-  RobotOutlined,
-  SlidersOutlined,
-  ThunderboltOutlined,
-  UserOutlined,
-} from '@ant-design/icons'
+import { Avatar, Badge, Button, Collapse, InputNumber, Popover, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import { BugOutlined, BulbOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
@@ -20,7 +11,6 @@ import type {
   KBHit,
   KnowledgeBase,
   Message,
-  ModelConnection,
   Project,
   RuntimeProfile,
   Skill,
@@ -167,7 +157,12 @@ const BUBBLE_ROLES: BubbleListProps['role'] = {
   },
   ai: {
     placement: 'start',
-    avatar: <Avatar icon={<RobotOutlined />} style={{ background: '#eef0fe', color: '#4f46e5' }} />,
+    // 智能体标识：与顶栏品牌同源的三节点网络标记（侧栏节点 / 空态保持一致）
+    avatar: (
+      <Avatar shape="square" className="agent-avatar">
+        <span className="agent-glyph" />
+      </Avatar>
+    ),
     styles: { content: { background: '#fff', border: '1px solid var(--c-line)', borderRadius: 12, borderBottomLeftRadius: 4 } },
     // 助手正文走 Markdown（XMarkdown）：流式期间尾部游标，hasNextChunk=false 时收尾刷新
     contentRender: (content, info) => (
@@ -197,8 +192,8 @@ const BUBBLE_ROLES: BubbleListProps['role'] = {
  * - agent 直聊：头部显示智能体名，「配置」打开智能体弹窗；
  * - project 会话：头部注明「项目：xxx · 会话使用的智能体：xxx」；
  * - 执行细节：历史事件回放、token 用量与耗时、深度思考 ThoughtChain、工具调用 JSON、原始事件调试开关
- * - M4-M8：子智能体 / 知识召回 / 本体事件卡（实时与回放共用 describeEvent）；「对话配置」抽屉管理
- *   本体运行方案（仅 running 可选）、知识库（kb_id/enable_kb/top_k/min_score）与已挂技能展示
+ * - M4-M8：子智能体 / 知识召回 / 本体事件卡（实时与回放共用 describeEvent）；会话级配置（本体运行方案 /
+ *   知识库 / 已挂技能）收进发送框上方的常驻快捷条，随改随存（merge-safe patchConv）
  */
 export default function ChatWindow({
   conversation,
@@ -238,7 +233,6 @@ export default function ChatWindow({
   const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({})
   const runRef = useRef<{ abort: () => void; done: Promise<void> } | null>(null)
   const runKeyRef = useRef('')
-  const connRef = useRef<ModelConnection[]>([])
 
   // 历史还原：消息表（对话正文）+ 事件表（执行时间线）按时间合并
   useEffect(() => {
@@ -291,36 +285,14 @@ export default function ChatWindow({
     }
   }, [conversation.id])
 
-  // 模型标签：智能体指定连接 或 默认连接
-  useEffect(() => {
-    api.listConnections().then((conns) => {
-      connRef.current = conns
-    }).catch(() => {})
-  }, [conversation.id])
-
-  const modelLabel = (() => {
-    if (!agent) return '项目未配置成员'
-    const connId = agent.model_conn_id
-    const conn = connId ? connRef.current.find((c) => c.id === connId) : connRef.current.find((c) => c.conn_type === 'chat' && c.is_default)
-    // 连接名已按 `{提供商}·{模型}` 约定时直接展示，避免模型名重复（兼容老数据）
-    return conn
-      ? conn.name.endsWith(`·${conn.model_name}`)
-        ? conn.name
-        : `${conn.name} · ${conn.model_name}`
-      : agent.model_conn_id
-        ? '指定连接'
-        : '默认模型'
-  })()
-
-  // ---- M8 对话配置 + M5/M6/M7 选项数据 ----
-  const [cfgOpen, setCfgOpen] = useState(false)
+  // ---- M8 会话级快捷配置 + M5/M6/M7 选项数据 ----
   const [profiles, setProfiles] = useState<RuntimeProfile[]>([])
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [profilesErr, setProfilesErr] = useState(false)
   const [kbsErr, setKbsErr] = useState(false)
 
-  // 选项列表（本体运行方案 / 知识库 / 技能）：挂载与打开抽屉时拉取；失败降级为空 + 提示
+  // 选项列表（本体运行方案 / 知识库 / 技能）：挂载时拉取；失败降级为空 + 提示
   const loadCfgOptions = () => {
     api.listRuntimeProfiles().then((ps) => { setProfiles(ps); setProfilesErr(false) }).catch(() => setProfilesErr(true))
     api.listKBs().then((ks) => { setKbs(ks); setKbsErr(false) }).catch(() => setKbsErr(true))
@@ -329,6 +301,21 @@ export default function ChatWindow({
   useEffect(loadCfgOptions, [])
 
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id
+  const agentSkills = agent?.skills ?? []
+
+  // 本体运行方案选项：仅 running 可选（draft 禁选，FR-11）；选中态带状态点
+  const profileOptions = profiles.map((p) => ({
+    value: p.id,
+    name: p.name,
+    status: p.status,
+    disabled: p.status !== 'running',
+    label: (
+      <span className="qb-opt">
+        <Badge status={profileBadge(p.status)} />
+        <span className="qb-opt-name">{p.name}</span>
+      </span>
+    ),
+  }))
 
   // 对话级配置落库（M8）：后端 PUT 为 full-replace，必须合并当前会话字段，避免重置 title/kb_id/top_k 等
   const patchConv = async (patch: Partial<Conversation>) => {
@@ -574,7 +561,6 @@ export default function ChatWindow({
         ) : (
           <Typography.Text strong className="subject">{agent ? agent.name : '对话'}</Typography.Text>
         )}
-        <Tag color="purple">{modelLabel}</Tag>
         {isProjectScope && project && <Tag>{project.collab_mode}</Tag>}
         {!isProjectScope && agent && (
           <>
@@ -587,9 +573,6 @@ export default function ChatWindow({
           <BugOutlined style={{ color: showRaw ? 'var(--ant-color-primary, #4f46e5)' : undefined }} />
           <span style={{ fontSize: 12 }}>调试</span>
           <Switch size="small" checked={showRaw} onChange={setShowRaw} />
-          <Button size="small" icon={<SlidersOutlined />} onClick={() => { setCfgOpen(true); loadCfgOptions() }}>
-            对话配置
-          </Button>
           <Button
             size="small"
             onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
@@ -605,7 +588,7 @@ export default function ChatWindow({
           <div className="msg-empty">
             <Welcome
               variant="borderless"
-              icon={<RobotOutlined style={{ fontSize: 36, color: 'var(--ant-color-primary, #4f46e5)' }} />}
+              icon={<span className="agent-tile"><span className="agent-glyph" /></span>}
               title={`开始与「${subjectName ?? '智能体'}」对话`}
               description={
                 isProjectScope
@@ -629,6 +612,87 @@ export default function ChatWindow({
 
       <div className="composer">
         <div className="composer-inner">
+          {/* 会话级快捷切换（常驻发送框上方）：本体方案 / 知识库（含检索开关与参数） / 已挂技能 */}
+          <div className="quickbar">
+            <div className="qb-item">
+              <span className="qb-label">本体</span>
+              <Select
+                className="qb-select"
+                size="small"
+                variant="filled"
+                allowClear
+                placeholder="未挂载"
+                value={conversation.runtime_profile_id ?? undefined}
+                onChange={(v) => patchConv({ runtime_profile_id: v ?? null, ontology_enabled: !!v })}
+                options={profileOptions}
+                notFoundContent={profilesErr ? '运行方案列表暂不可用' : '暂无运行方案'}
+                optionRender={(opt) => (
+                  <Space size={8} style={{ width: '100%' }}>
+                    <Badge status={profileBadge(opt.data?.status)} />
+                    <span>{opt.data?.name}</span>
+                    <span className="cfg-opt-status">{profileStatusText(opt.data?.status)}</span>
+                  </Space>
+                )}
+              />
+            </div>
+            <span className="qb-sep" />
+            <div className="qb-item">
+              <span className="qb-label">知识库</span>
+              <Select
+                className="qb-select"
+                size="small"
+                variant="filled"
+                allowClear
+                placeholder="未选择"
+                value={conversation.kb_id ?? undefined}
+                onChange={(v) => patchConv({ kb_id: v ?? null })}
+                options={kbs.map((k) => ({ value: k.id, label: k.name }))}
+                notFoundContent={kbsErr ? '知识库列表暂不可用' : '暂无知识库'}
+              />
+              <Tooltip title={conversation.kb_id ? '启用知识检索' : '先选择知识库'}>
+                {/* 包一层：禁用态控件不接收指针事件，Tooltip 需挂在包裹元素上 */}
+                <span className="qb-switch-wrap">
+                  <Switch
+                    size="small"
+                    checked={conversation.enable_kb}
+                    disabled={!conversation.kb_id}
+                    onChange={(v) => patchConv({ enable_kb: v })}
+                  />
+                </span>
+              </Tooltip>
+              <Popover
+                trigger="click"
+                placement="topRight"
+                title="检索参数"
+                content={
+                  <div className="qb-adv">
+                    <div className="cfg-row">
+                      <span className="cfg-row-label">召回条数 top_k</span>
+                      <InputNumber size="small" min={1} max={20} value={conversation.top_k} onChange={(v) => patchConv({ top_k: typeof v === 'number' ? v : conversation.top_k })} />
+                    </div>
+                    <div className="cfg-row">
+                      <span className="cfg-row-label">最低分 min_score</span>
+                      <InputNumber size="small" min={0} max={1} step={0.05} value={conversation.min_score} onChange={(v) => patchConv({ min_score: typeof v === 'number' ? v : conversation.min_score })} />
+                    </div>
+                    <div className="cfg-hint">「启用检索」开启且已选知识库时生效。</div>
+                  </div>
+                }
+              >
+                <Button type="text" size="small" className="qb-gear" icon={<SettingOutlined />} aria-label="检索参数" />
+              </Popover>
+            </div>
+            <span className="qb-spacer" />
+            {agentSkills.length > 0 && (
+              <Space size={[4, 4]} className="qb-skills">
+                {agentSkills.slice(0, 2).map((id) => <Tag key={id} className="qb-skill">{skillName(id)}</Tag>)}
+                {agentSkills.length > 2 && (
+                  <Tooltip title={agentSkills.slice(2).map(skillName).join('、')}>
+                    <Tag className="qb-skill">+{agentSkills.length - 2}</Tag>
+                  </Tooltip>
+                )}
+              </Space>
+            )}
+          </div>
           <Sender
             value={input}
             onChange={setInput}
@@ -643,92 +707,6 @@ export default function ChatWindow({
           </div>
         </div>
       </div>
-
-      {/* M8 对话配置：紧凑抽屉（保持头部单行），本体运行方案 / 知识库 / 已挂技能 */}
-      <Drawer
-        open={cfgOpen}
-        onClose={() => setCfgOpen(false)}
-        title="对话配置"
-        width={380}
-        styles={{ body: { padding: '16px 20px 28px' } }}
-      >
-        <section className="cfg-section">
-          <div className="cfg-title"><ApartmentOutlined /> 本体运行方案</div>
-          <Select
-            style={{ width: '100%' }}
-            allowClear
-            placeholder="未挂载（不启用本体）"
-            value={conversation.runtime_profile_id ?? undefined}
-            onChange={(v) => patchConv({ runtime_profile_id: v ?? null, ontology_enabled: !!v })}
-            options={profiles.map((p) => ({ value: p.id, label: p.name, disabled: p.status !== 'running', status: p.status }))}
-            optionRender={(opt) => (
-              <Space size={8} style={{ width: '100%' }}>
-                <Badge status={profileBadge(opt.data?.status)} />
-                <span>{opt.data?.label}</span>
-                <span className="cfg-opt-status">{profileStatusText(opt.data?.status)}</span>
-              </Space>
-            )}
-          />
-          {profilesErr
-            ? <div className="cfg-hint warn">本体运行方案列表暂不可用</div>
-            : <div className="cfg-hint">仅 running 方案可选；draft / stopped / error 禁选（FR-11）。</div>}
-        </section>
-
-        <section className="cfg-section">
-          <div className="cfg-title"><DatabaseOutlined /> 知识库</div>
-          <Select
-            style={{ width: '100%' }}
-            allowClear
-            placeholder="未选择知识库"
-            value={conversation.kb_id ?? undefined}
-            onChange={(v) => patchConv({ kb_id: v ?? null })}
-            options={kbs.map((k) => ({ value: k.id, label: k.name }))}
-            notFoundContent={kbsErr ? '知识库列表暂不可用' : undefined}
-          />
-          <div className="cfg-row">
-            <span className="cfg-row-label">启用检索</span>
-            <Switch
-              size="small"
-              checked={conversation.enable_kb}
-              disabled={!conversation.kb_id}
-              onChange={(v) => patchConv({ enable_kb: v })}
-            />
-          </div>
-          <div className="cfg-row">
-            <span className="cfg-row-label">召回条数 top_k</span>
-            <InputNumber
-              size="small"
-              min={1}
-              max={20}
-              value={conversation.top_k}
-              onChange={(v) => patchConv({ top_k: typeof v === 'number' ? v : conversation.top_k })}
-            />
-          </div>
-          <div className="cfg-row">
-            <span className="cfg-row-label">最低分 min_score</span>
-            <InputNumber
-              size="small"
-              min={0}
-              max={1}
-              step={0.05}
-              value={conversation.min_score}
-              onChange={(v) => patchConv({ min_score: typeof v === 'number' ? v : conversation.min_score })}
-            />
-          </div>
-          <div className="cfg-hint">「启用检索」开启且已选知识库时，召回片段随回答注入并显示为「知识召回」卡片。</div>
-        </section>
-
-        <section className="cfg-section">
-          <div className="cfg-title"><ThunderboltOutlined /> 已挂技能</div>
-          {agent?.skills?.length
-            ? (
-              <Space size={[6, 6]} wrap>
-                {agent.skills.map((id) => <Tag key={id} color="green" style={{ marginInlineEnd: 0 }}>{skillName(id)}</Tag>)}
-              </Space>
-            )
-            : <div className="cfg-hint">当前智能体未挂载技能</div>}
-        </section>
-      </Drawer>
     </div>
   )
 }

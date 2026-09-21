@@ -13,6 +13,8 @@
   --c-err: #c2373f;
   --c-err-weak: #fdeef0;
   --mono: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  /* 智能体标识：与顶栏品牌同源的三节点网络标记（mask 单处定义，靠 currentColor 上色） */
+  --agent-glyph-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 6.6 6.4 15.5M12 6.6l5.6 8.9M7.4 16.2h9.2'/%3E%3Ccircle cx='12' cy='5.2' r='2.5' fill='black'/%3E%3Ccircle cx='5.6' cy='16.6' r='2.2' fill='black'/%3E%3Ccircle cx='18.4' cy='16.6' r='2.2' fill='black'/%3E%3C/svg%3E");
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -83,6 +85,30 @@ body { font-size: 14px; background: var(--c-bg); }
 
 @media (max-width: 1080px) { .brand-sub { display: none; } }
 
+/* ---- 智能体标识：三节点网络标记（品牌同源），mask + currentColor 上色，处处一致 ----
+   用于：侧栏智能体节点 / 消息气泡头像 / 对话空态 / 智能体属性弹窗标题；项目保留各自图标以作区分 */
+.agent-glyph {
+  display: inline-block; flex: none;
+  width: 1em; height: 1em;
+  background-color: currentColor;
+  -webkit-mask: var(--agent-glyph-mask) center / contain no-repeat;
+  mask: var(--agent-glyph-mask) center / contain no-repeat;
+}
+/* 品牌渐变方牌（空态与弹窗标题用；侧栏节点与消息头像由各自容器提供底色） */
+.agent-tile {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 14px; flex: none;
+  font-size: 22px; color: #fff;
+  background: linear-gradient(135deg, #7c6cf5 0%, #4f46e5 58%, #3f36c9 100%);
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.agent-tile-sm { width: 24px; height: 24px; border-radius: 8px; font-size: 13px; box-shadow: none; }
+/* 消息气泡内的智能体头像：圆角方牌 + 品牌浅底（与用户圆形头像区分角色；
+   选择器多带一层 -square 以稳超 antd 的 .ant-avatar.ant-avatar-square 圆角规则） */
+.agent-avatar.ant-avatar.ant-avatar-square { border-radius: 10px; background: #eef0fe; color: var(--c-brand); }
+.agent-avatar .agent-glyph { font-size: 17px; }
+.modal-title { display: inline-flex; align-items: center; gap: 8px; }
+
 .main { flex: 1; display: flex; min-height: 0; height: 100%; }
 
 /* ---- 左栏：浅色调面板 + 统一节奏的树 ---- */
@@ -115,7 +141,7 @@ body { font-size: 14px; background: var(--c-bg); }
 .side-node-dot {
   width: 20px; height: 20px; border-radius: 7px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; color: var(--c-brand); background: #e6e8fb; border: 1px solid #dbdefa;
+  font-size: 12px; color: var(--c-brand); background: #e6e8fb; border: 1px solid #dbdefa;
 }
 .side-node.active .side-node-dot { background: var(--c-brand); border-color: var(--c-brand); color: #fff; }
 .side-node-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
@@ -290,16 +316,43 @@ pre.raw-json {
 .member-hint { font-size: 12px; color: var(--c-ink-3); margin-bottom: 10px; }
 .member-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 
-/* ---- M8 对话配置抽屉：本体运行方案 / 知识库 / 已挂技能 ---- */
-.cfg-section { margin-bottom: 22px; }
-.cfg-section:last-child { margin-bottom: 4px; }
-.cfg-title { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--c-ink); }
-.cfg-title .anticon { font-size: 14px; color: var(--c-brand); }
+/* ---- M8 会话快捷配置条（发送框上方常驻）：本体 / 知识库（含检索开关与参数） / 已挂技能 ---- */
+.quickbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; min-width: 0; overflow: hidden;
+  padding: 0 2px 8px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--c-line);
+}
+.qb-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: none; }
+.qb-label { flex: none; font-size: 11.5px; color: var(--c-ink-3); }
+.qb-select { width: 186px; }
+.qb-sep { flex: none; width: 1px; height: 14px; background: var(--c-line); }
+.qb-spacer { flex: 1; min-width: 8px; }
+.qb-opt { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.qb-opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb-gear.ant-btn { color: var(--c-ink-3); }
+.qb-gear.ant-btn:hover { color: var(--c-brand); background: #eef0fe; }
+.qb-switch-wrap { display: inline-flex; align-items: center; }
+.qb-skills { flex: none; }
+.qb-skill.ant-tag {
+  margin-inline-end: 0; max-width: 148px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #0b7a55; background: #eaf6f1; border-color: #cfe8de;
+}
+/* 检索参数气泡（top_k / min_score） */
+.qb-adv { width: 244px; }
+.qb-adv .cfg-row { margin-top: 0; }
+.qb-adv .cfg-row + .cfg-row { margin-top: 10px; }
+
+/* 通用配置行 / 提示（快捷条气泡与选项共用） */
 .cfg-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
 .cfg-row-label { font-size: 12.5px; color: var(--c-ink-2); }
 .cfg-hint { margin-top: 6px; font-size: 11.5px; line-height: 1.65; color: var(--c-ink-3); }
 .cfg-hint.warn { color: #b45309; }
 .cfg-opt-status { margin-left: auto; font-size: 11.5px; color: var(--c-ink-3); }
+
+/* 智能体属性 · 模型身份（选择后展示解析结果；留空展示将使用的同类型默认） */
+.model-meta { font-size: 12px; color: var(--c-ink-3); }
+.model-meta .model-meta-name { font-family: var(--mono); color: var(--c-ink-2); }
+.model-meta.warn { color: #b45309; }
 
 /* M5 工具下拉选项：名称 + 来源徽标 + 描述两行
    （antd 选项内容默认单行省略，这里按同等/更高特异性放开换行；Select 已设 virtual={false}） */

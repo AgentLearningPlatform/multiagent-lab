@@ -7,7 +7,6 @@ import {
   EditOutlined,
   DownOutlined,
   RightOutlined,
-  RobotOutlined,
   ProjectOutlined,
 } from '@ant-design/icons'
 import { Conversations } from '@ant-design/x'
@@ -161,7 +160,8 @@ export default function Sidebar({
                   onClick={() => toggleNode(n.key)}
                 >
                   <span className="side-node-chev">{expanded ? <DownOutlined /> : <RightOutlined />}</span>
-                  <span className="side-node-dot">{isAgent ? <RobotOutlined /> : <ProjectOutlined />}</span>
+                  {/* 智能体用品牌同源的三节点标记；项目保留各自图标，一眼可辨 */}
+                  <span className="side-node-dot">{isAgent ? <span className="agent-glyph" /> : <ProjectOutlined />}</span>
                   <span className="side-node-name" title={n.name}>{n.name}</span>
                   <span className="side-node-count">{n.convs.length}</span>
                 </button>
