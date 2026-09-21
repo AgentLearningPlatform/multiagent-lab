@@ -16,6 +16,12 @@ import type {
   ProviderModelList,
   RunEventDTO,
   RuntimeProfile,
+  SemanticaDecisionInput,
+  SemanticaDecisionsResponse,
+  SemanticaHealth,
+  SemanticaIngestResult,
+  SemanticaQueryResult,
+  SemanticaStats,
   Skill,
   Spec,
   ToolInfo,
@@ -259,6 +265,31 @@ export const api = {
   /** 某版本原始源文件下载地址（REQ-93；>1MB 时前端提示下载查看而非渲染） */
   versionOriginalUrl: (ontologyId: string, version: number) =>
     `/api/ontologies/${ontologyId}/versions/${version}/original`,
+
+  // ---- Semantica 独立栏（§4.9 D-O10；REQ-99~101；反代 /api/semantica/* → worker :8093）----
+  /** worker 健康/图规模；未启动 → 反代 502（UI 降级） */
+  semanticaHealth: () => req<SemanticaHealth>('/api/semantica/health'),
+  /** 本体 TTL → KG：worker ingest + GraphBuilder（返回实体/关系数与警告） */
+  semanticaIngestTtl: (ontologyId: string, ttl: string) =>
+    req<SemanticaIngestResult>('/api/semantica/ingest-ttl', {
+      method: 'POST',
+      body: JSON.stringify({ ontology_id: ontologyId, ttl }),
+    }),
+  /** GraphRAG 语义问答（向量 + 图混合检索） */
+  semanticaQuery: (q: string, maxResults?: number) =>
+    req<SemanticaQueryResult>('/api/semantica/query', {
+      method: 'POST',
+      body: JSON.stringify({ q, max_results: maxResults }),
+    }),
+  /** record_decision 落决策记录（PROV-O 审计链） */
+  semanticaRecordDecision: (d: SemanticaDecisionInput) =>
+    req<{ decision_id: string }>('/api/semantica/decision', { method: 'POST', body: JSON.stringify(d) }),
+  /** 决策列表（worker 侧已按 limit 截断） */
+  semanticaDecisions: (limit = 20) => req<SemanticaDecisionsResponse>(`/api/semantica/decisions?limit=${limit}`),
+  /** 图规模统计 */
+  semanticaStats: () => req<SemanticaStats>('/api/semantica/stats'),
+  /** 导出本体 Turtle 原文（ingest 数据源；复用既有构建平面导出端点，text/turtle） */
+  exportOntologyTurtle: (ontologyId: string) => reqText(`/api/ontologies/${ontologyId}/export?format=turtle`),
 }
 
 /**

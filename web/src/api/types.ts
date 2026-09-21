@@ -334,3 +334,65 @@ export interface LearningExample {
   name: string
   description: string
 }
+
+// ---- Semantica 独立栏（docs/04 §4.9 D-O10；REQ-99~101；主平台反代 /api/semantica/* → worker :8093）----
+
+/** worker 健康与图规模（GET /api/semantica/health；worker 未启动时反代 502） */
+export interface SemanticaHealth {
+  ok: boolean
+  version: string
+  graph_loaded: boolean
+  entities: number
+  relationships: number
+  decisions: number
+}
+
+/** TTL 摄入结果（POST /api/semantica/ingest-ttl） */
+export interface SemanticaIngestResult {
+  ontology_id: string
+  entities: number
+  relationships: number
+  warnings: string[] | null
+}
+
+/** GraphRAG 命中片段（POST /api/semantica/query） */
+export interface SemanticaClaim {
+  text: string
+  source_node?: string | null
+  score?: number | null
+}
+
+export interface SemanticaQueryResult {
+  claims: SemanticaClaim[] | null
+  query: string
+}
+
+/** 决策录入入参（POST /api/semantica/decision） */
+export interface SemanticaDecisionInput {
+  category: string
+  scenario: string
+  reasoning: string
+  outcome: string
+  confidence?: number
+}
+
+/** 决策记录（GET /api/semantica/decisions；worker 防御式归一化，字段可能缺省） */
+export interface SemanticaDecision {
+  id: string
+  category?: string | null
+  scenario?: string | null
+  outcome?: string | null
+  confidence?: number | null
+  ts?: string | null
+}
+
+export interface SemanticaDecisionsResponse {
+  decisions: SemanticaDecision[] | null
+}
+
+/** 图规模统计（GET /api/semantica/stats） */
+export interface SemanticaStats {
+  entities: number
+  relationships: number
+  decisions: number
+}

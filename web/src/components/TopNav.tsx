@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { RobotOutlined, ProjectOutlined, ApartmentOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons'
+import { RobotOutlined, ProjectOutlined, ApartmentOutlined, DatabaseOutlined, ThunderboltOutlined, NodeIndexOutlined, SettingOutlined } from '@ant-design/icons'
 import { useUI, type PageKey } from '../store/ui'
 
 const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
@@ -8,13 +8,14 @@ const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
   { key: 'ontology', label: '本体', icon: <ApartmentOutlined /> },
   { key: 'knowledge', label: '知识库', icon: <DatabaseOutlined /> },
   { key: 'skills', label: '技能', icon: <ThunderboltOutlined /> },
+  { key: 'semantica', label: 'Semantica', icon: <NodeIndexOutlined /> },
 ]
 
 /**
  * 顶部导航（开发者工具风格，浅色克制）：
  * - 品牌区：渐变几何标记（多智能体联结点，内联 SVG 非 emoji）+ 词标 / Lab 徽标 / 副标题；
  * - 导航：自绘 pill 按钮（图标 + 文字节奏一致），激活态品牌底 + 底部 2px 强调条；
- * - 设置入口不在导航内，顶栏最右端独立齿轮按钮（原型 06 §2 / §3.6 v0.4），与五模块同一切换机制。
+ * - 设置入口不在导航内，顶栏最右端独立齿轮按钮（原型 06 §2 / §3.6 v0.4），与各模块同一切换机制。
  */
 export default function TopNav() {
   const { page, setPage } = useUI()

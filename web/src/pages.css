@@ -282,3 +282,66 @@
 .onto-cm-wrap .cm-editor { font-family: var(--mono); font-size: 12px; }
 .onto-cm-wrap .cm-editor.cm-focused { outline: none; }
 .onto-cm-wrap .cm-scroller { line-height: 1.6; }
+
+/* ---- Semantica 独立栏（§4.9 D-O10 / REQ-99~101）---- */
+/* 单主区（无左树）：页头 + Worker 状态条 + 三页签，沿用 .work-main 的满高滚动 */
+.sema-main { gap: 12px; }
+
+/* Worker 状态条：健康态用 Alert；未启动降级 Result（收紧内边距，避免占满首屏） */
+.sema-status { flex: none; }
+.sema-status .ant-result { padding: 18px 0 8px; }
+.sema-status .ant-result-title { font-size: 17px; }
+.sema-status .ant-result-subtitle { font-size: 12.5px; line-height: 1.8; }
+
+/* 首页 / 页签内容：纵向卡片节奏 */
+.sema-home { display: flex; flex-direction: column; gap: 14px; }
+.sema-card { border-radius: 12px; }
+
+/* 三段式序号标记 */
+.sema-card-no {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 6px; flex: none;
+  font-size: 12px; font-weight: 700; color: var(--c-brand);
+  background: #eef0fe; border: 1px solid #dfe2fb;
+}
+
+/* ① 功能：三栏（是什么 / 解决什么 / 不做什么） */
+.sema-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.sema-feature {
+  border: 1px solid var(--c-line); border-radius: 10px; background: #fbfbfd;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;
+}
+.sema-feature-head { display: flex; align-items: center; gap: 8px; }
+.sema-feature-title { font-size: 13px; font-weight: 700; color: var(--c-ink); }
+.sema-feature-body { margin: 0; font-size: 12.5px; line-height: 1.75; color: var(--c-ink-2); }
+
+/* ② 原理：说明段落 */
+.sema-p { margin: 0 0 4px; font-size: 12.5px; line-height: 1.85; color: var(--c-ink-2); }
+.sema-p-muted { color: var(--c-ink-3); }
+
+/* 建库警告列表 */
+.sema-warn-list { margin: 0; padding-left: 18px; }
+
+/* GraphRAG 命中列表 */
+.sema-claims { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.sema-claim {
+  border: 1px solid var(--c-line); border-left: 3px solid #7c6cf5;
+  border-radius: 8px; padding: 10px 12px; background: #fbfbfd;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sema-claim-text { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--c-ink); white-space: pre-wrap; word-break: break-word; }
+.sema-claim-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* 教学对照：精确 vs 语义 两栏 */
+.sema-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.sema-compare-col {
+  border: 1px solid var(--c-line); border-radius: 10px; padding: 12px 14px;
+  background: #fff; display: flex; flex-direction: column; gap: 8px;
+}
+.sema-compare-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sema-compare-title { font-size: 13px; font-weight: 700; color: var(--c-ink); }
+.sema-compare-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.sema-compare-list li { font-size: 12.5px; line-height: 1.7; color: var(--c-ink-2); }
+
+/* 决策录入：类别 + 置信度 两列 */
+.sema-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }

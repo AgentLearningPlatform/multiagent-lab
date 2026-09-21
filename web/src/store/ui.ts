@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { toast } from '../lib/antd'
 
-export type PageKey = 'agents' | 'projects' | 'ontology' | 'knowledge' | 'skills' | 'settings'
+export type PageKey = 'agents' | 'projects' | 'ontology' | 'knowledge' | 'skills' | 'semantica' | 'settings'
 
 interface UIState {
   page: PageKey
