@@ -61,7 +61,7 @@ func (r *Runtime) Start(ctx context.Context, profileID string, port int, ttls ma
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("oxigraph serve 启动失败: %w", err)
 	}
-	go drainLog(profileID, stderr)
+	go drainLog(filepath.Join(r.LogDir, profileID+".log"), stderr)
 
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/query", port)
 	p := engine.NewProcess(endpoint, cmd.Process.Pid, func() error {
