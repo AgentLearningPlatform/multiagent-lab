@@ -1,22 +1,39 @@
 import type {
   Agent,
+  AiDraftResult,
+  ArtifactMeta,
   Conversation,
+  GuideResponse,
+  ImportReport,
   KBHit,
   KBDoc,
   KnowledgeBase,
   Message,
   ModelConnection,
-  OntologyDetail,
-  OntologySummary,
+  Ontology,
   Project,
   ProviderModelList,
   RunEventDTO,
   RuntimeProfile,
   Skill,
+  Spec,
   ToolInfo,
   UsageGroupBy,
   UsageStats,
+  ValidationError,
 } from './types'
+
+/** 携带 HTTP 状态与校验错误的接口错误（供 UI 区分 404 / 400 validation_errors / 502 不可达） */
+export class ApiError extends Error {
+  status: number
+  validationErrors?: ValidationError[]
+  constructor(message: string, status: number, validationErrors?: ValidationError[]) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.validationErrors = validationErrors
+  }
+}
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -27,7 +44,19 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const data = text ? JSON.parse(text) : null
   if (!res.ok) {
     const msg = (data && data.error) || `HTTP ${res.status}`
-    throw new Error(msg)
+    throw new ApiError(msg, res.status, data?.validation_errors)
+  }
+  return data as T
+}
+
+/** multipart 上传：不设置 Content-Type（交由浏览器补 boundary） */
+async function reqMultipart<T>(url: string, form: FormData): Promise<T> {
+  const res = await fetch(url, { method: 'POST', body: form })
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : null
+  if (!res.ok) {
+    const msg = (data && data.error) || `HTTP ${res.status}`
+    throw new ApiError(msg, res.status, data?.validation_errors)
   }
   return data as T
 }
@@ -105,10 +134,58 @@ export const api = {
   // ---- M5 工具注册表（§6.8：前端勾选落 agent.tools） ----
   listTools: () => req<ToolInfo[]>('/api/tools'),
 
-  // ---- M8 本体对接（§6.10：双反代只读展示） ----
+  // ---- M8 本体对接：构建平面 :8091 /api/ontologies*（同源反代，全路径透传） ----
+  listOntologies: () => req<Ontology[]>('/api/ontologies'),
+  getOntology: (id: string) => req<Ontology>(`/api/ontologies/${id}`),
+  createOntology: (o: { name: string; description?: string }) =>
+    req<Ontology>('/api/ontologies', { method: 'POST', body: JSON.stringify(o) }),
+  updateOntologyMeta: (id: string, m: { name: string; description?: string }) =>
+    req<Ontology>(`/api/ontologies/${id}`, { method: 'PUT', body: JSON.stringify(m) }),
+  deleteOntology: (id: string) => req<{ deleted?: string }>(`/api/ontologies/${id}`, { method: 'DELETE' }),
+  /** 原始 Spec JSON；从未保存过 → 404（UI 视为空 Spec） */
+  getSpec: (id: string) => req<Spec>(`/api/ontologies/${id}/spec`),
+  /** 全量保存 Spec（校验门控、递增 version）；400 时错误带 validation_errors */
+  saveSpec: (id: string, spec: Spec) =>
+    req<{ saved: boolean; version: number }>(`/api/ontologies/${id}/spec`, { method: 'PUT', body: JSON.stringify(spec) }),
+  /** 校验：始终 200，返回 ok + 错误列表 */
+  validateOntology: (id: string) =>
+    req<{ ok: boolean; validation_errors: ValidationError[] }>(`/api/ontologies/${id}/validate`, { method: 'POST' }),
+  listArtifacts: (id: string) => req<ArtifactMeta[]>(`/api/ontologies/${id}/artifacts`),
+  /** 导入：multipart（file + 可选 name），自动嗅探 ttl/owl/graphml/csv/spec_json */
+  importOntologyFile: (file: File, name?: string) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (name) fd.append('name', name)
+    return reqMultipart<{ ontology: Ontology; report: ImportReport }>('/api/ontologies/import', fd)
+  },
+  /** 导入：JSON 模式 {filename, content, name?} */
+  importOntologyContent: (filename: string, content: string, name?: string) =>
+    req<{ ontology: Ontology; report: ImportReport }>('/api/ontologies/import', {
+      method: 'POST',
+      body: JSON.stringify({ filename, content, name }),
+    }),
+  /** 内置示例：201 新建（id=onto_k8s_ops）或 200 {id, seeded:false, note} */
+  seedSampleOntology: () =>
+    req<Ontology & { seeded?: boolean; note?: string }>('/api/ontologies/seed-sample', { method: 'POST' }),
+  /** AI 草案：503 表示 LLM 未配置 */
+  aiDraftOntology: (description: string, extraHint?: string) =>
+    req<AiDraftResult>('/api/ontologies/ai-draft', { method: 'POST', body: JSON.stringify({ description, extraHint }) }),
+  /** 导出下载地址（text/turtle attachment） */
+  ontologyExportUrl: (id: string, format: string) => `/api/ontologies/${id}/export?format=${encodeURIComponent(format)}`,
+  /** 注入指引（经构建平面路由，稳定可用） */
+  getOntologyGuide: (id: string) => req<GuideResponse>(`/api/ontologies/${id}/guide`),
+
+  // ---- M8 运行平面 :8090 /api/runtime-profiles* ----
   listRuntimeProfiles: () => req<RuntimeProfile[]>('/api/runtime-profiles'),
-  listOntologies: () => req<OntologySummary[]>('/api/ontologies'),
-  getOntology: (id: string) => req<OntologyDetail>(`/api/ontologies/${id}`),
+  createRuntimeProfile: (p: { name: string; engine?: string; ontology_ids: string[]; config?: Record<string, unknown>; port?: number }) =>
+    req<RuntimeProfile>('/api/runtime-profiles', { method: 'POST', body: JSON.stringify(p) }),
+  updateRuntimeProfile: (id: string, p: { name: string; ontology_ids?: string[]; config?: Record<string, unknown>; port?: number }) =>
+    req<RuntimeProfile>(`/api/runtime-profiles/${id}`, { method: 'PUT', body: JSON.stringify(p) }),
+  deleteRuntimeProfile: (id: string) => req<{ deleted?: string }>(`/api/runtime-profiles/${id}`, { method: 'DELETE' }),
+  startRuntimeProfile: (id: string) => req<RuntimeProfile>(`/api/runtime-profiles/${id}/start`, { method: 'POST' }),
+  stopRuntimeProfile: (id: string) => req<RuntimeProfile>(`/api/runtime-profiles/${id}/stop`, { method: 'POST' }),
+  reloadRuntimeProfile: (id: string) => req<RuntimeProfile>(`/api/runtime-profiles/${id}/reload`, { method: 'POST' }),
+  runtimeProfileLogs: (id: string, tail = 200) => req<{ lines: string[] }>(`/api/runtime-profiles/${id}/logs?tail=${tail}`),
 }
 
 /**

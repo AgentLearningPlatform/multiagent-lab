@@ -181,32 +181,108 @@ export interface ToolInfo {
   source?: string
 }
 
-// ---- M8 本体对接（02 文档 §6.10/§10：反代只读展示） ----
+// ---- M8 本体对接（构建平面 :8091 / 运行平面 :8090，同源反代；契约以本体平面源码为准） ----
 
+/** 本体元数据（GET /api/ontologies 为裸数组；无 status/progress，前端按阶段派生） */
+export interface Ontology {
+  id: string
+  name: string
+  description?: string
+  version?: number
+  forked_from?: string | null
+  created_at?: string
+  updated_at?: string
+  n_concepts?: number
+  n_relations?: number
+  n_instances?: number
+}
+
+/** Spec 概念（S2 编辑对象） */
+export interface SpecConcept {
+  name: string
+  label?: string
+  definition?: string
+  parents?: string[]
+}
+
+/** Spec 关系（有向 from → to） */
+export interface SpecRelation {
+  name: string
+  label?: string
+  definition?: string
+  from: string
+  to: string
+}
+
+/** Spec 实例关系 */
+export interface SpecInstanceRelation {
+  rel: string
+  target: string
+}
+
+/** Spec 实例 */
+export interface SpecInstance {
+  name: string
+  concept: string
+  attributes?: Record<string, unknown>
+  relations?: SpecInstanceRelation[]
+}
+
+/** 本体 Spec（GET/PUT /api/ontologies/{id}/spec；PUT 全量、校验门控、递增 version） */
+export interface Spec {
+  name: string
+  description?: string
+  concepts: SpecConcept[]
+  relations: SpecRelation[]
+  instances: SpecInstance[]
+}
+
+/** 校验错误（PUT spec 400 / POST validate） */
+export interface ValidationError {
+  path: string
+  message: string
+}
+
+/** 构建产物元数据（GET /api/ontologies/{id}/artifacts） */
+export interface ArtifactMeta {
+  format: string
+  size: number
+  is_normalized?: boolean
+  imported_at?: string
+}
+
+/** 导入报告（POST /api/ontologies/import） */
+export interface ImportReport {
+  format: string
+  lossy: boolean
+  warnings: string[]
+  lossy_note?: string
+}
+
+/** AI 草案结果（POST /api/ontologies/ai-draft） */
+export interface AiDraftResult {
+  spec: Spec
+  rounds: number
+  warning?: string
+}
+
+/** 注入指引（GET /api/ontologies/{id}/guide） */
+export interface GuideResponse {
+  ontology_id: string
+  guide: string
+}
+
+/** 运行方案（运行平面 :8090；status 状态机 created→starting→running⇄stopped→error） */
 export interface RuntimeProfile {
   id: string
   name: string
-  ontology_id?: string
-  status: 'running' | 'stopped' | 'draft' | 'error'
   engine?: string
-}
-
-export interface OntologySummary {
-  id: string
-  name: string
-  status: 'running' | 'draft' | 'importing'
-  progress: number // 已完成阶段数 n（共 7）
+  ontology_ids: string[]
+  config?: Record<string, unknown>
+  port?: number
+  status: 'created' | 'starting' | 'running' | 'stopped' | 'error'
+  pid?: number
+  last_error?: string
+  created_at?: string
   updated_at?: string
-}
-
-export interface OntologyStage {
-  key: string // s1..s7
-  title: string
-  mode?: 'builtin' | 'guided' | 'managed'
-  status?: 'done' | 'current' | 'pending'
-  detail?: Record<string, unknown>
-}
-
-export interface OntologyDetail extends OntologySummary {
-  stages: OntologyStage[]
 }
