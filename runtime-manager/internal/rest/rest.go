@@ -225,48 +225,6 @@ func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
 // application/sparql-query 均支持；响应头与状态码透传引擎返回。
 func (s *Server) sparql(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-// guide 代理构建平面本体指引（方案 04 §5 指引注入）：
-// 主平台装配时 GET /api/runtime-profiles/{id}/guide[?ontology_id=…]。
-//
-// 显式传 ontology_id：校验方案存在后透传构建平面 guide（JSON 原样返回，行为不变）。
-// 不传（生产装配调用方只知挂载方案，方案可绑定多个本体）：加载方案并遍历
-// ontology_ids 逐个拉取，best-effort 拼接后返回 {ontology_id, guide} 统一形状。
-func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	ontologyID := strings.TrimSpace(r.URL.Query().Get("ontology_id"))
-
-	// ---- 显式指定 ontology_id：保持原行为（原样透传构建平面 JSON）----
-	if ontologyID != "" {
-		if _, err := s.Store.Get(id); err != nil {
-			writeErr(w, err)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		url := fmt.Sprintf("%s/api/ontologies/%s/guide", s.Manager.BuildURL, ontologyID)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "构建平面不可达: " + err.Error()})
-			return
-		}
-		resp, err := s.Manager.HTTP.Do(req)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "构建平面不可达: " + err.Error()})
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("构建平面不可达: %s %s", resp.Status, string(b))})
-			return
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(w, resp.Body)
-		return
-	}
-
-	// ---- 未指定 ontology_id：遍历方案绑定本体，best-effort 拼接 ----
 	p, err := s.Store.Get(id)
 	if err != nil {
 		writeErr(w, err)
@@ -321,6 +279,54 @@ func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
 }
 
 var sparqlHTTP = &http.Client{Timeout: 30 * time.Second}
+
+// guide 代理构建平面本体指引（方案 04 §5 指引注入）：
+// 主平台装配时 GET /api/runtime-profiles/{id}/guide[?ontology_id=…]。
+//
+// 显式传 ontology_id：校验方案存在后透传构建平面 guide（JSON 原样返回，行为不变）。
+// 不传（生产装配调用方只知挂载方案，方案可绑定多个本体）：加载方案并遍历
+// ontology_ids 逐个拉取，best-effort 拼接后返回 {ontology_id, guide} 统一形状。
+func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ontologyID := strings.TrimSpace(r.URL.Query().Get("ontology_id"))
+
+	// ---- 显式指定 ontology_id：保持原行为（原样透传构建平面 JSON）----
+	if ontologyID != "" {
+		if _, err := s.Store.Get(id); err != nil {
+			writeErr(w, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		url := fmt.Sprintf("%s/api/ontologies/%s/guide", s.Manager.BuildURL, ontologyID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "构建平面不可达: " + err.Error()})
+			return
+		}
+		resp, err := s.Manager.HTTP.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "构建平面不可达: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("构建平面不可达: %s %s", resp.Status, string(b))})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+
+	// ---- 未指定 ontology_id：遍历方案绑定本体，best-effort 拼接 ----
+	p, err := s.Store.Get(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	if len(p.OntologyIDs) == 0 {
 		// 无绑定本体：明确 400，装配侧按失败降级为 ontology.unavailable。
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "方案未绑定本体"})
