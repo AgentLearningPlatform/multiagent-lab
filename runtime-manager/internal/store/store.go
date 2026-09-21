@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -46,12 +48,27 @@ func Open(path, migrationsDir string) (*Store, error) {
 }
 
 func (s *Store) migrate(dir string) error {
-	bts, err := os.ReadFile(filepath.Join(dir, "001_profile.sql"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+		return fmt.Errorf("read migrations dir: %w", err)
 	}
-	_, err = s.db.Exec(string(bts))
-	return err
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		bts, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", f, err)
+		}
+		if _, err := s.db.Exec(string(bts)); err != nil {
+			return fmt.Errorf("apply migration %s: %w", f, err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -171,4 +188,59 @@ func (s *Store) RunningByOntology(ontologyID string) (*Profile, error) {
 		}
 	}
 	return nil, rows.Err()
+}
+
+// ---- 翻译透视（REQ-94，docs/04 v0.8 §4.8.2）----
+
+// Trace 一条工具→SPARQL 翻译透视记录。
+type Trace struct {
+	ID          int64  `json:"id,omitempty"`
+	TS          string `json:"ts"`
+	Tool        string `json:"tool"`
+	ProfileID   string `json:"profile_id"`
+	OntologyID  string `json:"ontology_id"`
+	Sparql      string `json:"sparql"`
+	TookMS      int64  `json:"took_ms"`
+	ResultCount int    `json:"result_count"`
+	Ok          bool   `json:"ok"`
+	Error       string `json:"error,omitempty"`
+}
+
+// SaveTrace 追加一条透视记录。
+func (s *Store) SaveTrace(t *Trace) error {
+	ok := 0
+	if t.Ok {
+		ok = 1
+	}
+	_, err := s.db.Exec(`INSERT INTO trace_log(tool,profile_id,ontology_id,sparql,took_ms,result_count,ok,error)
+		VALUES(?,?,?,?,?,?,?,?)`, t.Tool, t.ProfileID, t.OntologyID, t.Sparql, t.TookMS, t.ResultCount, ok, t.Error)
+	return err
+}
+
+// ListTraces 按方案倒序列出透视记录（limit<=0 或 >200 时取 50）。
+func (s *Store) ListTraces(profileID string, limit int) ([]*Trace, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`SELECT id,ts,tool,profile_id,ontology_id,sparql,took_ms,result_count,ok,error
+		FROM trace_log WHERE profile_id=? ORDER BY id DESC LIMIT ?`, profileID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Trace{}
+	for rows.Next() {
+		var t Trace
+		var errText *string
+		var ok int
+		if err := rows.Scan(&t.ID, &t.TS, &t.Tool, &t.ProfileID, &t.OntologyID, &t.Sparql, &t.TookMS, &t.ResultCount, &ok, &errText); err != nil {
+			return nil, err
+		}
+		t.Ok = ok == 1
+		if errText != nil {
+			t.Error = *errText
+		}
+		out = append(out, &t)
+	}
+	return out, rows.Err()
 }

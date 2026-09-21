@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -50,12 +52,25 @@ func Open(path, migrationsDir string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	bts, err := os.ReadFile(filepath.Join(s.migrationsDir, "001_repo.sql"))
+	entries, err := os.ReadDir(s.migrationsDir)
 	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+		return fmt.Errorf("read migrations dir: %w", err)
 	}
-	if _, err := s.db.Exec(string(bts)); err != nil {
-		return fmt.Errorf("apply migration: %w", err)
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		bts, err := os.ReadFile(filepath.Join(s.migrationsDir, f))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", f, err)
+		}
+		if _, err := s.db.Exec(string(bts)); err != nil {
+			return fmt.Errorf("apply migration %s: %w", f, err)
+		}
 	}
 	return nil
 }
@@ -208,4 +223,84 @@ func b2i(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ---- 版本历史（docs/04 v0.8 §4.8 / REQ-93）----
+
+// VersionMeta 版本历史条目元信息。
+type VersionMeta struct {
+	Version        int    `json:"version"`
+	CreatedAt      string `json:"created_at"`
+	HasOriginal    bool   `json:"has_original"`
+	OriginalFormat string `json:"original_format,omitempty"`
+	OriginalSize   int    `json:"original_size,omitempty"`
+}
+
+// SaveVersion 写入一条版本快照（spec_json 必有；original_format/original_content 可空）。幂等：同 (ontology_id, version) 覆盖。
+func (s *Store) SaveVersion(ontologyID string, version int, specJSON, origFormat, origContent string) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO ontology_version
+		(ontology_id, version, spec_json, original_format, original_content, created_at)
+		VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)`,
+		ontologyID, version, specJSON, origFormat, origContent)
+	return err
+}
+
+// ListVersions 列出某本体的版本历史（version 正序）。
+func (s *Store) ListVersions(ontologyID string) ([]VersionMeta, error) {
+	rows, err := s.db.Query(`SELECT version, created_at, original_format, length(original_content)
+		FROM ontology_version WHERE ontology_id=? ORDER BY version`, ontologyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []VersionMeta
+	for rows.Next() {
+		var m VersionMeta
+		var origFormat *string
+		var origLen *int
+		if err := rows.Scan(&m.Version, &m.CreatedAt, &origFormat, &origLen); err != nil {
+			return nil, err
+		}
+		m.HasOriginal = origFormat != nil && *origFormat != "" && origLen != nil && *origLen > 0
+		if m.HasOriginal {
+			m.OriginalFormat = *origFormat
+			m.OriginalSize = *origLen
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// GetVersionOriginal 读取指定版本的原始源文件内容与格式。
+func (s *Store) GetVersionOriginal(ontologyID string, version int) (content, format string, err error) {
+	var f, c *string
+	err = s.db.QueryRow(`SELECT original_format, original_content FROM ontology_version
+		WHERE ontology_id=? AND version=?`, ontologyID, version).Scan(&f, &c)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if f == nil || *f == "" || c == nil {
+		return "", "", ErrNotFound // 该版本由编辑产生，无原始源文件
+	}
+	return *c, *f, nil
+}
+
+// GetVersionSpec 读取指定版本的 spec_json 快照（版本回看/diff 的数据基础，REQ-95）。
+func (s *Store) GetVersionSpec(ontologyID string, version int) (string, error) {
+	var specJSON *string
+	err := s.db.QueryRow(`SELECT spec_json FROM ontology_version
+		WHERE ontology_id=? AND version=?`, ontologyID, version).Scan(&specJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if specJSON == nil {
+		return "", ErrNotFound
+	}
+	return *specJSON, nil
 }

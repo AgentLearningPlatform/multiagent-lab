@@ -22,10 +22,13 @@ type Facade struct {
 	Store    *store.Store
 	Endpoint func(profileID string) (string, error) // Manager.ProcEndpoint
 	HTTP     *http.Client
+	// TraceSparql 翻译透视开关（REQ-94，§4.8.2）：开启时把工具翻译出的 SPARQL
+	// 与执行耗时/结果数落 trace_log，供前端“翻译透视”视图学习用。
+	TraceSparql bool
 }
 
 func New(st *store.Store, endpoint func(string) (string, error)) *Facade {
-	return &Facade{Store: st, Endpoint: endpoint, HTTP: &http.Client{Timeout: 15 * time.Second}}
+	return &Facade{Store: st, Endpoint: endpoint, HTTP: &http.Client{Timeout: 15 * time.Second}, TraceSparql: true}
 }
 
 // Mount 挂载到 /mcp（Streamable HTTP，沿用 Q-14）。
@@ -93,17 +96,32 @@ func (f *Facade) query(ctx context.Context, endpoint, sparql string) ([]map[stri
 	return res.Results.Bindings, nil
 }
 
-// route 按 ontology_id 路由到 running 方案端点。
-func (f *Facade) route(ontologyID string) (endpoint string, errResult *mcp.CallToolResult) {
+// route 按 ontology_id 路由到 running 方案（返回方案与端点）。
+func (f *Facade) route(ontologyID string) (p *store.Profile, endpoint string, errResult *mcp.CallToolResult) {
 	p, err := f.Store.RunningByOntology(ontologyID)
 	if err != nil || p == nil {
-		return "", mcp.NewToolResultErrorf("ONTOLOGY_SERVICE_UNAVAILABLE: 本体 %s 未挂载到任何运行中的方案（REQ-70 按方案隔离）", ontologyID)
+		return nil, "", mcp.NewToolResultErrorf("ONTOLOGY_SERVICE_UNAVAILABLE: 本体 %s 未挂载到任何运行中的方案（REQ-70 按方案隔离）", ontologyID)
 	}
 	ep, err := f.Endpoint(p.ID)
 	if err != nil {
-		return "", mcp.NewToolResultErrorf("ONTOLOGY_SERVICE_UNAVAILABLE: %v", err)
+		return nil, "", mcp.NewToolResultErrorf("ONTOLOGY_SERVICE_UNAVAILABLE: %v", err)
 	}
-	return ep, nil
+	return p, ep, nil
+}
+
+// exec 执行翻译后的 SPARQL 并记录翻译透视（REQ-94）。执行失败同样留痕（ok=false）。
+func (f *Facade) exec(ctx context.Context, tool, ontologyID, profileID, endpoint, sparql string) ([]map[string]any, error) {
+	start := time.Now()
+	bindings, err := f.query(ctx, endpoint, sparql)
+	if f.TraceSparql {
+		tr := &store.Trace{Tool: tool, ProfileID: profileID, OntologyID: ontologyID,
+			Sparql: sparql, TookMS: time.Since(start).Milliseconds(), ResultCount: len(bindings), Ok: err == nil}
+		if err != nil {
+			tr.Error = err.Error()
+		}
+		_ = f.Store.SaveTrace(tr) // 透视落库失败不影响查询本身
+	}
+	return bindings, err
 }
 
 func uriOf(ontologyID, kind, name string) string {
@@ -153,7 +171,7 @@ func (f *Facade) handleConcept() server.ToolHandlerFunc {
 		if oid == "" || name == "" {
 			return mcp.NewToolResultErrorf("ontology_id 与 name 必填"), nil
 		}
-		ep, errRes := f.route(oid)
+		p, ep, errRes := f.route(oid)
 		if errRes != nil {
 			return errRes, nil
 		}
@@ -166,7 +184,7 @@ SELECT ?label ?comment ?parent WHERE {
   OPTIONAL { <%s> rdfs:comment ?comment }
   OPTIONAL { <%s> rdfs:subClassOf ?parent }
 }`, u, u, u)
-		bindings, err := f.query(ctx, ep, q)
+		bindings, err := f.exec(ctx, "get_concept", oid, p.ID, ep, q)
 		if err != nil {
 			return mcp.NewToolResultErrorf("查询失败: %v", err), nil
 		}
@@ -199,13 +217,13 @@ func (f *Facade) handleInstance() server.ToolHandlerFunc {
 		if oid == "" || name == "" {
 			return mcp.NewToolResultErrorf("ontology_id 与 name 必填"), nil
 		}
-		ep, errRes := f.route(oid)
+		p, ep, errRes := f.route(oid)
 		if errRes != nil {
 			return errRes, nil
 		}
 		u := uriOf(oid, "instance", name)
 		q := fmt.Sprintf(`SELECT ?p ?o WHERE { <%s> ?p ?o }`, u)
-		bindings, err := f.query(ctx, ep, q)
+		bindings, err := f.exec(ctx, "get_instance", oid, p.ID, ep, q)
 		if err != nil {
 			return mcp.NewToolResultErrorf("查询失败: %v", err), nil
 		}
@@ -237,14 +255,14 @@ func (f *Facade) handleListInstances() server.ToolHandlerFunc {
 		if oid == "" || concept == "" {
 			return mcp.NewToolResultErrorf("ontology_id 与 concept 必填"), nil
 		}
-		ep, errRes := f.route(oid)
+		p, ep, errRes := f.route(oid)
 		if errRes != nil {
 			return errRes, nil
 		}
 		cu := uriOf(oid, "concept", concept)
 		q := fmt.Sprintf(`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 SELECT ?i WHERE { ?i rdf:type <%s> } ORDER BY ?i`, cu)
-		bindings, err := f.query(ctx, ep, q)
+		bindings, err := f.exec(ctx, "list_instances", oid, p.ID, ep, q)
 		if err != nil {
 			return mcp.NewToolResultErrorf("查询失败: %v", err), nil
 		}
@@ -266,13 +284,13 @@ func (f *Facade) handleNeighbors() server.ToolHandlerFunc {
 		if oid == "" || name == "" {
 			return mcp.NewToolResultErrorf("ontology_id 与 name 必填"), nil
 		}
-		ep, errRes := f.route(oid)
+		p, ep, errRes := f.route(oid)
 		if errRes != nil {
 			return errRes, nil
 		}
 		u := uriOf(oid, "instance", name)
 		q := fmt.Sprintf(`SELECT ?p ?o WHERE { <%s> ?p ?o . FILTER(isIRI(?o)) FILTER(STRSTARTS(STR(?p), "urn:o:")) }`, u)
-		bindings, err := f.query(ctx, ep, q)
+		bindings, err := f.exec(ctx, "neighbors", oid, p.ID, ep, q)
 		if err != nil {
 			return mcp.NewToolResultErrorf("查询失败: %v", err), nil
 		}

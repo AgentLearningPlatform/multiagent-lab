@@ -39,9 +39,13 @@ func main() {
 	}
 	eng := oxigraph.New(oxigraphBin, dataDir, logDir)
 	mg := manager.New(st, eng, buildURL, logDir)
+	fc := facade.New(st, mg.ProcEndpoint)
+	if env("TRACE_SPARQL", "on") == "off" { // 翻译透视开关（REQ-94，默认开）
+		fc.TraceSparql = false
+	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", facade.New(st, mg.ProcEndpoint).Mount())
+	mux.Handle("/mcp", fc.Mount())
 	rest.New(st, mg).Mount(mux)
 
 	log.Printf("[runtimed] 运行平面监听 %s (build=%s, oxigraph=%s)", addr, buildURL, oxigraphBin)

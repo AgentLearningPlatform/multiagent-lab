@@ -92,6 +92,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	empty := pkgspec.Spec{Name: req.Name, Description: req.Description}
 	bts, _ := json.Marshal(empty)
 	_ = s.Store.PutArtifact(id, "spec_json", string(bts), true)
+	_ = s.Store.SaveVersion(id, 1, string(bts), "", "")
 	writeJSON(w, http.StatusCreated, o)
 }
 
@@ -252,6 +253,12 @@ func (s *Server) importOntology(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	v, _ := s.Store.BumpVersion(id)
+	if origFormat != "" {
+		_ = s.Store.SaveVersion(id, v, string(bts), origFormat, content)
+	} else {
+		_ = s.Store.SaveVersion(id, v, string(bts), "", "")
+	}
 	o, _ := s.Store.GetOntology(id)
 	writeJSON(w, http.StatusCreated, map[string]any{"ontology": o, "report": rep})
 }
@@ -402,6 +409,91 @@ func (s *Server) aiDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- utils ----
+
+// listLearning GET /api/ontologies/seed-learning：列出内置学习示例。
+func (s *Server) listLearning(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, seed.LearningExamples())
+}
+
+// seedLearning POST /api/ontologies/seed-learning {"key":"defects"}：灌装内置学习示例本体。
+func (s *Server) seedLearning(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Key) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key 必填"})
+		return
+	}
+	sp, err := seed.LoadLearningExample(strings.TrimSpace(req.Key))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if _, err := s.Store.GetOntology(sp.ID); err == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"id": sp.ID, "seeded": false, "note": "示例已存在"})
+		return
+	}
+	if _, err := s.Store.CreateOntology(sp.ID, sp.Name, sp.Description); err != nil {
+		writeErr(w, err)
+		return
+	}
+	bts, _ := json.Marshal(sp)
+	if err := s.Store.PutArtifact(sp.ID, "spec_json", string(bts), true); err != nil {
+		writeErr(w, err)
+		return
+	}
+	_ = s.Store.SaveVersion(sp.ID, 1, string(bts), "", "")
+	o, _ := s.Store.GetOntology(sp.ID)
+	writeJSON(w, http.StatusCreated, o)
+}
+
+// listVersions GET /api/ontologies/{id}/versions：版本历史列表（REQ-93）。
+func (s *Server) listVersions(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.Store.GetOntology(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	vs, err := s.Store.ListVersions(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if vs == nil {
+		vs = []repo.VersionMeta{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ontology_id": id, "versions": vs})
+}
+
+// versionOriginal GET /api/ontologies/{id}/versions/{version}/original：按版本读取原始源文件（REQ-93 源码视图）。
+func (s *Server) versionOriginal(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var v int
+	if _, err := fmt.Sscanf(r.PathValue("version"), "%d", &v); err != nil || v <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "版本号必须是正整数"})
+		return
+	}
+	content, format, err := s.Store.GetVersionOriginal(id, v)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	ct := "text/plain; charset=utf-8"
+	switch format {
+	case "turtle":
+		ct = "text/turtle; charset=utf-8"
+	case "owl_rdfxml":
+		ct = "application/rdf+xml; charset=utf-8"
+	case "spec_json":
+		ct = "application/json; charset=utf-8"
+	case "csv":
+		ct = "text/csv; charset=utf-8"
+	case "graphml":
+		ct = "application/xml; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ct)
+	_, _ = w.Write([]byte(content))
+}
 
 func newID() string {
 	return strings.ReplaceAll(time.Now().UTC().Format("060102150405.000000000"), ".", "")

@@ -2,10 +2,12 @@
 package rest
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +33,9 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("POST /api/runtime-profiles/{id}/stop", s.stop)
 	m.HandleFunc("POST /api/runtime-profiles/{id}/reload", s.reload)
 	m.HandleFunc("GET /api/runtime-profiles/{id}/logs", s.logs)
+	m.HandleFunc("GET /api/runtime-profiles/{id}/trace", s.trace)    // 翻译透视（REQ-94）
+	m.HandleFunc("GET /api/runtime-profiles/{id}/sparql", s.sparql)  // SPARQL 工作台端点（REQ-92，Yasgui）
+	m.HandleFunc("POST /api/runtime-profiles/{id}/sparql", s.sparql) // 同上
 	m.HandleFunc("GET /healthz", s.healthz)
 }
 
@@ -195,6 +200,82 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
 }
+
+// trace GET /api/runtime-profiles/{id}/trace?limit=50：翻译透视记录，时间倒序（REQ-94）。
+func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.Store.Get(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	traces, err := s.Store.ListTraces(id, limit)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"profile_id": id, "traces": traces})
+}
+
+// sparql GET|POST /api/runtime-profiles/{id}/sparql：标准 SPARQL protocol 端点
+// （REQ-92，§4.8.1 Yasgui 内嵌工作台数据源）。GET ?query= 与 POST
+// application/sparql-query 均支持；响应头与状态码透传引擎返回。
+func (s *Server) sparql(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p, err := s.Store.Get(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if p.Status != "running" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "方案未运行（当前状态 " + p.Status + "），启动后再使用 SPARQL 工作台"})
+		return
+	}
+	ep, err := s.Manager.ProcEndpoint(id)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	var req *http.Request
+	if r.Method == http.MethodGet {
+		q := r.URL.Query().Get("query")
+		if strings.TrimSpace(q) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 query 参数"})
+			return
+		}
+		req, err = http.NewRequestWithContext(r.Context(), "GET", ep+"?query="+url.QueryEscape(q), nil)
+	} else {
+		body, err2 := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+		if err2 != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "读取请求体失败"})
+			return
+		}
+		req, err = http.NewRequestWithContext(r.Context(), "POST", ep, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/sparql-query")
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	accept := r.Header.Get("Accept")
+	if accept == "" {
+		accept = "application/sparql-results+json"
+	}
+	req.Header.Set("Accept", accept)
+	resp, err := sparqlHTTP.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "引擎请求失败: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+var sparqlHTTP = &http.Client{Timeout: 30 * time.Second}
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.List()

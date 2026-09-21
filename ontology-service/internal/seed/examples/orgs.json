@@ -1,0 +1,36 @@
+{
+  "id": "onto_org_person",
+  "name": "组织与人员",
+  "description": "组织结构迷你本体：组织、部门、组、岗位与人员的层级模型，适合学习概念多继承（parents）与多层关系建模。",
+  "concepts": [
+    { "name": "组织", "label": "Organization", "definition": "一个法人组织或公司。" },
+    { "name": "部门", "label": "Department", "definition": "组织下设的职能部门。" },
+    { "name": "组", "label": "Group", "definition": "部门内设的更小团队单元。", "parents": ["部门"] },
+    { "name": "岗位", "label": "Position", "definition": "人员担任的职务角色。" },
+    { "name": "人员", "label": "Person", "definition": "组织中的成员。" },
+    { "name": "项目", "label": "Project", "definition": "由部门承接、人员参与的项目。" }
+  ],
+  "relations": [
+    { "name": "下设", "from": "组织", "to": "部门", "definition": "组织下设部门。" },
+    { "name": "内设", "from": "部门", "to": "组", "definition": "部门内设小组。" },
+    { "name": "承接", "from": "部门", "to": "项目", "definition": "部门承接项目。" },
+    { "name": "任职于", "from": "人员", "to": "部门", "definition": "人员任职于某部门或组。" },
+    { "name": "担任", "from": "人员", "to": "岗位", "definition": "人员担任某岗位。" },
+    { "name": "参与", "from": "人员", "to": "项目", "definition": "人员参与某项目。" }
+  ],
+  "instances": [
+    { "name": "星辰科技", "concept": "组织", "attributes": { "行业": "软件", "规模": "200人" }, "relations": [ { "rel": "下设", "target": "研发部" }, { "rel": "下设", "target": "产品部" } ] },
+    { "name": "研发部", "concept": "部门", "attributes": { "职能": "产品研发" }, "relations": [ { "rel": "内设", "target": "平台组" }, { "rel": "内设", "target": "应用组" } ] },
+    { "name": "产品部", "concept": "部门", "attributes": { "职能": "产品规划" } },
+    { "name": "平台组", "concept": "组", "attributes": { "方向": "基础平台" }, "relations": [ { "rel": "承接", "target": "数据中台" } ] },
+    { "name": "应用组", "concept": "组", "attributes": { "方向": "业务应用" }, "relations": [ { "rel": "承接", "target": "会员系统" } ] },
+    { "name": "数据中台", "concept": "项目", "attributes": { "状态": "进行中" } },
+    { "name": "会员系统", "concept": "项目", "attributes": { "状态": "立项" } },
+    { "name": "后端工程师", "concept": "岗位" },
+    { "name": "前端工程师", "concept": "岗位" },
+    { "name": "产品经理", "concept": "岗位" },
+    { "name": "王强", "concept": "人员", "attributes": { "工号": "E1001" }, "relations": [ { "rel": "任职于", "target": "平台组" }, { "rel": "担任", "target": "后端工程师" }, { "rel": "参与", "target": "数据中台" } ] },
+    { "name": "陈晨", "concept": "人员", "attributes": { "工号": "E1002" }, "relations": [ { "rel": "任职于", "target": "应用组" }, { "rel": "担任", "target": "前端工程师" }, { "rel": "参与", "target": "会员系统" } ] },
+    { "name": "赵敏", "concept": "人员", "attributes": { "工号": "E1003" }, "relations": [ { "rel": "任职于", "target": "产品部" }, { "rel": "担任", "target": "产品经理" }, { "rel": "参与", "target": "数据中台" } ] }
+  ]
+}

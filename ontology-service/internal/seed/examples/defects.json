@@ -1,0 +1,30 @@
+{
+  "id": "onto_defect_mgmt",
+  "name": "软件缺陷管理",
+  "description": "软件研发缺陷管理迷你本体：项目、迭代、需求、缺陷、测试用例与人员的关系模型，适合学习基础概念建模与实例关系断言。",
+  "concepts": [
+    { "name": "项目", "label": "Project", "definition": "一个软件研发项目，由多个迭代组成。" },
+    { "name": "迭代", "label": "Iteration", "definition": "一段固定周期的开发迭代。" },
+    { "name": "需求", "label": "Requirement", "definition": "迭代中计划交付的功能需求。" },
+    { "name": "缺陷", "label": "Defect", "definition": "开发或测试过程中发现的软件缺陷。" },
+    { "name": "测试用例", "label": "TestCase", "definition": "用于验证需求实现或缺陷修复的测试用例。" },
+    { "name": "人员", "label": "Person", "definition": "参与项目的研发或测试人员。" }
+  ],
+  "relations": [
+    { "name": "包含", "from": "项目", "to": "迭代", "definition": "项目包含若干迭代。" },
+    { "name": "交付", "from": "迭代", "to": "需求", "definition": "迭代交付若干需求。" },
+    { "name": "源于", "from": "缺陷", "to": "需求", "definition": "缺陷源于某个需求的实现。" },
+    { "name": "验证", "from": "测试用例", "to": "缺陷", "definition": "测试用例用于验证某个缺陷的修复。" },
+    { "name": "提交", "from": "人员", "to": "缺陷", "definition": "人员提交缺陷报告。" },
+    { "name": "负责", "from": "人员", "to": "项目", "definition": "人员负责某个项目。" }
+  ],
+  "instances": [
+    { "name": "线上商城", "concept": "项目", "attributes": { "代码仓库": "mall/monorepo", "状态": "进行中" } },
+    { "name": "iter-2025S1", "concept": "迭代", "attributes": { "周期": "2025-Q1" } },
+    { "name": "支付功能", "concept": "需求", "attributes": { "优先级": "P0" } },
+    { "name": "bug-1042", "concept": "缺陷", "attributes": { "严重级别": "P1", "状态": "修复中" }, "relations": [ { "rel": "源于", "target": "支付功能" } ] },
+    { "name": "tc-pay-01", "concept": "测试用例", "attributes": { "覆盖范围": "核心支付链路" }, "relations": [ { "rel": "验证", "target": "bug-1042" } ] },
+    { "name": "张伟", "concept": "人员", "attributes": { "角色": "后端工程师" }, "relations": [ { "rel": "提交", "target": "bug-1042" }, { "rel": "负责", "target": "线上商城" } ] },
+    { "name": "李娜", "concept": "人员", "attributes": { "角色": "测试工程师" } }
+  ]
+}

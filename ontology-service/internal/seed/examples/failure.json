@@ -1,0 +1,29 @@
+{
+  "id": "onto_equip_failure",
+  "name": "设备故障知识",
+  "description": "工业设备故障知识迷你本体：设备、部件、故障（含概念层级）、故障原因与维护措施，适合学习故障归因链建模与概念分类（parents）。",
+  "concepts": [
+    { "name": "设备", "label": "Equipment", "definition": "生产现场的物理设备。" },
+    { "name": "部件", "label": "Component", "definition": "设备的功能部件。" },
+    { "name": "故障", "label": "Fault", "definition": "设备或部件出现的异常状态。" },
+    { "name": "过热故障", "label": "OverheatFault", "definition": "以温度异常升高为特征的故障类别。", "parents": ["故障"] },
+    { "name": "故障原因", "label": "FaultCause", "definition": "引发故障的根本原因。" },
+    { "name": "维护措施", "label": "Maintenance", "definition": "消除或预防故障原因的措施。" }
+  ],
+  "relations": [
+    { "name": "包含", "from": "设备", "to": "部件", "definition": "设备包含若干部件。" },
+    { "name": "发生", "from": "部件", "to": "故障", "definition": "部件上发生某类故障。" },
+    { "name": "引起", "from": "故障原因", "to": "故障", "definition": "某原因引起某故障。" },
+    { "name": "对应", "from": "故障原因", "to": "维护措施", "definition": "某原因对应某维护措施。" }
+  ],
+  "instances": [
+    { "name": "空压机A", "concept": "设备", "attributes": { "型号": "AC-200", "位置": "1号车间" } },
+    { "name": "电机", "concept": "部件", "attributes": { "功率": "75kW" } },
+    { "name": "传动皮带", "concept": "部件" },
+    { "name": "过热停机", "concept": "过热故障", "attributes": { "等级": "严重" } },
+    { "name": "散热不良", "concept": "故障原因", "relations": [ { "rel": "引起", "target": "过热停机" }, { "rel": "对应", "target": "清理散热器" } ] },
+    { "name": "皮带松动", "concept": "故障原因", "relations": [ { "rel": "引起", "target": "过热停机" }, { "rel": "对应", "target": "张紧调整" } ] },
+    { "name": "清理散热器", "concept": "维护措施", "attributes": { "周期": "每月" } },
+    { "name": "张紧调整", "concept": "维护措施", "attributes": { "周期": "每季度" } }
+  ]
+}
