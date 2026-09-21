@@ -200,3 +200,7 @@
 .onto-conv-list { display: flex; flex-direction: column; gap: 6px; }
 .onto-conv-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--c-line); border-radius: 9px; background: #fff; }
 .onto-conv-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--c-ink); }
+
+/* P1 尾适配：S1 学习示例行 */
+.onto-learn-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid #f0f0f0; border-radius: 8px; }
+.onto-learn-row .ant-btn { flex-shrink: 0; }

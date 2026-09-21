@@ -8,6 +8,7 @@ import type {
   KBHit,
   KBDoc,
   KnowledgeBase,
+  LearningExample,
   Message,
   ModelConnection,
   Ontology,
@@ -18,9 +19,11 @@ import type {
   Skill,
   Spec,
   ToolInfo,
+  TraceResponse,
   UsageGroupBy,
   UsageStats,
   ValidationError,
+  VersionsResponse,
 } from './types'
 
 /** 携带 HTTP 状态与校验错误的接口错误（供 UI 区分 404 / 400 validation_errors / 502 不可达） */
@@ -59,6 +62,40 @@ async function reqMultipart<T>(url: string, form: FormData): Promise<T> {
     throw new ApiError(msg, res.status, data?.validation_errors)
   }
   return data as T
+}
+
+/** 文本响应请求（版本源码视图等非 JSON 端点；错误仍按 JSON {error} 解析） */
+async function reqText(url: string): Promise<string> {
+  const res = await fetch(url)
+  const text = await res.text()
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const j = JSON.parse(text)
+      if (j && j.error) msg = j.error
+    } catch { /* 非 JSON 错误体，保留状态码消息 */ }
+    throw new ApiError(msg, res.status)
+  }
+  return text
+}
+
+/** SPARQL 工作台请求：Accept JSON 结果；失败解析 {error} 或透传引擎原文片段 */
+async function reqSparql(url: string, query: string): Promise<{ raw: string; json: any }> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sparql-query', Accept: 'application/sparql-results+json' },
+    body: query,
+  })
+  const text = await res.text()
+  let json: any = null
+  try {
+    json = JSON.parse(text)
+  } catch { /* 引擎可能返回非 JSON（如 HTML 错误页） */ }
+  if (!res.ok) {
+    const msg = (json && json.error) || `引擎返回 HTTP ${res.status}：${(text || '').slice(0, 200)}`
+    throw new ApiError(msg, res.status)
+  }
+  return { raw: text, json }
 }
 
 export const api = {
@@ -167,9 +204,12 @@ export const api = {
   /** 内置示例：201 新建（id=onto_k8s_ops）或 200 {id, seeded:false, note} */
   seedSampleOntology: () =>
     req<Ontology & { seeded?: boolean; note?: string }>('/api/ontologies/seed-sample', { method: 'POST' }),
-  /** AI 草案：503 表示 LLM 未配置 */
-  aiDraftOntology: (description: string, extraHint?: string) =>
-    req<AiDraftResult>('/api/ontologies/ai-draft', { method: 'POST', body: JSON.stringify({ description, extraHint }) }),
+  /** AI 草案：503 表示 LLM 未配置；capabilityQuestions 为能力问题（CQ，REQ §4.8.3） */
+  aiDraftOntology: (description: string, extraHint?: string, capabilityQuestions?: string[]) =>
+    req<AiDraftResult>('/api/ontologies/ai-draft', {
+      method: 'POST',
+      body: JSON.stringify({ description, extraHint, capability_questions: capabilityQuestions }),
+    }),
   /** 导出下载地址（text/turtle attachment） */
   ontologyExportUrl: (id: string, format: string) => `/api/ontologies/${id}/export?format=${encodeURIComponent(format)}`,
   /** 注入指引（经构建平面路由，稳定可用） */
@@ -186,6 +226,24 @@ export const api = {
   stopRuntimeProfile: (id: string) => req<RuntimeProfile>(`/api/runtime-profiles/${id}/stop`, { method: 'POST' }),
   reloadRuntimeProfile: (id: string) => req<RuntimeProfile>(`/api/runtime-profiles/${id}/reload`, { method: 'POST' }),
   runtimeProfileLogs: (id: string, tail = 200) => req<{ lines: string[] }>(`/api/runtime-profiles/${id}/logs?tail=${tail}`),
+
+  // ---- P1 尾适配：版本历史（REQ-93）/ 学习示例 / 翻译透视（REQ-94）/ SPARQL 工作台（REQ-92） ----
+  /** 版本历史列表（每次保存/导入/灌装留快照） */
+  listVersions: (id: string) => req<VersionsResponse>(`/api/ontologies/${id}/versions`),
+  /** 某版本导入时的原始源文件（Turtle/RDF-XML/JSON/CSV/GraphML 原文；无原始源 → 404） */
+  getVersionOriginal: (id: string, version: number) => reqText(`/api/ontologies/${id}/versions/${version}/original`),
+  /** 内置学习示例清单（软件缺陷/组织人员/设备故障） */
+  listLearningExamples: () => req<LearningExample[]>('/api/ontologies/seed-learning'),
+  /** 灌装学习示例（幂等：已存在 → 200 {seeded:false, note}） */
+  seedLearningExample: (key: string) =>
+    req<Ontology & { seeded?: boolean; note?: string }>('/api/ontologies/seed-learning', {
+      method: 'POST',
+      body: JSON.stringify({ key }),
+    }),
+  /** 翻译透视（最近 N 条，含失败留痕；limit≤200） */
+  listTraces: (profileId: string, limit = 50) => req<TraceResponse>(`/api/runtime-profiles/${profileId}/trace?limit=${limit}`),
+  /** SPARQL 工作台：POST application/sparql-query；非 running → 409；状态码/错误透传引擎 */
+  runSparql: (profileId: string, query: string) => reqSparql(`/api/runtime-profiles/${profileId}/sparql`, query),
 }
 
 /**
