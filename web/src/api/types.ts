@@ -72,6 +72,34 @@ export interface ModelConnection {
   updated_at: string
 }
 
+/**
+ * 自动发现模型（ASSUMED 后端契约，接口可能尚未就绪）：
+ * POST /api/model-connections/{anchorId}/list-models
+ * 后端解密锚点连接的 Key，调用其 OpenAI 兼容的 GET {base_url}/models，返回可用模型 id 列表。
+ */
+export interface ProviderModelList {
+  models: string[]
+}
+
+/**
+ * 使用统计（ASSUMED 后端契约，接口可能尚未就绪）：
+ * GET /api/stats/usage?group_by=model|agent|project
+ */
+export type UsageGroupBy = 'model' | 'agent' | 'project'
+
+export interface UsageRow {
+  key: string
+  label: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface UsageStats {
+  rows: UsageRow[]
+}
+
 /** SSE 平台事件（方案 §7 统一协议） */
 export interface PlatformEvent {
   type: string

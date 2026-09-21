@@ -9,10 +9,13 @@ import type {
   OntologyDetail,
   OntologySummary,
   Project,
+  ProviderModelList,
   RunEventDTO,
   RuntimeProfile,
   Skill,
   ToolInfo,
+  UsageGroupBy,
+  UsageStats,
 } from './types'
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -67,6 +70,17 @@ export const api = {
   deleteConnection: (id: string) => req<{ deleted: string }>(`/api/model-connections/${id}`, { method: 'DELETE' }),
   setDefaultConnection: (id: string) => req<ModelConnection>(`/api/model-connections/${id}/default`, { method: 'PUT' }),
   testConnection: (input: any) => req<{ ok: boolean; error?: string; elapsed_ms: number }>('/api/model-connections/test', { method: 'POST', body: JSON.stringify(input) }),
+  /**
+   * 自动获取某提供商（锚点连接）的可用模型列表（ASSUMED 契约，接口可能未就绪 → 抛错由 UI 降级）。
+   * POST /api/model-connections/{anchorId}/list-models → { models: string[] }
+   */
+  listProviderModels: (anchorId: string) => req<ProviderModelList>(`/api/model-connections/${anchorId}/list-models`, { method: 'POST' }),
+
+  /**
+   * 使用统计（ASSUMED 契约，接口可能未就绪 → 抛错由 UI 降级）。
+   * GET /api/stats/usage?group_by=model|agent|project → { rows: UsageRow[] }
+   */
+  usageStats: (groupBy: UsageGroupBy) => req<UsageStats>(`/api/stats/usage?group_by=${groupBy}`),
 
   // ---- M6 知识库（§8：/api/kb 系列） ----
   listKBs: () => req<KnowledgeBase[]>('/api/kb'),

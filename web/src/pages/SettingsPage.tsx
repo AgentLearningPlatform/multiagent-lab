@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Form, Input, Menu, Modal, Popconfirm, Select, Space, Splitter, Switch, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Checkbox, Form, Input, Menu, Modal, Popconfirm, Result, Segmented, Select, Space, Splitter, Spin, Switch, Table, Tabs, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../api/client'
-import type { ModelConnection } from '../api/types'
+import type { ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
 import { useUI } from '../store/ui'
 
 type Category = 'models' | 'global' | 'security'
+type SettingsTab = 'models' | 'stats'
 
 /**
  * 提供商分组：后端为扁平 model_connection（无独立提供商实体），
@@ -13,7 +14,7 @@ type Category = 'models' | 'global' | 'security'
  * - 连接命名约定：`{提供商名}·{模型名}`（间隔符 U+00B7），保证 name 的 UNIQUE 约束不冲突；
  * - 提供商展示名 = 连接名中第一个 · 之前的部分（老数据无 · 则取整名），从锚点派生；
  * - 提供商改名 = 按新前缀批量重生成组内全部连接名；重名时追加 ` (n)`；
- * - 一条连接同时出现在两个页签：提供商页签看组（聚合行），模型页签看连接（明细行）。
+ * - 合并列表：提供商为可展开行（聚合行），其模型直接嵌套在展开区（明细行）。
  */
 interface ProviderGroup {
   key: string // `${protocol}::${base_url}`
@@ -46,20 +47,27 @@ function uniqueConnName(provider: string, model: string, taken: Set<string>): st
   return name
 }
 
+const fmtNum = (n?: number) => (n ?? 0).toLocaleString()
+
 /**
  * 设置页（原型 06 §3.6 v0.4 布局）：
  * - 左栏：设置分类——模型管理（默认选中）/ 全局参数（P1 预留）/ 数据与安全（P2 预留）；
- * - 右栏「模型管理」：提供商 / 模型 两个页签（antd Tabs + Table）。
+ * - 右栏「模型管理」：① 提供商与模型合并为单个可折叠列表；② 使用统计。
  */
 export default function SettingsPage() {
   const { showToast } = useUI()
   const [conns, setConns] = useState<ModelConnection[]>([])
   const [category, setCategory] = useState<Category>('models')
-  const [tab, setTab] = useState<'providers' | 'models'>('providers')
+  const [tab, setTab] = useState<SettingsTab>('models')
   // undefined = 关闭；'new' = 新建；对象 = 编辑
   const [providerModal, setProviderModal] = useState<ProviderGroup | 'new' | undefined>(undefined)
   const [modelModal, setModelModal] = useState<ModelConnection | 'new' | undefined>(undefined)
+  // 新建模型时预选的提供商分组 key（从某提供商行「＋添加模型」进入）
+  const [modelInitProvider, setModelInitProvider] = useState<string | undefined>(undefined)
   const [testing, setTesting] = useState<string | null>(null)
+  // 合并列表：展开的提供商行；以及当前触发「自动获取模型」的提供商 key
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
+  const [discoverKey, setDiscoverKey] = useState<string | null>(null)
 
   const reload = () => { api.listConnections().then(setConns).catch(() => setConns([])) }
   useEffect(reload, [])
@@ -79,9 +87,12 @@ export default function SettingsPage() {
     return [...map.values()]
   }, [conns])
 
-  const groupNameOf = (c: ModelConnection) => groups.find((g) => g.key === groupOf(c))?.name ?? c.name
-
   const hasChat = conns.some((c) => c.conn_type === 'chat' && c.has_key && c.enabled)
+
+  const openModelModal = (conn: ModelConnection | 'new', providerKey?: string) => {
+    setModelInitProvider(providerKey)
+    setModelModal(conn)
+  }
 
   const setDefault = async (c: ModelConnection) => {
     try {
@@ -130,7 +141,13 @@ export default function SettingsPage() {
     }
   }
 
-  // 提供商页签：一个 Base URL 组一行
+  // 「自动获取模型」：展开该提供商行并挂载发现面板（面板内自行拉取，失败降级为手动添加）
+  const startDiscover = (g: ProviderGroup) => {
+    setExpandedKeys((prev) => (prev.includes(g.key) ? prev : [...prev, g.key]))
+    setDiscoverKey(g.key)
+  }
+
+  // 提供商行：名称 / Base URL / API Key 掩码 / 启用 / 模型数 / 行内操作
   const providerColumns: ColumnsType<ProviderGroup> = [
     {
       title: '提供商',
@@ -141,14 +158,14 @@ export default function SettingsPage() {
     {
       title: 'API Key',
       key: 'key',
+      width: 150,
       render: (_, g) => {
         const withKey = g.members.find((m) => m.has_key)
         return <Typography.Text type={withKey ? 'secondary' : 'warning'} style={{ fontSize: 12 }}>{withKey ? withKey.api_key_hint : '未设置'}</Typography.Text>
       },
     },
-    { title: '模型数', key: 'count', width: 80, align: 'center', render: (_, g) => <Tag style={{ margin: 0 }}>{g.members.length}</Tag> },
     {
-      title: '状态',
+      title: '启用',
       key: 'status',
       width: 110,
       render: (_, g) => {
@@ -158,10 +175,11 @@ export default function SettingsPage() {
         return <Tag color="orange" style={{ margin: 0 }}>启用 {on}/{g.members.length}</Tag>
       },
     },
+    { title: '模型数', key: 'count', width: 80, align: 'center', render: (_, g) => <Tag style={{ margin: 0 }}>{g.members.length}</Tag> },
     {
       title: '操作',
       key: 'ops',
-      width: 230,
+      width: 360,
       render: (_, g) => {
         // 测试代表连接：优先取组内存有 Key 的成员
         const rep = g.members.find((m) => m.has_key) ?? g.anchor
@@ -179,16 +197,17 @@ export default function SettingsPage() {
             >
               <Button type="link" size="small" danger>删除</Button>
             </Popconfirm>
+            <Button type="link" size="small" onClick={() => openModelModal('new', g.key)}>＋添加模型</Button>
+            <Button type="link" size="small" onClick={() => startDiscover(g)}>自动获取模型</Button>
           </Space>
         )
       },
     },
   ]
 
-  // 模型页签：一条连接一行
+  // 展开区：一条连接一行（模型名 / 类型 / 默认 / 操作）
   const modelColumns: ColumnsType<ModelConnection> = [
     { title: '模型', dataIndex: 'model_name', render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
-    { title: '所属提供商', key: 'provider', render: (_, c) => groupNameOf(c) },
     { title: '类型', dataIndex: 'conn_type', width: 110, render: (t: string) => (t === 'chat' ? <Tag color="blue">chat</Tag> : <Tag color="green">embedding</Tag>) },
     { title: '默认', dataIndex: 'is_default', width: 130, render: (_, c) => (c.is_default ? <Tag color="gold" style={{ margin: 0 }}>{c.conn_type} 默认</Tag> : <Typography.Text type="secondary">—</Typography.Text>) },
     {
@@ -198,7 +217,7 @@ export default function SettingsPage() {
       render: (_, c) => (
         <Space size={0} wrap>
           <Button type="link" size="small" loading={testing === c.id} onClick={() => test(c)}>测试</Button>
-          <Button type="link" size="small" onClick={() => setModelModal(c)}>编辑</Button>
+          <Button type="link" size="small" onClick={() => openModelModal(c)}>编辑</Button>
           {c.is_default ? null : <Button type="link" size="small" onClick={() => setDefault(c)}>设为默认</Button>}
           <Popconfirm
             title={`删除模型「${c.model_name}」？`}
@@ -214,6 +233,30 @@ export default function SettingsPage() {
       ),
     },
   ]
+
+  const expandedRowRender = (g: ProviderGroup) => (
+    <div className="provider-models">
+      {discoverKey === g.key && (
+        <DiscoverPanel
+          key={g.key}
+          group={g}
+          conns={conns}
+          onManualAdd={() => openModelModal('new', g.key)}
+          onClose={() => setDiscoverKey(null)}
+          onAdded={() => { setDiscoverKey(null); reload() }}
+        />
+      )}
+      <Table<ModelConnection>
+        rowKey="id"
+        columns={modelColumns}
+        dataSource={g.members}
+        pagination={false}
+        size="small"
+        showHeader={false}
+        locale={{ emptyText: '暂无模型，点击该行「＋添加模型」' }}
+      />
+    </div>
+  )
 
   return (
     <Splitter
@@ -264,11 +307,11 @@ export default function SettingsPage() {
           <Tabs
             style={{ marginTop: 12 }}
             activeKey={tab}
-            onChange={(k) => setTab(k as 'providers' | 'models')}
+            onChange={(k) => setTab(k as SettingsTab)}
             items={[
               {
-                key: 'providers',
-                label: `模型提供商 (${groups.length})`,
+                key: 'models',
+                label: `模型 (${groups.length} 提供商 / ${conns.length} 模型)`,
                 children: (
                   <>
                     <Table<ProviderGroup>
@@ -277,34 +320,30 @@ export default function SettingsPage() {
                       dataSource={groups}
                       pagination={false}
                       size="middle"
+                      scroll={{ x: 960 }}
+                      expandable={{
+                        expandedRowKeys: expandedKeys,
+                        onExpandedRowsChange: (keys) => {
+                          const arr = keys as string[]
+                          setExpandedKeys(arr)
+                          if (discoverKey && !arr.includes(discoverKey)) setDiscoverKey(null)
+                        },
+                        expandedRowRender,
+                      }}
                       locale={{ emptyText: '暂无提供商，点击下方按钮添加' }}
                     />
                     <div className="tab-footer">
                       <Button type="primary" onClick={() => setProviderModal('new')}>＋ 添加提供商</Button>
-                      <span className="hint">名称 · 协议 · Base URL · API Key（掩码输入）· 启用；编辑将批量应用到该提供商下全部模型连接</span>
+                      <Button onClick={() => openModelModal('new')}>＋ 添加模型</Button>
+                      <span className="hint">展开提供商行查看其模型；「自动获取模型」从接入点拉取可用模型并批量创建连接</span>
                     </div>
                   </>
                 ),
               },
               {
-                key: 'models',
-                label: `模型 (${conns.length})`,
-                children: (
-                  <>
-                    <Table<ModelConnection>
-                      rowKey="id"
-                      columns={modelColumns}
-                      dataSource={conns}
-                      pagination={false}
-                      size="middle"
-                      locale={{ emptyText: '暂无模型，点击下方按钮添加' }}
-                    />
-                    <div className="tab-footer">
-                      <Button type="primary" onClick={() => setModelModal('new')}>＋ 添加模型</Button>
-                      <span className="hint">所属提供商（引用「模型提供商」页签的分组）· 模型名 · 类型 · 设为该类型默认</span>
-                    </div>
-                  </>
-                ),
+                key: 'stats',
+                label: '使用统计',
+                children: <StatsView />,
               },
             ]}
           />
@@ -323,12 +362,258 @@ export default function SettingsPage() {
             conn={modelModal}
             groups={groups}
             conns={conns}
-            onClose={() => setModelModal(undefined)}
-            onSaved={() => { setModelModal(undefined); reload() }}
+            initialProvider={modelInitProvider}
+            onClose={() => { setModelModal(undefined); setModelInitProvider(undefined) }}
+            onSaved={() => { setModelModal(undefined); setModelInitProvider(undefined); reload() }}
           />
         )}
       </Splitter.Panel>
     </Splitter>
+  )
+}
+
+/**
+ * 自动发现面板（挂在提供商展开区）：
+ * - 拉取 `POST /api/model-connections/{anchorId}/list-models`（ASSUMED 契约）；
+ * - 成功：多选清单（已添加项置灰）→ 批量创建连接（copy_key_from 锚点，名称按 `{提供商}·{模型}`）；
+ * - 失败 / 404：提示「自动发现接口未就绪，可手动添加」，手动添加仍可用。
+ */
+function DiscoverPanel({ group, conns, onManualAdd, onClose, onAdded }: {
+  group: ProviderGroup
+  conns: ModelConnection[]
+  onManualAdd: () => void
+  onClose: () => void
+  onAdded: () => void
+}) {
+  const { showToast } = useUI()
+  const [loading, setLoading] = useState(true)
+  const [models, setModels] = useState<string[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [connType, setConnType] = useState<'chat' | 'embedding'>('chat')
+  const [busy, setBusy] = useState(false)
+
+  const existing = new Set(group.members.map((m) => m.model_name))
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    setError(null)
+    api.listProviderModels(group.anchor.id)
+      .then((r) => {
+        if (!alive) return
+        const found = Array.isArray(r.models) ? r.models : []
+        setModels(found)
+        // 默认勾选「尚未添加」的模型
+        setSelected(found.filter((m) => !group.members.some((x) => x.model_name === m)))
+      })
+      .catch((e: any) => { if (alive) setError(e?.message ?? '请求失败') })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+    // 面板以 group.key 为 React key，切换提供商即重挂载；仅随锚点变化重取
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group.anchor.id])
+
+  const addable = (models ?? []).filter((m) => !existing.has(m))
+
+  const apply = async () => {
+    setBusy(true)
+    try {
+      const taken = new Set(conns.map((c) => c.name))
+      let n = 0
+      for (const m of selected) {
+        const name = uniqueConnName(group.name, m, taken)
+        taken.add(name)
+        await api.createConnection({
+          name,
+          protocol: group.protocol,
+          base_url: group.baseUrl,
+          model_name: m,
+          conn_type: connType,
+          copy_key_from: group.anchor.id, // Key 归属提供商：与锚点共享同一份密文
+          enabled: true,
+          is_default: false,
+        })
+        n += 1
+      }
+      showToast(`已添加 ${n} 个模型连接`)
+      onAdded()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="discover-panel">
+        <Spin size="small" />
+        <span className="discover-loading-text">正在获取模型列表…</span>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="discover-panel">
+        <div className="discover-head">
+          <span className="discover-title">自动获取模型列表</span>
+          <span className="discover-provider">{group.name}</span>
+        </div>
+        <Alert
+          type="warning"
+          showIcon
+          message="自动发现接口未就绪，可手动添加"
+          description={`${error}（POST /api/model-connections/{id}/list-models 待后端跟进）`}
+        />
+        <div className="discover-foot">
+          <Button size="small" type="primary" onClick={onManualAdd}>手动添加模型</Button>
+          <Button size="small" onClick={onClose}>关闭</Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="discover-panel">
+      <div className="discover-head">
+        <span className="discover-title">发现 {models?.length ?? 0} 个模型</span>
+        <Tag color="blue" style={{ margin: 0 }}>可添加 {addable.length}</Tag>
+        <span className="discover-provider">{group.name} · 沿用提供商 Key</span>
+      </div>
+      <div className="discover-toolbar">
+        <span className="discover-label">类型</span>
+        <Segmented
+          size="small"
+          value={connType}
+          onChange={(v) => setConnType(v as 'chat' | 'embedding')}
+          options={[{ label: 'chat', value: 'chat' }, { label: 'embedding', value: 'embedding' }]}
+        />
+        <Button type="link" size="small" disabled={addable.length === 0} onClick={() => setSelected(addable)}>全选可添加</Button>
+        <Button type="link" size="small" disabled={selected.length === 0} onClick={() => setSelected([])}>清空</Button>
+      </div>
+      <Checkbox.Group value={selected} onChange={(v) => setSelected(v as string[])} style={{ display: 'block' }}>
+        <div className="discover-list">
+          {(models ?? []).map((m) => (
+            <Checkbox key={m} value={m} disabled={existing.has(m)}>
+              <span className="discover-model">{m}</span>
+              {existing.has(m) && <Tag style={{ marginInlineStart: 6 }}>已添加</Tag>}
+            </Checkbox>
+          ))}
+        </div>
+      </Checkbox.Group>
+      <div className="discover-foot">
+        <Button type="primary" size="small" loading={busy} disabled={selected.length === 0} onClick={apply}>
+          添加所选（{selected.length}）
+        </Button>
+        <Button size="small" onClick={onManualAdd}>手动添加</Button>
+        <Button size="small" type="text" onClick={onClose}>取消</Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 使用统计（ASSUMED 契约 `GET /api/stats/usage?group_by=…`）：
+ * 维度切换（按模型 / 按智能体 / 按项目）+ 明细表；总 tokens 用纯 CSS 横条表示（不引入图表依赖）。
+ * 接口未就绪 → Result 提示 + 重试。
+ */
+function StatsView() {
+  const [groupBy, setGroupBy] = useState<UsageGroupBy>('model')
+  const [rows, setRows] = useState<UsageRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    setError(null)
+    api.usageStats(groupBy)
+      .then((r) => { if (alive) setRows(Array.isArray(r.rows) ? r.rows : []) })
+      .catch((e: any) => { if (alive) { setError(e?.message ?? '请求失败'); setRows(null) } })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [groupBy, tick])
+
+  const list = rows ?? []
+  const totalCalls = list.reduce((s, r) => s + (r.calls || 0), 0)
+  const totalTokens = list.reduce((s, r) => s + (r.total_tokens || 0), 0)
+  const maxTotal = Math.max(1, ...list.map((r) => r.total_tokens || 0))
+
+  const columns: ColumnsType<UsageRow> = [
+    { title: '名称', dataIndex: 'label', render: (v: string, r) => <Typography.Text strong>{v || r.key}</Typography.Text> },
+    { title: '调用次数', dataIndex: 'calls', width: 120, align: 'right', render: (v: number) => fmtNum(v) },
+    { title: 'Prompt tokens', dataIndex: 'prompt_tokens', width: 150, align: 'right', render: (v: number) => fmtNum(v) },
+    { title: 'Completion tokens', dataIndex: 'completion_tokens', width: 170, align: 'right', render: (v: number) => fmtNum(v) },
+    {
+      title: '总 tokens',
+      dataIndex: 'total_tokens',
+      width: 260,
+      render: (v: number) => (
+        <div className="usage-bar-cell">
+          <div className="usage-bar-track">
+            <div className="usage-bar-fill" style={{ width: `${Math.round(((v || 0) / maxTotal) * 100)}%` }} />
+          </div>
+          <span className="usage-bar-num">{fmtNum(v)}</span>
+        </div>
+      ),
+    },
+  ]
+
+  if (error) {
+    return (
+      <div className="usage-main">
+        <Result
+          status="warning"
+          title="统计接口未就绪"
+          subTitle={`${error}（后端车道跟进）`}
+          extra={<Button onClick={() => setTick((t) => t + 1)}>重试</Button>}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="usage-main">
+      <div className="usage-toolbar">
+        <Segmented
+          value={groupBy}
+          onChange={(v) => setGroupBy(v as UsageGroupBy)}
+          options={[
+            { label: '按模型', value: 'model' },
+            { label: '按智能体', value: 'agent' },
+            { label: '按项目', value: 'project' },
+          ]}
+        />
+        <span className="usage-hint">数据来自 GET /api/stats/usage，按维度聚合调用记录</span>
+        <Button size="small" style={{ marginLeft: 'auto' }} loading={loading} onClick={() => setTick((t) => t + 1)}>刷新</Button>
+      </div>
+      <div className="usage-summary">
+        <div className="usage-stat">
+          <div className="usage-stat-label">条目数</div>
+          <div className="usage-stat-value">{fmtNum(list.length)}</div>
+        </div>
+        <div className="usage-stat">
+          <div className="usage-stat-label">总调用次数</div>
+          <div className="usage-stat-value">{fmtNum(totalCalls)}</div>
+        </div>
+        <div className="usage-stat">
+          <div className="usage-stat-label">总 tokens</div>
+          <div className="usage-stat-value">{fmtNum(totalTokens)}</div>
+        </div>
+      </div>
+      <Table<UsageRow>
+        rowKey="key"
+        columns={columns}
+        dataSource={list}
+        loading={loading}
+        pagination={false}
+        size="middle"
+        locale={{ emptyText: '暂无统计数据' }}
+      />
+    </div>
   )
 }
 
@@ -470,8 +755,16 @@ function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGrou
  * - API Key 归属提供商：新建时用 copy_key_from 复用组锚点的密文，模型表单不再出现 Key；
  * - 编辑时切换提供商 = 移动到目标组（名称/Base URL/协议随目标组，Key 亦改用目标提供商）；
  * - 提供商未变则两个 Key 字段都不发送（后端保留原 Key）。
+ * - initialProvider：从某提供商行「＋添加模型」进入时预选该分组。
  */
-function ModelModal({ conn, groups, conns, onClose, onSaved }: { conn: ModelConnection | 'new'; groups: ProviderGroup[]; conns: ModelConnection[]; onClose: () => void; onSaved: () => void }) {
+function ModelModal({ conn, groups, conns, initialProvider, onClose, onSaved }: {
+  conn: ModelConnection | 'new'
+  groups: ProviderGroup[]
+  conns: ModelConnection[]
+  initialProvider?: string
+  onClose: () => void
+  onSaved: () => void
+}) {
   const { showToast } = useUI()
   const [form] = Form.useForm()
   const [busy, setBusy] = useState(false)
@@ -481,9 +774,9 @@ function ModelModal({ conn, groups, conns, onClose, onSaved }: { conn: ModelConn
     if (editConn) {
       form.setFieldsValue({ provider: groupOf(editConn), model_name: editConn.model_name, conn_type: editConn.conn_type, is_default: editConn.is_default })
     } else {
-      form.setFieldsValue({ provider: groups[0]?.key, model_name: '', conn_type: 'chat', is_default: false })
+      form.setFieldsValue({ provider: initialProvider ?? groups[0]?.key, model_name: '', conn_type: 'chat', is_default: false })
     }
-  }, [conn, form, groups])
+  }, [conn, form, groups, initialProvider])
 
   const providerKey = Form.useWatch('provider', form)
   const providerGroup = groups.find((g) => g.key === providerKey)
@@ -516,7 +809,7 @@ function ModelModal({ conn, groups, conns, onClose, onSaved }: { conn: ModelConn
         })
         if (v.is_default) await api.setDefaultConnection(editConn.id)
       } else {
-        if (!providerGroup) throw new Error('请先选择提供商；新提供商请先在「模型提供商」页签添加')
+        if (!providerGroup) throw new Error('请先选择提供商；新提供商请先添加')
         const created = await api.createConnection({
           name: uniqueConnName(providerGroup.name, v.model_name, new Set(conns.map((c) => c.name))),
           protocol: providerGroup.protocol,
@@ -553,7 +846,7 @@ function ModelModal({ conn, groups, conns, onClose, onSaved }: { conn: ModelConn
       }
     >
       <Form form={form} layout="vertical" requiredMark={false}>
-        <Form.Item name="provider" label="所属提供商" rules={[{ required: true, message: '请选择提供商；新提供商请先在「模型提供商」页签添加' }]}>
+        <Form.Item name="provider" label="所属提供商" rules={[{ required: true, message: '请选择提供商；新提供商请先添加' }]}>
           <Select
             placeholder="选择提供商"
             options={groups.map((g) => ({ value: g.key, label: g.name }))}
