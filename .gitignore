@@ -4,3 +4,4 @@ web/dist/
 *.log
 web/tsconfig.tsbuildinfo
 *.tsbuildinfo
+/data/
