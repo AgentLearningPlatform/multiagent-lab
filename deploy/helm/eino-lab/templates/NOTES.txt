@@ -1,0 +1,19 @@
+Eino 多智能体学习平台已部署。
+
+1. 访问（三选一）：
+{{- if .Values.ingress.enabled }}
+   Ingress: http://{{ .Values.ingress.host }}（确保 DNS/hosts 指向 Ingress 入口）
+{{- else }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Release.Name }}-backend 8080:8080
+   然后访问 http://localhost:8080
+{{- end }}
+
+2. 首次使用：设置 → 模型管理 → 编辑 DeepSeek 官方，填入 API Key 并测试连接。
+
+3. 已知边界（docs/13 §4）：
+   - 三服务为 SQLite 单文件存储，副本数固定为 1
+   - oxigraph SPARQL 端点仅 Pod 内可达（对话/本体查询经 manager 内部转发，功能完整）
+   - Docker 沙箱默认关闭（K8s 内需 DinD/宿主 sock，进阶配置）
+{{- if .Values.qdrant.enabled }}
+   - qdrant 已启用：backend 需设 KB_VECTOR_BACKEND=qdrant + QDRANT_URL 指向 {{ .Release.Name }}-qdrant:6333
+{{- end }}

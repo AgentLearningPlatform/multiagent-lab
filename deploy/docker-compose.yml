@@ -1,0 +1,74 @@
+# eino-lab 服务器单机部署（Docker Compose）
+# 用法：cd deploy && docker compose up -d --build
+#       需要知识库向量检索：docker compose --profile qdrant up -d
+# 文档：docs/13_部署与运行.md
+name: eino-lab
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      BUILD_SVC_URL: http://ontology-service:8091
+      RUNTIME_MGR_URL: http://runtime-manager:8090
+      # Docker 沙箱（进阶，默认关）：需挂载 /var/run/docker.sock 并改写回连地址
+      # SANDBOX_IMAGE: eino-lab/agentd:latest
+      # PLATFORM_URL_EXTERNAL: http://<宿主IP>:8080
+    volumes:
+      - platform-data:/app/data
+    depends_on:
+      - ontology-service
+      - runtime-manager
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  ontology-service:
+    build:
+      context: ..
+      dockerfile: ontology-service/Dockerfile
+    environment:
+      PLATFORM_URL: http://backend:8080
+    volumes:
+      - ontology-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  runtime-manager:
+    build:
+      context: ..
+      dockerfile: runtime-manager/Dockerfile
+    environment:
+      BUILD_SVC_URL: http://ontology-service:8091
+    volumes:
+      - runtime-data:/app/data
+      - runtime-logs:/app/logs
+    # oxigraph 子进程端口（9201+）仅容器内可达；对话/本体查询经 manager 内部转发，功能完整
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    profiles: ["qdrant"]
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+volumes:
+  platform-data:
+  ontology-data:
+  runtime-data:
+  runtime-logs:
+  qdrant-data:

@@ -1,0 +1,15 @@
+{{- range .Values.components }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "eino-lab.name" (dict "Release" $.Release "component" .name) }}
+  labels:
+    {{- include "eino-lab.labels" (dict "Release" $.Release "component" .name) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .storage }}
+{{- end }}

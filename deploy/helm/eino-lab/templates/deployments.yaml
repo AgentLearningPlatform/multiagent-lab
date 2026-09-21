@@ -1,0 +1,42 @@
+{{- range .Values.components }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "eino-lab.name" (dict "Release" $.Release "component" .name) }}
+  labels:
+    {{- include "eino-lab.labels" (dict "Release" $.Release "component" .name) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ .name }}
+  template:
+    metadata:
+      labels:
+        {{- include "eino-lab.labels" (dict "Release" $.Release "component" .name) | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .name }}
+          image: {{ include "eino-lab.fullimage" (dict "image" .) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .port }}
+          env:
+            {{- range .env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "eino-lab.name" (dict "Release" $.Release "component" .name) }}
+{{- end }}
