@@ -116,6 +116,9 @@ func (s *Server) routes() {
 		m.Handle("/api/ontologies/", s.Ontology.BuildProxy())
 		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
 		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
+		// Semantica 独立栏（§4.9 D-O10）：剥离前缀反代到 worker，:8093
+		m.Handle("/api/semantica", s.Ontology.SemanticaProxy()) // → SEMANTICA_WORKER_URL(:8093)
+		m.Handle("/api/semantica/", s.Ontology.SemanticaProxy())
 	}
 }
 

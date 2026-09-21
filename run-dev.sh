@@ -62,8 +62,24 @@ ADDR=":8090" DB_PATH=data/runtime.db MIGRATIONS_DIR=runtime-manager/migrations \
   data/bin/runtimed >data/runtime-manager.log 2>&1 &
 RT_PID=$!
 
+# ---- Semantica worker（可选，独立栏消费/审计；§4.9 D-O10）----
+# 首次需 bash tools/semantica-worker/setup.sh（semantica 核心依赖多 GB，属预期，不阻塞主平台）
+SEM_PID=""
+if [ ! -x tools/semantica-worker/.venv/bin/python ]; then
+  echo "[run-dev] 提示: 未找到 tools/semantica-worker/.venv，Semantica 独立栏不可用（首次需下载数 GB 依赖：bash tools/semantica-worker/setup.sh）" >&2
+else
+  mkdir -p data/semantica
+  echo "[run-dev] 启动 semantica-worker: http://localhost:8093"
+  (cd tools/semantica-worker && \
+    SEMANTICA_DATA_DIR="$PWD/../../data/semantica/graph.json" SEMANTICA_PORT=8093 \
+    .venv/bin/python -m uvicorn worker:app --host 0.0.0.0 --port 8093) \
+    >data/semantica-worker.log 2>&1 &
+  SEM_PID=$!
+fi
+
 cleanup() {
   kill "$ONT_PID" "$RT_PID" 2>/dev/null || true
+  [ -n "$SEM_PID" ] && kill "$SEM_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -79,6 +95,6 @@ if [ "$ok" != "1" ]; then
   echo "[run-dev] 警告: 本体侧服务未完全就绪（详情见 data/ontology-service.log、data/runtime-manager.log）" >&2
 fi
 
-echo "[run-dev] 启动 backend: http://localhost:${PORT}（本体页面经反代对接 :8091/:8090）"
+echo "[run-dev] 启动 backend: http://localhost:${PORT}（本体页面经反代对接 :8091/:8090，Semantica 独立栏 :8093）"
 cd backend
 ADDR=":${PORT}" go run ./cmd/backend

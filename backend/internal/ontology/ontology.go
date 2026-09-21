@@ -18,19 +18,21 @@ import (
 
 // Service 本体对接服务（P1 主线路径：Runtime Manager facade + 构建平面）。
 type Service struct {
-	MCPURL      string        // facade MCP 端点（ONTOLOGY_MCP_URL，默认 http://127.0.0.1:8090/mcp）
-	RuntimeURL  string        // 运行平面（RUNTIME_MGR_URL，默认 http://127.0.0.1:8090）
-	BuildURL    string        // 构建平面（BUILD_SVC_URL，默认 http://127.0.0.1:8091）
-	DialTimeout time.Duration // ONTOLOGY_DIAL_TIMEOUT，默认 3s
+	MCPURL       string        // facade MCP 端点（ONTOLOGY_MCP_URL，默认 http://127.0.0.1:8090/mcp）
+	RuntimeURL   string        // 运行平面（RUNTIME_MGR_URL，默认 http://127.0.0.1:8090）
+	BuildURL     string        // 构建平面（BUILD_SVC_URL，默认 http://127.0.0.1:8091）
+	SemanticaURL string        // Semantica worker（SEMANTICA_WORKER_URL，默认 http://127.0.0.1:8093，§4.9 D-O10）
+	DialTimeout  time.Duration // ONTOLOGY_DIAL_TIMEOUT，默认 3s
 }
 
 // NewService 从环境变量构建；始终返回可用实例（不可达由调用方降级）。
 func NewService() *Service {
 	s := &Service{
-		MCPURL:      getenv("ONTOLOGY_MCP_URL", "http://127.0.0.1:8090/mcp"),
-		RuntimeURL:  getenv("RUNTIME_MGR_URL", "http://127.0.0.1:8090"),
-		BuildURL:    getenv("BUILD_SVC_URL", "http://127.0.0.1:8091"),
-		DialTimeout: 3 * time.Second,
+		MCPURL:       getenv("ONTOLOGY_MCP_URL", "http://127.0.0.1:8090/mcp"),
+		RuntimeURL:   getenv("RUNTIME_MGR_URL", "http://127.0.0.1:8090"),
+		BuildURL:     getenv("BUILD_SVC_URL", "http://127.0.0.1:8091"),
+		SemanticaURL: getenv("SEMANTICA_WORKER_URL", "http://127.0.0.1:8093"),
+		DialTimeout:  3 * time.Second,
 	}
 	if v := os.Getenv("ONTOLOGY_DIAL_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
