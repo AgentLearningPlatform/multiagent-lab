@@ -3,8 +3,10 @@ package rest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -36,6 +38,7 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/runtime-profiles/{id}/trace", s.trace)    // 翻译透视（REQ-94）
 	m.HandleFunc("GET /api/runtime-profiles/{id}/sparql", s.sparql)  // SPARQL 工作台端点（REQ-92，Yasgui）
 	m.HandleFunc("POST /api/runtime-profiles/{id}/sparql", s.sparql) // 同上
+	m.HandleFunc("GET /api/runtime-profiles/{id}/guide", s.guide)
 	m.HandleFunc("GET /healthz", s.healthz)
 }
 
@@ -222,6 +225,48 @@ func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
 // application/sparql-query 均支持；响应头与状态码透传引擎返回。
 func (s *Server) sparql(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+// guide 代理构建平面本体指引（方案 04 §5 指引注入）：
+// 主平台装配时 GET /api/runtime-profiles/{id}/guide[?ontology_id=…]。
+//
+// 显式传 ontology_id：校验方案存在后透传构建平面 guide（JSON 原样返回，行为不变）。
+// 不传（生产装配调用方只知挂载方案，方案可绑定多个本体）：加载方案并遍历
+// ontology_ids 逐个拉取，best-effort 拼接后返回 {ontology_id, guide} 统一形状。
+func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ontologyID := strings.TrimSpace(r.URL.Query().Get("ontology_id"))
+
+	// ---- 显式指定 ontology_id：保持原行为（原样透传构建平面 JSON）----
+	if ontologyID != "" {
+		if _, err := s.Store.Get(id); err != nil {
+			writeErr(w, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		url := fmt.Sprintf("%s/api/ontologies/%s/guide", s.Manager.BuildURL, ontologyID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "构建平面不可达: " + err.Error()})
+			return
+		}
+		resp, err := s.Manager.HTTP.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "构建平面不可达: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("构建平面不可达: %s %s", resp.Status, string(b))})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+
+	// ---- 未指定 ontology_id：遍历方案绑定本体，best-effort 拼接 ----
 	p, err := s.Store.Get(id)
 	if err != nil {
 		writeErr(w, err)
@@ -276,6 +321,78 @@ func (s *Server) sparql(w http.ResponseWriter, r *http.Request) {
 }
 
 var sparqlHTTP = &http.Client{Timeout: 30 * time.Second}
+	if len(p.OntologyIDs) == 0 {
+		// 无绑定本体：明确 400，装配侧按失败降级为 ontology.unavailable。
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "方案未绑定本体"})
+		return
+	}
+	var (
+		parts   []string // 非空指引片段（已加来源前缀）
+		okIDs   []string // 拉取成功的 ontology_id（含指引为空的）
+		lastErr error
+	)
+	for _, oid := range p.OntologyIDs {
+		oid = strings.TrimSpace(oid)
+		if oid == "" {
+			continue
+		}
+		gotID, guide, ferr := s.fetchOntologyGuide(r.Context(), oid)
+		if ferr != nil {
+			lastErr = ferr
+			continue // best-effort：单个本体失败跳过，不阻断整体注入
+		}
+		if gotID == "" {
+			gotID = oid
+		}
+		okIDs = append(okIDs, gotID)
+		if g := strings.TrimSpace(guide); g != "" {
+			parts = append(parts, fmt.Sprintf("来源：%s\n%s", gotID, g))
+		}
+	}
+	if len(okIDs) == 0 {
+		// 全部本体拉取失败 → 构建平面不可达（装配侧降级）。
+		msg := "构建平面不可达"
+		if lastErr != nil {
+			msg += ": " + lastErr.Error()
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
+		return
+	}
+	respID := strings.Join(okIDs, ",")
+	if respID == "" {
+		respID = p.ID
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ontology_id": respID, "guide": strings.Join(parts, "\n\n")})
+}
+
+// fetchOntologyGuide 从构建平面拉取单个本体指引（5s 预算），
+// 解析统一形状 {ontology_id, guide}；非 200 或解析失败返回错误（由调用方 best-effort 处理）。
+func (s *Server) fetchOntologyGuide(ctx context.Context, ontologyID string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	url := fmt.Sprintf("%s/api/ontologies/%s/guide", s.Manager.BuildURL, ontologyID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", err
+	}
+	resp, err := s.Manager.HTTP.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return "", "", fmt.Errorf("%s %s", resp.Status, string(b))
+	}
+	var out struct {
+		OntologyID string `json:"ontology_id"`
+		Guide      string `json:"guide"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", "", err
+	}
+	return out.OntologyID, out.Guide, nil
+}
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.List()
