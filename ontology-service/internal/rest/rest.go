@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -485,8 +486,8 @@ func (s *Server) listVersions(w http.ResponseWriter, r *http.Request) {
 // versionOriginal GET /api/ontologies/{id}/versions/{version}/original：按版本读取原始源文件（REQ-93 源码视图）。
 func (s *Server) versionOriginal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var v int
-	if _, err := fmt.Sscanf(r.PathValue("version"), "%d", &v); err != nil || v <= 0 {
+	v, err := strconv.Atoi(r.PathValue("version"))
+	if err != nil || v <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "版本号必须是正整数"})
 		return
 	}
@@ -506,9 +507,10 @@ func (s *Server) versionOriginal(w http.ResponseWriter, r *http.Request) {
 	case "csv":
 		ct = "text/csv; charset=utf-8"
 	case "graphml":
-		ct = "application/xml; charset=utf-8"
+		ct = "application/graphml; charset=utf-8"
 	}
 	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Ontology-Version", strconv.Itoa(v))
 	_, _ = w.Write([]byte(content))
 }
 
