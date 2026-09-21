@@ -64,8 +64,10 @@ type Conversation struct {
 	EnableKB         bool    `json:"enable_kb"`
 	RuntimeProfileID *string `json:"runtime_profile_id"` // 本体运行方案（外部引用，O-6）
 	OntologyEnabled  bool    `json:"ontology_enabled"`
-	TopK             int     `json:"top_k"`
-	MinScore         float64 `json:"min_score"`
+	// EnableSkills 会话级技能开关（nil=未指定：创建默认开、更新保留原值）
+	EnableSkills *bool   `json:"enable_skills,omitempty"`
+	TopK         int     `json:"top_k"`
+	MinScore     float64 `json:"min_score"`
 	CreatedAt        string  `json:"created_at"`
 	UpdatedAt        string  `json:"updated_at"`
 }

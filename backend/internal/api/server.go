@@ -81,6 +81,10 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/model-connections/{id}", s.deleteConnection)
 	m.HandleFunc("PUT /api/model-connections/{id}/default", s.setDefaultConnection)
 	m.HandleFunc("POST /api/model-connections/test", s.testConnection)
+	m.HandleFunc("POST /api/model-connections/{id}/list-models", s.listConnectionModels)
+
+	// 使用统计（按 model|agent|project 聚合 run_event）
+	m.HandleFunc("GET /api/stats/usage", s.usageStats)
 
 	// 工具注册表（REQ-24 工具勾选）
 	m.HandleFunc("GET /api/tools", s.listTools)

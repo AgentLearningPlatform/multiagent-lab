@@ -47,6 +47,33 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
+	// 迁移记录表：SQLite 不支持 ADD COLUMN IF NOT EXISTS，通过记录已应用迁移
+	// 保证 006 等 ALTER 型迁移在重复启动时幂等（001~005 均为 IF NOT EXISTS/OR IGNORE，重放安全）。
+	if _, err := s.DB.Exec(`CREATE TABLE IF NOT EXISTS schema_migration (
+		name TEXT PRIMARY KEY,
+		applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		return fmt.Errorf("create schema_migration: %w", err)
+	}
+	applied := map[string]bool{}
+	rows, err := s.DB.Query(`SELECT name FROM schema_migration`)
+	if err != nil {
+		return fmt.Errorf("read schema_migration: %w", err)
+	}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		applied[n] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
 		return err
@@ -57,12 +84,18 @@ func (s *Store) migrate() error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
+		if applied[name] {
+			continue
+		}
 		b, err := migrationsFS.ReadFile("migrations/" + name)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 		if _, err := s.DB.Exec(string(b)); err != nil {
 			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
+		if _, err := s.DB.Exec(`INSERT OR IGNORE INTO schema_migration (name) VALUES (?)`, name); err != nil {
+			return fmt.Errorf("record migration %s: %w", name, err)
 		}
 	}
 	return nil

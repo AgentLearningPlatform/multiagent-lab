@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -194,6 +195,71 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "elapsed_ms": elapsed})
+}
+
+// listConnectionModels 自动发现模型：解密锚点连接的 Key，调用 OpenAI 兼容 GET {base_url}/models，
+// 返回去重排序后的模型 id 列表（契约：{"models":["id1",...]}）。上游失败返回 502 + {"error": detail}。
+func (s *Server) listConnectionModels(w http.ResponseWriter, r *http.Request) {
+	rec, err := s.Store.GetConnectionRecord(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err) // 连接不存在 → 404
+		return
+	}
+	key, err := s.Box.Decrypt(rec.Encrypted)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(rec.Conn.BaseURL, "/models"), nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("HTTP %d, bad response: %v", resp.StatusCode, err)})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg := fmt.Sprintf("HTTP %d", resp.StatusCode)
+		if out.Error != nil {
+			msg += ": " + out.Error.Message
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
+		return
+	}
+
+	seen := map[string]bool{}
+	models := []string{}
+	for _, m := range out.Data {
+		if m.ID == "" || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		models = append(models, m.ID)
+	}
+	sort.Strings(models)
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
 // probeChat 用最小请求测 chat 连通（回复长度限制 8 token 级别）。

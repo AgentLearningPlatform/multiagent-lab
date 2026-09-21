@@ -55,6 +55,7 @@ type assembleScope struct {
 	Mount          string // 本体运行方案 profile id（空=未挂载）
 	ProjectID      string // 项目文件目录归属（M11；空=agent 会话）
 	ConversationID string // 产物归属会话
+	SkillsDisabled bool   // 会话级技能开关：enable_skills=false 时本次装配不注入技能
 }
 
 func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *store.Conversation) (*BuildResult, error) {
@@ -69,9 +70,13 @@ func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *stor
 		if conv.ProjectID != nil {
 			sc.ProjectID = *conv.ProjectID
 		}
+		// 会话级技能开关（§6.12）：false 时本次装配剥离 Skills（单点生效，覆盖指令注入 + 工具白名单 + skill.loaded）
+		if conv.EnableSkills != nil && !*conv.EnableSkills {
+			sc.SkillsDisabled = true
+		}
 	}
 	if conv == nil || conv.Scope != "project" {
-		return a.assembleSingle(ctx, agent, sc)
+		return a.assembleSingle(ctx, sc.skillGated(agent), sc)
 	}
 	if sc.ProjectID == "" {
 		return nil, fmt.Errorf("project conversation missing project_id")
@@ -81,6 +86,18 @@ func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *stor
 		return nil, fmt.Errorf("load project: %w", err)
 	}
 	return a.assembleProject(ctx, p, sc)
+}
+
+// skillGated 会话级技能开关：enable_skills=false 时返回 Skills 置空的 Agent 副本。
+// ComposeInstruction（注入指令）与 assembleTools（技能工具白名单）均读取 ag.Skills，
+// 剥离后二者自然跳过，LoadedSkills 随之为空 → runner 不发出 skill.loaded 事件。
+func (sc assembleScope) skillGated(ag *store.Agent) *store.Agent {
+	if ag == nil || !sc.SkillsDisabled {
+		return ag
+	}
+	cp := *ag
+	cp.Skills = []string{}
+	return &cp
 }
 
 // assembleSingle 单 Agent 装配（agent 直聊 / 项目 single 模式）。
@@ -127,6 +144,7 @@ func (a *Assembler) assembleProject(ctx context.Context, p *store.Project, sc as
 		if gerr != nil {
 			return nil, fmt.Errorf("load member agent %s: %w", m.AgentID, gerr)
 		}
+		ag = sc.skillGated(ag) // 会话级技能开关：项目成员同样受控
 		if m.AgentID == coordID {
 			coord = ag
 			continue
@@ -139,6 +157,7 @@ func (a *Assembler) assembleProject(ctx context.Context, p *store.Project, sc as
 		if err != nil {
 			return nil, err
 		}
+		coord = sc.skillGated(coord)
 		warns = append(warns, fmt.Sprintf("项目协调者 %q 不在成员列表，已回退首个成员", p.Coordinator))
 	}
 

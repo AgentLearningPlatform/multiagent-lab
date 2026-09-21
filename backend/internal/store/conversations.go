@@ -8,8 +8,8 @@ import (
 func scanConversation(row interface{ Scan(...any) error }) (*Conversation, error) {
 	var c Conversation
 	var agentID, projectID, kbID, profileID sql.NullString
-	var enableKB, ontoEnabled int
-	err := row.Scan(&c.ID, &c.Scope, &agentID, &projectID, &c.Title, &kbID, &enableKB, &profileID, &ontoEnabled, &c.TopK, &c.MinScore, &c.CreatedAt, &c.UpdatedAt)
+	var enableKB, ontoEnabled, enableSkills int
+	err := row.Scan(&c.ID, &c.Scope, &agentID, &projectID, &c.Title, &kbID, &enableKB, &profileID, &ontoEnabled, &c.TopK, &c.MinScore, &c.CreatedAt, &c.UpdatedAt, &enableSkills)
 	if err != nil {
 		return nil, err
 	}
@@ -27,10 +27,12 @@ func scanConversation(row interface{ Scan(...any) error }) (*Conversation, error
 	}
 	c.EnableKB = enableKB == 1
 	c.OntologyEnabled = ontoEnabled == 1
+	es := enableSkills == 1
+	c.EnableSkills = &es
 	return &c, nil
 }
 
-const convCols = `id,scope,agent_id,project_id,title,kb_id,enable_kb,runtime_profile_id,ontology_enabled,top_k,min_score,created_at,updated_at`
+const convCols = `id,scope,agent_id,project_id,title,kb_id,enable_kb,runtime_profile_id,ontology_enabled,top_k,min_score,created_at,updated_at,enable_skills`
 
 // ConversationFilter 会话列表过滤。
 type ConversationFilter struct {
@@ -102,18 +104,28 @@ func (s *Store) CreateConversation(c *Conversation) (*Conversation, error) {
 	if c.TopK == 0 {
 		c.TopK = 4
 	}
-	_, err := s.DB.Exec(`INSERT INTO conversation (`+convCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		c.ID, c.Scope, c.AgentID, c.ProjectID, c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), now())
+	// enable_skills：未指定时默认开启（前端 full-replace PUT 会显式携带）
+	enableSkills := true
+	if c.EnableSkills != nil {
+		enableSkills = *c.EnableSkills
+	}
+	_, err := s.DB.Exec(`INSERT INTO conversation (`+convCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.ID, c.Scope, c.AgentID, c.ProjectID, c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), now(), boolInt(enableSkills))
 	if err != nil {
 		return nil, err
 	}
 	return s.GetConversation(c.ID)
 }
 
-// UpdateConversation 更新标题与对话级配置（kb / 本体运行方案）。
+// UpdateConversation 更新标题与对话级配置（kb / 本体运行方案 / 技能开关）。
 func (s *Store) UpdateConversation(c *Conversation) (*Conversation, error) {
-	res, err := s.DB.Exec(`UPDATE conversation SET title=?,kb_id=?,enable_kb=?,runtime_profile_id=?,ontology_enabled=?,top_k=?,min_score=?,updated_at=? WHERE id=?`,
-		c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), c.ID)
+	// enable_skills 为 nil 时保留原值（COALESCE），非 nil 时覆盖
+	var enableArg any
+	if c.EnableSkills != nil {
+		enableArg = boolInt(*c.EnableSkills)
+	}
+	res, err := s.DB.Exec(`UPDATE conversation SET title=?,kb_id=?,enable_kb=?,runtime_profile_id=?,ontology_enabled=?,top_k=?,min_score=?,enable_skills=COALESCE(?,enable_skills),updated_at=? WHERE id=?`,
+		c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, enableArg, now(), c.ID)
 	if err != nil {
 		return nil, err
 	}
