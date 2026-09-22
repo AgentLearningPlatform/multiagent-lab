@@ -185,6 +185,16 @@ type validateDirResp struct {
 }
 
 // validateProjectDir POST /api/projects/validate-dir：校验本地目录与 git 状态（REQ-101）。
+// isWindowsPath 识别 Windows 盘符路径形态（C:/ 或 C:\，大小写盘符均可）。
+// 用于跨平台场景：Linux 运行时接受 Windows 客户端提交的本地目录（如挂载盘）。
+func isWindowsPath(p string) bool {
+	if len(p) < 3 {
+		return false
+	}
+	c := p[0]
+	return (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') && p[1] == ':' && (p[2] == '\\' || p[2] == '/')
+}
+
 func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Dir string `json:"dir"`
@@ -197,6 +207,11 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 	if dir == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必填"})
 		return
+	}
+	// Windows 路径支持：filepath.IsAbs 在 Linux 运行时对 `C:\...` 返回 false，
+	// 显式识别盘符形态（C:/ 或 C:\，含正斜杠变体），归一为运行时格式后校验。
+	if isWindowsPath(dir) {
+		dir = filepath.FromSlash(dir)
 	}
 	if !filepath.IsAbs(dir) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必须是绝对路径"})
