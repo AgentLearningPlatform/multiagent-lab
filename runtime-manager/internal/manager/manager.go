@@ -4,6 +4,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,8 +20,8 @@ import (
 
 type Manager struct {
 	Store       *store.Store
-	Engine      engine.Runtime
-	BuildURL    string // 构建平面地址（拉取本体形态）
+	Engines     map[string]engine.Runtime // engine 名 → 适配器（oxigraph/fuseki；O6 起多引擎）
+	BuildURL    string                    // 构建平面地址（拉取本体形态）
 	LogDir      string
 	HTTP        *http.Client
 	HealthTries int // 启动健康检查重试次数
@@ -29,14 +30,34 @@ type Manager struct {
 	procs map[string]*engine.Process // profileID → 运行句柄（进程内态，重启 Manager 后按 stopped 处理）
 }
 
-func New(st *store.Store, eng engine.Runtime, buildURL, logDir string) *Manager {
+func New(st *store.Store, buildURL, logDir string) *Manager {
 	_ = os.MkdirAll(logDir, 0o755)
 	return &Manager{
-		Store: st, Engine: eng, BuildURL: strings.TrimRight(buildURL, "/"), LogDir: logDir,
+		Store: st, Engines: map[string]engine.Runtime{}, BuildURL: strings.TrimRight(buildURL, "/"), LogDir: logDir,
 		HTTP:        &http.Client{Timeout: 30 * time.Second},
 		HealthTries: 20,
 		procs:       map[string]*engine.Process{},
 	}
+}
+
+// RegisterEngine 注册引擎适配器（main 启动时按环境探测注册）。
+func (m *Manager) RegisterEngine(name string, eng engine.Runtime) {
+	m.Engines[name] = eng
+}
+
+// engineFor 按 profile.engine 取适配器；未注册给出可自助的提示。
+func (m *Manager) engineFor(name string) (engine.Runtime, error) {
+	if eng, ok := m.Engines[name]; ok {
+		return eng, nil
+	}
+	hint := "请检查 runtimed 启动配置（对应引擎二进制未就绪或未注册）"
+	if name == "fuseki" {
+		hint = "请下载 apache-jena-fuseki 并设置 FUSEKI_BIN 指向 fuseki-server 脚本（JDK 17+），重启 runtimed"
+	}
+	if name == "oxigraph" {
+		hint = "请安装 oxigraph_server 并加入 PATH（或设置 OXIGRAPH_BIN），重启 runtimed"
+	}
+	return nil, fmt.Errorf("引擎 %q 未注册: %s", name, hint)
 }
 
 // FetchTTL 从构建平面拉取本体 TTL 形态（original turtle 直接回原文；自建经 spec→sidecar 导出）。
@@ -85,7 +106,12 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 		port = nextPort(m.Store)
 		_ = m.Store.SetPort(id, port)
 	}
-	proc, err := m.Engine.Start(ctx, id, port, ttls)
+	eng, err := m.engineFor(p.Engine)
+	if err != nil {
+		_ = m.Store.SetStatus(id, "error", err.Error(), "")
+		return err
+	}
+	proc, err := m.startEngine(ctx, eng, p, port, ttls)
 	if err != nil {
 		_ = m.Store.SetStatus(id, "error", err.Error(), "")
 		return err
@@ -101,7 +127,7 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 		if ctx.Err() != nil {
 			break
 		}
-		lastErr = m.Engine.HealthCheck(ctx, proc.Endpoint)
+		lastErr = eng.HealthCheck(ctx, proc.Endpoint)
 		if lastErr == nil {
 			_ = m.Store.SetStatus(id, "running", "", "")
 			return nil
@@ -163,6 +189,25 @@ func (m *Manager) ProcEndpoint(id string) (string, error) {
 		return p.Endpoint, nil
 	}
 	return "", fmt.Errorf("方案 %s 未在运行", id)
+}
+
+// startEngine 按引擎能力分发启动（实现 ReasoningRuntime 的引擎透传推理开关，O6）。
+func (m *Manager) startEngine(ctx context.Context, eng engine.Runtime, p *store.Profile, port int, ttls map[string]string) (*engine.Process, error) {
+	if rr, ok := eng.(engine.ReasoningRuntime); ok {
+		return rr.StartWithReasoning(ctx, p.ID, port, ttls, profileReasoning(p.Config))
+	}
+	return eng.Start(ctx, p.ID, port, ttls)
+}
+
+// profileReasoning 从 profile config JSON 读 reasoning 开关（O6：fuseki 推理对照基座）。
+func profileReasoning(cfgJSON string) bool {
+	var cfg struct {
+		Reasoning bool `json:"reasoning"`
+	}
+	if cfgJSON != "" {
+		_ = json.Unmarshal([]byte(cfgJSON), &cfg)
+	}
+	return cfg.Reasoning
 }
 
 func nextPort(st *store.Store) int {

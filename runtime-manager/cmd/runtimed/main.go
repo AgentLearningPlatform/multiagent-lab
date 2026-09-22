@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/engine/fuseki"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/engine/oxigraph"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/facade"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/manager"
@@ -38,7 +39,19 @@ func main() {
 		log.Fatalf("打开存储失败: %v", err)
 	}
 	eng := oxigraph.New(oxigraphBin, dataDir, logDir)
-	mg := manager.New(st, eng, buildURL, logDir)
+	mg := manager.New(st, buildURL, logDir)
+	mg.RegisterEngine("oxigraph", eng)
+	// O6：Fuseki 引擎（FUSEKI_BIN 指向 fuseki-server 启动脚本；未配置则不注册，创建 fuseki 方案时给可自助提示）
+	fusekiBin := env("FUSEKI_BIN", "")
+	fusekiJava := env("FUSEKI_JAVA", "")
+	if fusekiBin != "" {
+		if _, err := os.Stat(fusekiBin); err == nil {
+			mg.RegisterEngine("fuseki", fuseki.New(fusekiBin, fusekiJava, dataDir, logDir))
+			log.Printf("[runtimed] fuseki 引擎已注册 (%s, java=%s)", fusekiBin, fusekiJava)
+		} else {
+			log.Printf("[runtimed] FUSEKI_BIN=%s 不存在，fuseki 引擎未注册", fusekiBin)
+		}
+	}
 	fc := facade.New(st, mg.ProcEndpoint)
 	if env("TRACE_SPARQL", "on") == "off" { // 翻译透视开关（REQ-94，默认开）
 		fc.TraceSparql = false

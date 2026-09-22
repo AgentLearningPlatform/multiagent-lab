@@ -83,10 +83,10 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Engine == "" {
-		req.Engine = "oxigraph" // P1 唯一引擎
+		req.Engine = "oxigraph" // 默认引擎
 	}
-	if req.Engine != "oxigraph" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "P1 仅支持 oxigraph 引擎（fuseki/memory_graph 为 P2）"})
+	if req.Engine != "oxigraph" && req.Engine != "fuseki" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "仅支持 oxigraph / fuseki 引擎（memory_graph 为 P2，oo 为独立托管非 managed 引擎）"})
 		return
 	}
 	if req.Config == "" {

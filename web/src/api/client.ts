@@ -251,7 +251,7 @@ export const api = {
 
   // ---- M8 运行平面 :8090 /api/runtime-profiles* ----
   listRuntimeProfiles: () => req<RuntimeProfile[]>('/api/runtime-profiles'),
-  createRuntimeProfile: (p: { name: string; engine?: string; ontology_ids: string[]; config?: Record<string, unknown>; port?: number }) =>
+  createRuntimeProfile: (p: { name: string; engine?: string; ontology_ids: string[]; config?: string | Record<string, unknown>; port?: number }) =>
     req<RuntimeProfile>('/api/runtime-profiles', { method: 'POST', body: JSON.stringify(p) }),
   updateRuntimeProfile: (id: string, p: { name: string; ontology_ids?: string[]; config?: Record<string, unknown>; port?: number }) =>
     req<RuntimeProfile>(`/api/runtime-profiles/${id}`, { method: 'PUT', body: JSON.stringify(p) }),

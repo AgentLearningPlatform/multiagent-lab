@@ -15,6 +15,7 @@ import {
   Space,
   Spin,
   Steps,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -51,15 +52,15 @@ type EngineKey = 'oxigraph' | 'fuseki' | 'oo' | 'cayley'
 const ONTO_ENGINE_KEY = 'eino.onto.engineKey'
 
 const ENGINES: { key: EngineKey; label: string; state: 'ok' | 'soon' | 'guide' | 'disabled'; desc: string }[] = [
-  { key: 'oxigraph', label: 'Oxigraph', state: 'ok', desc: 'SPARQL 型 · P1 唯一引擎（无推理）' },
-  { key: 'fuseki', label: 'Fuseki', state: 'soon', desc: 'SPARQL 型 · 带推理（O6 交付后点亮）' },
+  { key: 'oxigraph', label: 'Oxigraph', state: 'ok', desc: 'SPARQL 型 · 轻量快速（无推理）' },
+  { key: 'fuseki', label: 'Fuseki', state: 'ok', desc: 'SPARQL 型 · RDFS/OWL 推理可配（O6）' },
   { key: 'oo', label: 'Open Ontologies', state: 'guide', desc: '独立托管双轨 · 引导页（非 managed 引擎）' },
   { key: 'cayley', label: 'Cayley', state: 'disabled', desc: '轻量内存图 · P2 可选（D-O5 v0.4）' },
 ]
 
 const STATE_TAG: Record<EngineKey, { color: string; text: string }[]> = {
   oxigraph: [{ color: 'green', text: '可用' }],
-  fuseki: [{ color: 'gold', text: '排期中' }],
+  fuseki: [{ color: 'green', text: '可用' }, { color: 'blue', text: '推理' }],
   oo: [{ color: 'cyan', text: '引导页' }],
   cayley: [{ color: 'default', text: 'P2' }],
 }
@@ -72,8 +73,14 @@ function readEngineKey(): EngineKey {
 /** last_error 关键词 → 友好预检文案（D-O9：engines 预检段未提供前的兜底） */
 function friendlyEngineError(err?: string): string | null {
   if (!err) return null
-  if (err.includes('executable not found') || err.includes('未找到引擎可执行文件') || err.includes('not found'))
+  if (err.includes('未找到 fuseki-server') || err.includes('FUSEKI_BIN'))
+    return 'Fuseki 未就绪：请下载 apache-jena-fuseki 并解压，设置 FUSEKI_BIN 指向 fuseki-server 启动脚本（需 JDK 17+），重启 runtimed。'
+  if (err.includes('未找到 java'))
+    return 'Java 未就绪：Fuseki 为 Java 进程（需 JDK 17+），请安装 JDK 并加入 PATH 或设置 FUSEKI_JAVA。'
+  if (err.includes('未找到引擎可执行文件') || err.includes('OXIGRAPH_BIN'))
     return '引擎可执行文件缺失：请安装 oxigraph_server 并加入 PATH（或设置 OXIGRAPH_BIN），详见部署文档。'
+  if (err.includes('未注册'))
+    return '引擎未注册：runtimed 启动时未探测到对应引擎二进制，请检查 FUSEKI_BIN / OXIGRAPH_BIN 配置后重启。'
   if (err.includes('address already in use') || err.includes('bind'))
     return '端口被占用：请更换方案端口后重试。'
   if (err.includes('load') && err.includes('失败'))
@@ -135,10 +142,6 @@ export default function RuntimePage() {
 
       {engineKey === 'oo' ? (
         <OpenOntologiesGuide />
-      ) : engineKey === 'fuseki' ? (
-        <Card className="work-card" size="small">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Fuseki 引擎随 O6 交付后点亮；届时支持推理开关与「推理对照」（REQ-94）。" />
-        </Card>
       ) : (
         <EngineProfilesPage engine={engineKey} />
       )}
@@ -374,6 +377,7 @@ function ProfileWizard({
   const [name, setName] = useState('')
   const [port, setPort] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [reasoning, setReasoning] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -382,6 +386,7 @@ function ProfileWizard({
       setName('')
       setPort(null)
       setSelectedIds([])
+      setReasoning(false)
     }
   }, [open])
 
@@ -398,11 +403,14 @@ function ProfileWizard({
     }
     setBusy(true)
     try {
+      // O6：fuseki 推理开关落 config.reasoning（启动时 Manager 读取并传引擎）
+      const cfg = engine === 'fuseki' ? JSON.stringify({ reasoning }) : undefined
       await api.createRuntimeProfile({
         name: name.trim(),
         engine,
         ontology_ids: selectedIds,
         ...(port ? { port } : {}),
+        ...(cfg ? { config: cfg } : {}),
       })
       showToast('运行方案已创建（启动后生效）')
       onCreated()
@@ -446,7 +454,7 @@ function ProfileWizard({
       />
       {step === 0 && (
         <Space direction="vertical" style={{ width: '100%' }} size={8}>
-          <Alert type="info" showIcon message={`本分组内固定为 ${engine}（P1 仅 Oxigraph 可用；Fuseki 随 O6 点亮）。`} />
+          <Alert type="info" showIcon message={`本分组内固定为 ${engine}（Oxigraph 轻量无推理；Fuseki 支持 RDFS/OWL 推理开关）。`} />
           <div className="onto-wizard-engine">
             <Tag color="green" style={{ margin: 0 }}>{engine}</Tag>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -481,6 +489,12 @@ function ProfileWizard({
             <span className="cfg-label">监听端口（可选，留空由 Manager 分配）</span>
             <InputNumber min={1} max={65535} value={port} onChange={(v) => setPort(typeof v === 'number' ? v : null)} style={{ width: 200 }} />
           </div>
+          {engine === 'fuseki' && (
+            <div className="onto-csv-field">
+              <span className="cfg-label">RDFS/OWL 推理（O6：开启后 subClassOf/subPropertyOf 等被推断三元组可查；对照实验建议同本体建两套方案一开一关）</span>
+              <Switch checked={reasoning} onChange={setReasoning} checkedChildren="开" unCheckedChildren="关" />
+            </div>
+          )}
           <Alert
             type="info"
             showIcon

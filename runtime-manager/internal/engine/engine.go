@@ -31,3 +31,9 @@ type Runtime interface {
 	// HealthCheck 探测引擎可用性（SPARQL ping）。
 	HealthCheck(ctx context.Context, endpoint string) error
 }
+
+// ReasoningRuntime 支持推理开关的引擎（O6：fuseki；config.reasoning=true 时启用 RDFS/OWL 推理）。
+type ReasoningRuntime interface {
+	Runtime
+	StartWithReasoning(ctx context.Context, profileID string, port int, ttls map[string]string, reasoning bool) (*Process, error)
+}
