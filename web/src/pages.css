@@ -489,3 +489,88 @@
 /* activity bar 占位图标（后续扩展） */
 .proj-bar-btn:disabled { opacity: .38; cursor: not-allowed; }
 .proj-bar-btn:disabled:hover { background: none; color: var(--c-ink-3); }
+
+/* ---- 本体模块四栏 IA（D-O11 / REQ-104）：模块侧边栏 + 引擎/路径二级导航 + 学习中心 ---- */
+.onto-nav { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; overflow: auto; }
+.onto-nav-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 10px; border-radius: 9px; border: 1px solid transparent;
+  background: none; cursor: pointer; text-align: left;
+  transition: background .16s ease, border-color .16s ease;
+}
+.onto-nav-item:hover { background: #eef0f6; }
+.onto-nav-item.active { background: #e9ebf7; border-color: #dbdefa; }
+.onto-nav-icon {
+  flex: none; width: 26px; height: 26px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--c-brand); background: #e6e8fb; border: 1px solid #dbdefa;
+}
+.onto-nav-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.onto-nav-label { font-size: 13px; font-weight: 600; color: var(--c-ink); }
+.onto-nav-item.active .onto-nav-label { color: var(--c-brand); }
+.onto-nav-desc { font-size: 10.5px; color: var(--c-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 引擎 / 构建路径二级导航（横排卡片） */
+.onto-engine-nav { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.onto-engine-item {
+  display: flex; flex-direction: column; gap: 5px; text-align: left;
+  border: 1px solid var(--c-line); border-radius: 10px; background: #fff;
+  padding: 10px 12px; cursor: pointer;
+  transition: box-shadow .16s ease, border-color .16s ease;
+}
+.onto-engine-item:hover { border-color: #d9dcec; box-shadow: 0 4px 14px rgba(28, 33, 48, .06); }
+.onto-engine-item.active { border-color: var(--c-brand); box-shadow: 0 0 0 2px rgba(79, 70, 229, .12); }
+.onto-engine-item.disabled { opacity: .5; cursor: not-allowed; }
+.onto-engine-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.onto-engine-label { font-size: 13px; font-weight: 600; color: var(--c-ink); flex: 1; min-width: 0; }
+.onto-engine-desc { font-size: 11px; color: var(--c-ink-3); line-height: 1.5; }
+
+/* 资产选择条（资产栏顶部统一列表） */
+.onto-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+.onto-picker-item {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  border: 1px solid var(--c-line); border-radius: 9px; background: #fff;
+  padding: 7px 10px; cursor: pointer; max-width: 260px;
+  transition: border-color .16s ease, background .16s ease;
+}
+.onto-picker-item:hover { background: #eef0f6; }
+.onto-picker-item.active { border-color: var(--c-brand); background: #e9ebf7; }
+.onto-picker-name { font-size: 12.5px; font-weight: 600; color: var(--c-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.onto-picker-item.active .onto-picker-name { color: var(--c-brand); }
+.onto-picker-meta { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--c-ink-3); }
+
+/* 方案卡片本体 chips */
+.onto-profile-ontos { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* 向导引擎行 */
+.onto-wizard-engine { display: flex; align-items: center; gap: 8px; }
+
+/* 学习中心：任务卡 / 方法论 / 对照卡 */
+.onto-learn-stage { display: flex; flex-direction: column; gap: 10px; }
+.onto-learn-method .ant-collapse-header { align-items: center; }
+.onto-learn-method-body { margin: 0; font-size: 12.5px; line-height: 1.8; color: var(--c-ink-2); }
+.onto-learn-tasks { display: flex; flex-direction: column; gap: 8px; }
+.onto-learn-tasks-head { display: flex; align-items: center; gap: 10px; font-size: 12.5px; font-weight: 700; color: var(--c-ink-2); }
+.onto-task-card {
+  border: 1px solid var(--c-line); border-radius: 10px; background: #fff;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+}
+.onto-task-card.done { border-color: #bbe7c8; background: #f4fbf6; }
+.onto-task-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.onto-task-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--c-ink); }
+.onto-task-card.done .onto-task-title { color: #16a34a; }
+.onto-task-body { font-size: 12.5px; color: var(--c-ink-2); line-height: 1.7; }
+.onto-task-body p { margin: 2px 0; }
+.onto-task-body ol { margin: 4px 0; padding-left: 20px; }
+.onto-task-accept { color: var(--c-ink-2); }
+.onto-learn-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.onto-learn-card {
+  border: 1px solid var(--c-line); border-radius: 10px; background: #fff;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;
+}
+.onto-learn-card-head { display: flex; align-items: center; gap: 8px; }
+.onto-learn-card-title { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--c-ink); }
+.onto-learn-card-line { margin: 0; font-size: 12px; color: var(--c-ink-2); line-height: 1.65; }
+
+/* CodeMirror 只读容器（源码视图） */
+.onto-cm-wrap { border: 1px solid var(--c-line); border-radius: 10px; overflow: hidden; }

@@ -1,0 +1,126 @@
+{
+  "version": "1.0",
+  "note": "学习任务卡（REQ-91 P1 尾档）。打卡 key 空间 task:<id>；前端 LearnPage 内嵌同构数据，本文件为随版本维护的内容资产事实源（P2 迁服务端 checklist 后以本文件为 seed）。",
+  "tasks": [
+    {
+      "id": "task_s1_first_ontology",
+      "stage": "s1",
+      "title": "建立第一个本体（三条来源路径各走一遍）",
+      "goal": "体会 S1 三条来源路径的差异与产物形态",
+      "prereq": [],
+      "steps": [
+        "创建内置示例（seed-sample）",
+        "用「AI 创建」生成一个小领域草稿并确认入库",
+        "粘贴一段 TTL 走「导入文件」（观察导入报告与有损警告）"
+      ],
+      "acceptance_question": "三条路径的产物分别是什么形态？哪条有损、为什么？",
+      "tools": ["builtin_import", "builtin_ai_draft", "builtin_seed"],
+      "difficulty": 1
+    },
+    {
+      "id": "task_s2_model_cq",
+      "stage": "s2",
+      "title": "从 CQ 到 Spec：为一个问题建模",
+      "goal": "体验问题驱动建模",
+      "prereq": ["task_s1_first_ontology"],
+      "steps": [
+        "写下 3 条能力问题",
+        "在 Spec 编辑器为每条 CQ 补概念与关系",
+        "保存并观察版本号递增"
+      ],
+      "acceptance_question": "你的哪条 CQ 需要跨概念的关系才能回答？",
+      "tools": ["builtin_edit"],
+      "difficulty": 1
+    },
+    {
+      "id": "task_s3_break_references",
+      "stage": "s3",
+      "title": "故意制造一次校验失败",
+      "goal": "理解引用完整性校验拦住了什么",
+      "prereq": ["task_s2_model_cq"],
+      "steps": [
+        "在 Spec 里让某关系指向未定义的概念",
+        "尝试保存（观察校验错误表）",
+        "修正后重新保存"
+      ],
+      "acceptance_question": "校验在构建平面还是运行平面执行？为什么不允许保存坏本体？",
+      "tools": ["builtin_validate"],
+      "difficulty": 1
+    },
+    {
+      "id": "task_s4_read_graph",
+      "stage": "s4",
+      "title": "读图：从可视化找一条继承链",
+      "goal": "用 S4 图谱理解层次结构",
+      "prereq": ["task_s2_model_cq"],
+      "steps": [
+        "打开资产详情「可视化」",
+        "找到最深的一条继承链",
+        "点击节点查看实例数徽标"
+      ],
+      "acceptance_question": "虚线与实线分别代表什么？",
+      "tools": ["builtin_graph"],
+      "difficulty": 1
+    },
+    {
+      "id": "task_s5_run_profile",
+      "stage": "s5",
+      "title": "把本体部署为运行方案",
+      "goal": "理解构建/运行解耦与显式重载",
+      "prereq": ["task_s3_break_references"],
+      "steps": [
+        "在运行栏新建方案（勾选本体）",
+        "启动并确认 running",
+        "回资产栏保存一个新版本，再回方案页执行「重载」"
+      ],
+      "acceptance_question": "为什么仓库更新后方案不会自动生效？（REQ-87 解耦语义）",
+      "tools": ["builtin_runtime"],
+      "difficulty": 2
+    },
+    {
+      "id": "task_s5_reload_semantics",
+      "stage": "s5",
+      "title": "多方案并存对照",
+      "goal": "体会同一本体的多套部署视图",
+      "prereq": ["task_s5_run_profile"],
+      "steps": [
+        "用不同端口再建一套方案（加载同一本体）",
+        "分别启动",
+        "停止其中一套，确认另一套与普通对话不受影响（NFR-O-2 故障隔离）"
+      ],
+      "acceptance_question": "两套方案的查询结果一致吗？停止一套后挂载它的对话看到什么提示？",
+      "tools": ["builtin_runtime"],
+      "difficulty": 2
+    },
+    {
+      "id": "task_s6_facade",
+      "stage": "s6",
+      "title": "认识 facade：4 个固定工具",
+      "goal": "理解统一 MCP 契约对所有运行时类型一致",
+      "prereq": ["task_s5_run_profile"],
+      "steps": [
+        "打开方案详情「facade 与工具」",
+        "阅读 4 个 onto_* 工具签名",
+        "展开「翻译透视」看一次调用的 SPARQL 原文"
+      ],
+      "acceptance_question": "onto_neighbors 返回什么？翻译透视图里 SPARQL 是谁生成的？",
+      "tools": ["builtin_facade"],
+      "difficulty": 2
+    },
+    {
+      "id": "task_s7_agent_query",
+      "stage": "s7",
+      "title": "让 Agent 用本体回答跨概念问题",
+      "goal": "验证对话挂载与查询全链路",
+      "prereq": ["task_s6_facade"],
+      "steps": [
+        "在对话输入框「本体增强」chip 选择 running 方案",
+        "提问一个需要 neighbors 的问题",
+        "在时间线观察工具调用卡片，回方案详情看透视记录"
+      ],
+      "acceptance_question": "Agent 调用了哪个工具？方案的哪个端点承接了这次查询？",
+      "tools": ["builtin_facade", "builtin_trace"],
+      "difficulty": 2
+    }
+  ]
+}
