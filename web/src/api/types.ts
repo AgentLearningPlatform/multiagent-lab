@@ -397,6 +397,49 @@ export interface SemanticaStats {
   decisions: number
 }
 
+// ---- Semantica 审计/溯源（REQ-101，§4.9.4）----
+
+/** 因果/先例关系类型（POST /api/semantica/causal） */
+export type SemanticaCausalType = 'CAUSED' | 'INFLUENCED' | 'PRECEDENT_FOR'
+
+/** 决策链节点（GET /api/semantica/decision-chain/{id}；worker 防御式归一化） */
+export interface SemanticaChainNode {
+  id: string
+  category?: string | null
+  scenario?: string | null
+  outcome?: string | null
+  confidence?: number | string | null
+  relation?: string | null
+  ts?: string | null
+}
+
+export interface SemanticaDecisionChain {
+  decision_id: string
+  chain: SemanticaChainNode[] | null
+  warnings?: string[] | null
+}
+
+/** PROV-O 溯源条目（GET /api/semantica/lineage/{entity_id}；source/metadata/type 形状不定） */
+export interface SemanticaProvNode {
+  id: string
+  source?: unknown
+  metadata?: unknown
+  type?: unknown
+}
+
+export interface SemanticaLineage {
+  entity_id: string
+  lineage: SemanticaProvNode[] | null
+  warnings?: string[] | null
+}
+
+export interface SemanticaCausalResult {
+  ok: boolean
+  from_id: string
+  to_id: string
+  type: string
+}
+
 // ---- P2 本体增量（REQ-95 版本 diff / REQ-96 CSV 灌装 / REQ-83 fork） ----
 
 /** diff 字段级变化：from → to（REQ-95） */
