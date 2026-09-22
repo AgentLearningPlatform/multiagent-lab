@@ -47,6 +47,7 @@ type Project struct {
 	CollabMode   string   `json:"collab_mode"`   // single | agent_as_tool | transfer
 	WorkflowMode string   `json:"workflow_mode"` // free | sequential | parallel | loop (P1)
 	Constraints  string   `json:"constraints"`   // 项目级统一约束（P1）
+	LocalDir     string   `json:"local_dir"`     // 绑定的本地目录绝对路径（REQ-101 v0.17；空=未绑定）
 	AgentIDs     []string `json:"agent_ids"`     // 成员 Agent
 	Coordinator  string   `json:"coordinator"`   // 主 Agent（role=coordinator）
 	CreatedAt    string   `json:"created_at"`
@@ -68,8 +69,8 @@ type Conversation struct {
 	EnableSkills *bool   `json:"enable_skills,omitempty"`
 	TopK         int     `json:"top_k"`
 	MinScore     float64 `json:"min_score"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
 // Message 消息（role: user/assistant/system/tool）。

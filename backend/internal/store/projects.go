@@ -11,7 +11,7 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var p Project
 	var constraints string
 	var agentIDs string
-	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.CollabMode, &p.WorkflowMode, &constraints, &agentIDs, &p.Coordinator, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.CollabMode, &p.WorkflowMode, &constraints, &agentIDs, &p.Coordinator, &p.CreatedAt, &p.UpdatedAt, &p.LocalDir)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,7 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 const projectCols = `p.id, p.name, p.description, p.collab_mode, p.workflow_mode, p.constraints,
  COALESCE((SELECT json_group_array(agent_id) FROM project_agent pa WHERE pa.project_id = p.id), '[]') AS agent_ids,
  COALESCE((SELECT agent_id FROM project_agent pa WHERE pa.project_id = p.id AND pa.role = 'coordinator' LIMIT 1), '') AS coordinator,
- p.created_at, p.updated_at`
+ p.created_at, p.updated_at, p.local_dir`
 
 // ListProjects 返回全部项目。
 func (s *Store) ListProjects() ([]*Project, error) {
@@ -67,8 +67,8 @@ func (s *Store) CreateProject(p *Project) (*Project, error) {
 	if p.WorkflowMode == "" {
 		p.WorkflowMode = "free"
 	}
-	_, err := s.DB.Exec(`INSERT INTO project (id,name,description,collab_mode,workflow_mode,constraints,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`,
-		p.ID, p.Name, p.Description, p.CollabMode, p.WorkflowMode, p.Constraints, now(), now())
+	_, err := s.DB.Exec(`INSERT INTO project (id,name,description,collab_mode,workflow_mode,constraints,local_dir,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+		p.ID, p.Name, p.Description, p.CollabMode, p.WorkflowMode, p.Constraints, p.LocalDir, now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -80,8 +80,8 @@ func (s *Store) CreateProject(p *Project) (*Project, error) {
 
 // UpdateProject 更新项目基础字段。
 func (s *Store) UpdateProject(p *Project) (*Project, error) {
-	res, err := s.DB.Exec(`UPDATE project SET name=?,description=?,collab_mode=?,workflow_mode=?,constraints=?,updated_at=? WHERE id=?`,
-		p.Name, p.Description, p.CollabMode, p.WorkflowMode, p.Constraints, now(), p.ID)
+	res, err := s.DB.Exec(`UPDATE project SET name=?,description=?,collab_mode=?,workflow_mode=?,constraints=?,local_dir=?,updated_at=? WHERE id=?`,
+		p.Name, p.Description, p.CollabMode, p.WorkflowMode, p.Constraints, p.LocalDir, now(), p.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict

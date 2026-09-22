@@ -49,6 +49,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/projects/{id}/files", s.listProjectFiles)
 	m.HandleFunc("POST /api/projects/{id}/files", s.uploadProjectFile)
 	m.HandleFunc("GET /api/projects/{id}/files/{fid}/content", s.downloadProjectFile)
+	// M12 REQ-101/102：项目绑定本地目录 + 目录文件视图
+	m.HandleFunc("POST /api/projects/validate-dir", s.validateProjectDir)
+	m.HandleFunc("GET /api/projects/{id}/dir-files", s.listDirFiles)
+	m.HandleFunc("GET /api/projects/{id}/dir-file", s.getDirFile)
 	m.HandleFunc("POST /api/agents", s.createAgent)
 	m.HandleFunc("GET /api/agents/{id}", s.getAgent)
 	m.HandleFunc("PUT /api/agents/{id}", s.updateAgent)

@@ -46,6 +46,11 @@ func NewSaveFileTool(deps SaveFileDeps) (einotool.BaseTool, error) {
 	if deps.Store == nil || deps.ProjectID == "" || deps.Root == "" {
 		return nil, fmt.Errorf("save_file: store/project/root required")
 	}
+	// REQ-101 v0.17：项目绑定本地目录时，产物根切换为 local_dir，否则回退 FilesRoot/{projectID}
+	root := filepath.Join(deps.Root, deps.ProjectID)
+	if p, perr := deps.Store.GetProject(deps.ProjectID); perr == nil && p != nil && p.LocalDir != "" {
+		root = p.LocalDir
+	}
 	bt, err := utils.InferTool("save_file",
 		"把生成的文本内容保存为项目文件（如报告、清单、代码、数据）。保存成功后文件出现在项目文件面板。",
 		func(_ context.Context, in saveFileIn) (*saveFileOut, error) {
@@ -53,7 +58,7 @@ func NewSaveFileTool(deps SaveFileDeps) (einotool.BaseTool, error) {
 			if name == "" || !safeFileName.MatchString(name) || strings.Contains(name, "..") {
 				return nil, fmt.Errorf("文件名不合法: %q（仅允许中英文、数字、下划线、短横线、点、空格）", in.Name)
 			}
-			dir := filepath.Join(deps.Root, deps.ProjectID)
+			dir := root
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return nil, fmt.Errorf("create project dir: %w", err)
 			}
