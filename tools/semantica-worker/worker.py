@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import threading
@@ -14,14 +15,16 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 SEMANTICA_VERSION = "0.6.8"
 PERSIST_PATH = Path(os.getenv("SEMANTICA_DATA_DIR", "./data/semantica/graph.json"))
+CAUSAL_TYPES = {"CAUSED", "INFLUENCED", "PRECEDENT_FOR"}  # add_causal_relationship 允许值
 _lock = threading.Lock()
 _graph = None
 _context = None
+_prov = None  # ProvenanceManager 单例（REQ-101 溯源）
 _warnings: list[str] = []
 _mcp = None  # FastMCP 单例（mcp SDK 可用时挂载 /mcp 端点，REQ-99 ③）
 
@@ -148,6 +151,78 @@ def _normalize_claims(result):
     return [{"text": str(_pick(c, "text", "claim", "content", "statement", default=c)),
              "source_node": _pick(c, "source_node", "source", "node", "provenance"),
              "score": _pick(c, "score", "similarity", "confidence")} for c in _as_list(raw)]
+
+# ---- 审计/溯源（REQ-101，§4.9.4）：决策链 + PROV-O lineage/export + Explorer 惰性挂载 ----
+def _normalize_node(x):
+    """归一化决策链/图节点（dict 或对象；标量退化为 {id}）。"""
+    if isinstance(x, (str, int, float)):
+        return {"id": str(x)}
+    return {"id": str(_pick(x, "id", "decision_id", "node_id", default="")),
+            "category": _pick(x, "category"), "scenario": _pick(x, "scenario"),
+            "outcome": _pick(x, "outcome"), "confidence": _pick(x, "confidence"),
+            "relation": _pick(x, "relationship_type", "relation", "type"),
+            "ts": _pick(x, "ts", "timestamp", "created_at", "time")}
+def _normalize_prov(x):
+    """归一化 PROV-O 溯源条目。"""
+    if isinstance(x, (str, int, float)):
+        return {"id": str(x)}
+    return {"id": str(_pick(x, "id", "entity_id", "name", "uri", default="")),
+            "source": _pick(x, "source", "source_node", "wasDerivedFrom", "was_derived_from"),
+            "metadata": _pick(x, "metadata", "meta"),
+            "type": _pick(x, "type", "entity_type", "prov_type")}
+def _ensure_prov():
+    """惰性创建 ProvenanceManager（storage 落在 SEMANTICA_DATA_DIR 同目录 audit.db）。"""
+    global _prov
+    if _prov is None:
+        from semantica.provenance import ProvenanceManager
+        PERSIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        db = str(PERSIST_PATH.parent / "audit.db")
+        try:
+            _prov = ProvenanceManager(storage_path=db)
+        except TypeError:
+            _prov = ProvenanceManager()
+    return _prov
+async def _asgi_json(send, status, msg):
+    body = json.dumps({"error": msg}, ensure_ascii=False).encode("utf-8")
+    await send({"type": "http.response.start", "status": status,
+                "headers": [(b"content-type", b"application/json; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
+class _ExplorerMount:
+    """惰性挂载 semantica Explorer ASGI（首次访问创建并缓存；剥离 X-Frame-Options 便于 iframe 嵌入）。
+
+    首次访问才 import/create_app——启动时图单例可能尚未就绪；未安装 semantica[explorer] 时返回 503 JSON，
+    不影响 worker 其余端点启动。
+    """
+    def __init__(self):
+        self._app = None
+    def _get_app(self):
+        if self._app is None:
+            from semantica.explorer.app import create_app
+            try:
+                from semantica.context import GraphSession
+                self._app = create_app(session=GraphSession(_ensure_graph()))
+            except TypeError:
+                self._app = create_app(_ensure_graph())
+        return self._app
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return
+        try:
+            sub = self._get_app()
+        except ImportError as e:  # noqa: BLE001
+            await _asgi_json(send, 503, f"semantica[explorer] 未安装: {e}")
+            return
+        except Exception as e:  # noqa: BLE001
+            await _asgi_json(send, 503, f"Explorer 初始化失败: {e}")
+            return
+        async def _send(message):
+            # 剥离 X-Frame-Options（存在才剥离；不存在则原样透传）
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [(k, v) for k, v in message.get("headers", [])
+                                                  if k.lower() != b"x-frame-options"]}
+            await send(message)
+        await sub(scope, receive, _send)
 
 # ---- MCP 端点（REQ-99 ③）：Streamable HTTP，与 REST 共享同一图/上下文单例 ----
 # 平台挂载：agent 级 mcp_servers 配 {name:"semantica", url:"http://127.0.0.1:8093/mcp"}
@@ -294,6 +369,9 @@ try:
 except ImportError as e:  # noqa: BLE001
     warnings.warn(f"mcp SDK 未安装（pip install 'mcp>=1.2.0,<2'），/mcp 端点不可用: {e}")
 
+# Explorer 审计视图（REQ-101，§4.9.2）：/explorer 惰性挂载，未安装 semantica[explorer] 时返回 503 JSON
+app.mount("/explorer", _ExplorerMount())
+
 # ---- 契约端点 ----
 class IngestReq(BaseModel):
     ontology_id: str
@@ -307,6 +385,10 @@ class DecisionReq(BaseModel):
     reasoning: str
     outcome: str
     confidence: float | None = None
+class CausalReq(BaseModel):
+    from_id: str
+    to_id: str
+    type: str = "CAUSED"
 
 @app.get("/health")
 def health():
@@ -399,6 +481,82 @@ def stats():
     return {"entities": _count(_pick(g, "entities", "nodes", default=[])),
             "relationships": _count(_pick(g, "relationships", "edges", default=[])),
             "decisions": _count(_pick(g, "decisions", default=[]))}
+
+@app.get("/decision-chain/{decision_id}")
+def decision_chain(decision_id: str):
+    """决策因果链（PROV-O 溯源，§4.9.4）。"""
+    g = _ensure_graph()
+    tracer = _method(g, "trace_decision_chain")
+    if tracer is None:
+        return {"decision_id": decision_id, "chain": [], "warnings": ["graph 不支持 trace_decision_chain"]}
+    try:
+        raw = tracer(decision_id)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": f"决策链追溯失败: {e}"})
+    items = _pick(raw, "chain", "decisions", "path", "nodes", default=raw)
+    return {"decision_id": decision_id, "chain": [_normalize_node(x) for x in _as_list(items)]}
+
+@app.get("/lineage/{entity_id}")
+def lineage(entity_id: str):
+    """实体溯源 lineage（ProvenanceManager，§4.9.4）。"""
+    try:
+        prov = _ensure_prov()
+    except ImportError as e:  # noqa: BLE001
+        return JSONResponse(status_code=503, content={"error": f"semantica provenance 不可用: {e}"})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": f"ProvenanceManager 初始化失败: {e}"})
+    getter = _method(prov, "get_lineage", "trace_lineage")
+    if getter is None:
+        return {"entity_id": entity_id, "lineage": [], "warnings": ["ProvenanceManager 不支持 lineage"]}
+    try:
+        raw = getter(entity_id)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": f"溯源查询失败: {e}"})
+    items = _pick(raw, "lineage", "entities", "path", "nodes", default=raw)
+    return {"entity_id": entity_id, "lineage": [_normalize_prov(x) for x in _as_list(items)]}
+
+@app.get("/prov-export")
+def prov_export(format: str = "turtle"):
+    """导出 PROV-O（默认 turtle，含 prov:Entity/wasDerivedFrom 等词汇）。"""
+    try:
+        prov = _ensure_prov()
+    except ImportError as e:  # noqa: BLE001
+        return JSONResponse(status_code=503, content={"error": f"semantica provenance 不可用: {e}"})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": f"ProvenanceManager 初始化失败: {e}"})
+    exporter = _method(prov, "export_prov", "export")
+    if exporter is None:
+        return JSONResponse(status_code=501, content={"error": "ProvenanceManager 不支持导出"})
+    try:
+        try:
+            text = exporter(format=format)
+        except TypeError:
+            text = exporter()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": f"PROV-O 导出失败: {e}"})
+    media = "text/turtle" if str(format).lower() in ("turtle", "ttl") else "text/plain; charset=utf-8"
+    return Response(content=str(text), media_type=media)
+
+@app.post("/causal")
+def causal(req: CausalReq):
+    """写入因果/先例关系（CAUSED|INFLUENCED|PRECEDENT_FOR，§4.9.4）。"""
+    rtype = (req.type or "CAUSED").upper()
+    if rtype not in CAUSAL_TYPES:
+        return JSONResponse(status_code=400, content={"error": f"不支持的因果类型: {req.type}（允许 {sorted(CAUSAL_TYPES)}）"})
+    g = _ensure_graph()
+    adder = _method(g, "add_causal_relationship")
+    if adder is None:
+        return JSONResponse(status_code=501, content={"error": "graph 不支持 add_causal_relationship"})
+    try:
+        with _lock:
+            try:
+                adder(req.from_id, req.to_id, relationship_type=rtype)
+            except TypeError:
+                adder(req.from_id, req.to_id, rtype)
+            _save_graph()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": f"因果关系写入失败: {e}"})
+    return {"ok": True, "from_id": req.from_id, "to_id": req.to_id, "type": rtype}
 
 if __name__ == "__main__":
     import uvicorn

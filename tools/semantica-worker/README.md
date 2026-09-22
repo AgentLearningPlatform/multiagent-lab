@@ -35,9 +35,26 @@ bash tools/semantica-worker/run.sh
 | POST | `/decision` | body `{category, scenario, reasoning, outcome, confidence?}` → 记录决策，返回 `{decision_id}` |
 | GET | `/decisions?limit=20` | 决策节点列表（id/category/scenario/outcome/confidence/ts） |
 | GET | `/stats` | 实体/关系/决策计数 |
+| GET | `/decision-chain/{decision_id}` | 决策因果链 `{decision_id, chain:[…]}`（PROV-O 溯源） |
+| GET | `/lineage/{entity_id}` | 实体 lineage `{entity_id, lineage:[…]}`（ProvenanceManager） |
+| GET | `/prov-export?format=turtle` | 导出 PROV-O（`text/turtle`，含 prov:Entity/wasDerivedFrom 等词汇） |
+| POST | `/causal` | body `{from_id, to_id, type?}`（`CAUSED`\|`INFLUENCED`\|`PRECEDENT_FOR`）→ `{ok:true}` |
+| GET | `/explorer/` … | semantica 自带 Explorer UI（ASGI 惰性挂载；未安装 `semantica[explorer]` 时 503） |
 
 主平台经反向代理同源访问：`/api/semantica/health` → worker `/health`（前缀剥离）。
 代理目标由 `SEMANTICA_WORKER_URL` 配置，默认 `http://127.0.0.1:8093`。
+
+## 审计与 Explorer（REQ-101，§4.9.2/§4.9.4）
+
+审计链路：`POST /decision` 落决策节点 → `POST /causal` 建立因果/先例关系 →
+`GET /decision-chain/{id}` 取决策链 → `GET /lineage/{id}` + `GET /prov-export` 查看 PROV-O 溯源。
+
+Explorer UI（semantica 自带，React 19 + Sigma.js，随 wheel 打包）：
+
+- 挂载于 worker `/explorer`（首次访问惰性创建并缓存：启动时图单例可能尚未就绪；未安装 `semantica[explorer]` 返回 503 JSON，worker 其余端点不受影响）。
+- 主平台 iframe 入口：`/semantica/explorer/`（后端反代改写前缀 `/semantica/explorer` → `/explorer`）。
+- **X-Frame-Options**：semantica 服务默认设置 `X-Frame-Options` 阻止 iframe 嵌入。worker 挂载层与后端反代 `ModifyResponse` **双重剥离**该响应头（存在才剥离，缺失无副作用），使 Explorer 可在主平台内嵌。
+- 已知边界：Explorer 静态资源若使用绝对根路径（`/assets/...`）可能受子路径挂载影响；如需彻底规避，可后续评估独立端口直连或前端改用相对路径。
 
 ## MCP 端点（REQ-99 ③）
 
@@ -56,8 +73,8 @@ worker 同时暴露 **Streamable HTTP** MCP 端点：`http://127.0.0.1:8093/mcp`
 - **重依赖体积**：见上；venv 数 GB 属正常，勿误判为异常。
 - **GraphRAG 依赖向量索引**：ingest 时会尽力把实体文本写入向量存储；若写入失败，`/query` 仍可用但可能降级
   （`warnings` 提示）。
-- **Explorer UI / MCP 后续**：`semantica[explorer]` 与原生 MCP 能力（P2 审计视图 / 对话挂载）本轮**不在范围内**，
-  后续复用其自带 Explorer（注意 iframe 嵌入的 X-Frame-Options 限制）。
+- **Explorer / PROV-O 溯源**：已由 `/explorer`（惰性挂载）与 `/decision-chain`、`/lineage`、`/prov-export`、
+  `/causal` 提供（REQ-101）；Explorer 需 `semantica[explorer]` extra（已入 requirements）。
 - **无鉴权 / CORS 放开**：仅本地学习用途，勿暴露公网。
 - **防御式适配**：semantica 各版本方法名/返回形状存在差异（`GraphBuilder`、`AgentContext.retrieve`、
   `record_decision` 等），worker 内部统一做容错归一，避免版本漂移导致整体不可用。

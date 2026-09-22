@@ -119,6 +119,9 @@ func (s *Server) routes() {
 		// Semantica 独立栏（§4.9 D-O10）：剥离前缀反代到 worker，:8093
 		m.Handle("/api/semantica", s.Ontology.SemanticaProxy()) // → SEMANTICA_WORKER_URL(:8093)
 		m.Handle("/api/semantica/", s.Ontology.SemanticaProxy())
+		// Semantica Explorer iframe 嵌入（§4.9.2/§4.9.4）：/semantica/explorer/* → worker /explorer/*（剥离 X-Frame-Options）
+		m.Handle("/semantica/explorer", s.Ontology.SemanticaExplorerProxy())
+		m.Handle("/semantica/explorer/", s.Ontology.SemanticaExplorerProxy())
 	}
 }
 
