@@ -9,6 +9,7 @@ import {
 import { api } from '../../api/client'
 import { useUI } from '../../store/ui'
 import { STAGE_DEFS } from './shared'
+import PipelinePane from './components/PipelinePane'
 
 // ---------------------------------------------------------------------------
 // 学习中心（LearnPage，REQ-104 ①，默认页）：本体模块 = 学习各种本体构建、运行方式的模块
@@ -536,6 +537,11 @@ export default function LearnPage() {
                 <Alert type="success" showIcon message="4 示例本体已齐（REQ-91 ③ 交付）" description="覆盖构建路径：K8s 迷你运维（手写，seed-sample）、软件缺陷管理（AI 生成）、组织与人员（复用对照 FOAF）、设备故障知识（分类+灌装路径）。每份示例附建模说明（seeds/learning/examples/*.README.md：背景/CQ/决策记录/局限）。第 5 示例「设备故障知识库→设备故障本体」随 O13（KB 构建路径）。" />
               </div>
             ),
+          },
+          {
+            key: 'pipeline',
+            label: '工具链配置',
+            children: <PipelinePane />,
           },
         ]}
         style={{ marginTop: 2 }}

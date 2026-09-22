@@ -15,6 +15,10 @@ import type {
   KBDoc,
   KnowledgeBase,
   LearningExample,
+  PipelineCatalogResponse,
+  PipelineDetail,
+  PipelineProfile,
+  PipelineStageSelection,
   Message,
   ModelConnection,
   Ontology,
@@ -274,6 +278,29 @@ export const api = {
     req<Ontology & { seeded?: boolean; note?: string }>('/api/ontologies/seed-learning', {
       method: 'POST',
       body: JSON.stringify({ key }),
+    }),
+  /** 工具链候选清单（REQ-75/77，七阶段分组，tools.json 数据驱动） */
+  listPipelineCatalog: () => req<PipelineCatalogResponse>('/api/pipelines/catalog'),
+  /** 工具链配置列表 */
+  listPipelines: () => req<PipelineProfile[]>('/api/pipelines'),
+  /** 创建工具链配置（默认模板：每阶段预置 builtin 项） */
+  createPipeline: (input: { name: string; ontology_id?: string }) =>
+    req<PipelineProfile>('/api/pipelines', { method: 'POST', body: JSON.stringify(input) }),
+  /** 配置详情（附 checklist 引导清单视图） */
+  getPipeline: (id: string) => req<PipelineDetail>(`/api/pipelines/${id}`),
+  /** 更新配置（stages 全量覆盖 / meta 局部） */
+  updatePipeline: (id: string, input: Partial<{ name: string; ontology_id: string; runtime_profile_id: string; stages: Record<string, PipelineStageSelection> }>) =>
+    req<PipelineProfile>(`/api/pipelines/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+  /** 复制为新工具链（checklist 清零） */
+  clonePipeline: (id: string, input: { name?: string } = {}) =>
+    req<PipelineProfile>(`/api/pipelines/${id}/clone`, { method: 'POST', body: JSON.stringify(input) }),
+  /** 删除配置 */
+  deletePipeline: (id: string) => req<{ deleted: boolean }>(`/api/pipelines/${id}`, { method: 'DELETE' }),
+  /** guided 打卡（tool:<stage>:<tool_id>；toggle 由 done 控制） */
+  checkPipeline: (id: string, key: string, done: boolean) =>
+    req<{ key: string; done: boolean; checklist: Record<string, unknown> }>(`/api/pipelines/${id}/check`, {
+      method: 'POST',
+      body: JSON.stringify({ key, done }),
     }),
   /** 翻译透视（最近 N 条，含失败留痕；limit≤200） */
   listTraces: (profileId: string, limit = 50) => req<TraceResponse>(`/api/runtime-profiles/${profileId}/trace?limit=${limit}`),

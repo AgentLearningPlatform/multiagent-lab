@@ -18,6 +18,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/importer"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/llmcreate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/ontochat"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/pipeline"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/repo"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/seed"
 )
@@ -28,7 +29,8 @@ type Server struct {
 	LLM      *llmcreate.Creator
 	OntoChat *ontochat.Engine
 
-	ontoChatDB *ontochat.Store // 惰性初始化（rest_ontochat.go）
+	ontoChatDB *ontochat.Store   // 惰性初始化（rest_ontochat.go）
+	pipelineDB *pipeline.Store   // 惰性初始化（rest_pipeline.go）
 }
 
 func New(st *repo.Store, sc *importer.Sidecar, llm *llmcreate.Creator) *Server {
@@ -59,6 +61,16 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("POST /api/ontologies/{id}/ingest-csv", s.ingestCSV)
 	m.HandleFunc("GET /api/ontologies/{id}/ingest-mapping", s.getIngestMapping)
 	m.HandleFunc("PUT /api/ontologies/{id}/ingest-mapping", s.putIngestMapping)
+
+	// 工具链配置（REQ-75/76，04 §4.6）
+	m.HandleFunc("GET /api/pipelines/catalog", s.listToolCatalog)
+	m.HandleFunc("GET /api/pipelines", s.listPipelines)
+	m.HandleFunc("POST /api/pipelines", s.createPipeline)
+	m.HandleFunc("GET /api/pipelines/{id}", s.getPipeline)
+	m.HandleFunc("PUT /api/pipelines/{id}", s.updatePipeline)
+	m.HandleFunc("POST /api/pipelines/{id}/clone", s.clonePipeline)
+	m.HandleFunc("DELETE /api/pipelines/{id}", s.deletePipeline)
+	m.HandleFunc("POST /api/pipelines/{id}/check", s.checkPipeline)
 	m.HandleFunc("POST /api/ontologies/{id}/fork", s.fork)
 	// OntoChat 多轮引导（REQ-103 模式 A）
 	m.HandleFunc("GET /api/ontochat/sessions", s.listOntoChatSessions)

@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "note": "七阶段候选工具清单（REQ-74/77，数据驱动：增删工具不改核心代码）。来源：docs/07_本体_工程七阶段与开源工具链清单.md §3。mode: builtin|guided|managed。",
+  "tools": [
+    { "id": "builtin_handwrite", "stage": "s1", "name": "手写 spec_json", "license": "—", "mode": "builtin", "eats": [], "gives": ["spec_json"], "learning": "平台默认起点：表单 + JSON 编辑器直接写三要素" },
+    { "id": "builtin_import", "stage": "s1", "name": "文件导入", "license": "—", "mode": "builtin", "eats": ["original"], "gives": ["spec_json"], "learning": "TTL/OWL/GraphML/CSV 自动嗅探，导入报告给有损警告" },
+    { "id": "builtin_ai_create", "stage": "s1", "name": "AI 辅助生成", "license": "—", "mode": "builtin", "eats": [], "gives": ["spec_json"], "learning": "CQ 引导 + 生成-校验循环（REQ-82/90）" },
+    { "id": "protege_desktop", "stage": "s1", "name": "Protégé 桌面版", "license": "BSD", "mode": "guided", "eats": [], "gives": ["original"], "guide": { "install": "https://protege.stanford.edu 下载安装", "handoff": "导出 OWL/TTL → 平台「导入文件」回流", "entry": "https://webprotege.stanford.edu" }, "learning": "业界标准桌面建模器；导出 OWL/TTL 回流导入" },
+    { "id": "oo_load", "stage": "s1", "name": "open-ontologies load", "license": "MIT", "mode": "guided", "eats": ["original"], "gives": ["original"], "guide": { "install": "oo-worker :8092 托管（双轨）", "handoff": "CSV/XLSX→RDF，数据留双轨 data-dir，不进 spec_json 体系", "entry": "http://127.0.0.1:8092" }, "learning": "实例数据快速灌装；与主线 REQ-96 灌装对照（数据归属不同）" },
+    { "id": "builtin_editor", "stage": "s2", "name": "平台内置编辑器", "license": "—", "mode": "builtin", "eats": ["spec_json"], "gives": ["spec_json"], "learning": "JSON + 图形化双形态（ReactFlow）；校验门控保存" },
+    { "id": "webprotege", "stage": "s2", "name": "WebProtégé", "license": "Apache-2.0", "mode": "guided", "eats": ["original"], "gives": ["original"], "guide": { "install": "自托管或用公共实例", "handoff": "导入 OWL → 编辑 → 导出 → 平台回流", "entry": "https://webprotege.stanford.edu" }, "learning": "完整 OWL 编辑能力；往返一致性是核心体验点" },
+    { "id": "robot_cli", "stage": "s2", "name": "ROBOT", "license": "Apache-2.0", "mode": "guided", "eats": ["original"], "gives": ["original"], "guide": { "install": "下载 robot.jar（需 Java）", "handoff": "template 批量生成 / merge / subset 后回流导入", "entry": "https://robot.obolibrary.org" }, "learning": "命令行本体处理：模板批量生成是规模化利器" },
+    { "id": "builtin_validate", "stage": "s3", "name": "内置校验", "license": "—", "mode": "builtin", "eats": ["spec_json"], "gives": ["report"], "learning": "JSON Schema + 引用完整性（REQ-63）；入库门控" },
+    { "id": "jena_reasoner", "stage": "s3", "name": "Jena rule reasoner", "license": "Apache-2.0", "mode": "guided", "eats": ["original"], "gives": ["report"], "guide": { "install": "Fuseki 交付后经推理对照入口使用", "handoff": "RDFS/OWL 逻辑一致性检查", "entry": "运行栏 Fuseki 方案" }, "learning": "逻辑一致性：矛盾在推理时暴露而非沉默" },
+    { "id": "pyshacl", "stage": "s3", "name": "pySHACL / Jena SHACL", "license": "Apache-2.0", "mode": "guided", "eats": ["original"], "gives": ["report"], "guide": { "install": "pip install pyshacl", "handoff": "shapes 语言写业务约束", "entry": "https://github.com/RDFLib/pySHACL" }, "learning": "三层校验的第三层：业务约束（结构→逻辑→约束）" },
+    { "id": "oops", "stage": "s3", "name": "OOPS! 陷阱扫描", "license": "Apache-2.0", "mode": "guided", "eats": ["original"], "gives": ["report"], "guide": { "install": "OOPS CLI（Java）或在线入口", "handoff": "34 类常见建模错误检测报告", "entry": "https://oops.linkeddata.es" }, "learning": "建模陷阱扫描：误用 domain/range、不对称关系等" },
+    { "id": "oo_validate", "stage": "s3", "name": "open-ontologies validate/reason", "license": "MIT", "mode": "guided", "eats": ["turtle"], "gives": ["report"], "guide": { "install": "oo-worker :8092 托管（双轨）", "handoff": "RDFS/OWL-RL 物化 + SHACL + 不一致检查", "entry": "http://127.0.0.1:8092" }, "learning": "双轨语义校验；与主线内置校验对照" },
+    { "id": "builtin_reactflow", "stage": "s4", "name": "OntologyExplorer（ReactFlow）", "license": "自有", "mode": "builtin", "eats": ["spec_json"], "gives": [], "learning": "内置默认可视化（D-O12 定案）；资产栏「可视化」页签" },
+    { "id": "webvowl", "stage": "s4", "name": "WebVOWL", "license": "MIT", "mode": "guided", "eats": ["original"], "gives": [], "guide": { "install": "OWL2VOWL 预转换 + WebVOWL 静态页", "handoff": "TBox 结构标准视图", "entry": "https://vowl.visualdataweb.org/webvowl.html" }, "learning": "TBox 标准视图；P3 可选增强（D-O12）" },
+    { "id": "lodlive", "stage": "s4", "name": "LodLive", "license": "MIT", "mode": "guided", "eats": ["endpoint"], "gives": [], "guide": { "install": "静态页 + SPARQL endpoint 配置", "handoff": "ABox 增量探索", "entry": "http://lodlive.it" }, "learning": "实例级探索，需运行中的 endpoint" },
+    { "id": "builtin_oxigraph", "stage": "s5", "name": "Oxigraph", "license": "MIT/Apache-2.0", "mode": "managed", "eats": ["spec_json"], "gives": ["endpoint"], "learning": "P1 默认引擎；SPARQL 1.1 Rust 单二进制" },
+    { "id": "builtin_fuseki", "stage": "s5", "name": "Apache Jena Fuseki", "license": "Apache-2.0", "mode": "managed", "eats": ["spec_json"], "gives": ["endpoint"], "learning": "SPARQL + OWL 推理开关；推理对照基座（O6）" },
+    { "id": "builtin_sparql", "stage": "s6", "name": "SPARQL endpoint", "license": "—", "mode": "builtin", "eats": ["endpoint"], "gives": ["endpoint"], "learning": "引擎原生提供；Yasgui 工作台直连" },
+    { "id": "builtin_facade", "stage": "s6", "name": "自研 MCP facade", "license": "MIT", "mode": "builtin", "eats": ["endpoint"], "gives": ["endpoint"], "learning": "4 个 onto_* 工具（Q-14）；facade 模式学习点" },
+    { "id": "builtin_yasgui", "stage": "s6", "name": "Yasgui 工作台", "license": "MIT", "mode": "builtin", "eats": ["endpoint"], "gives": [], "learning": "多 tab/历史/三视图（REQ-92）；手写 SPARQL 主入口" },
+    { "id": "builtin_agent_mount", "stage": "s7", "name": "主平台对话挂载", "license": "Apache-2.0", "mode": "builtin", "eats": ["endpoint"], "gives": [], "learning": "Eino ADK + MCP Client（REQ-65~67）；Agent 用 neighbors 回答跨概念问题" },
+    { "id": "builtin_semantica", "stage": "s7", "name": "Semantica 独立集成", "license": "MIT", "mode": "builtin", "eats": ["original"], "gives": ["endpoint"], "learning": "消费（TTL→KG）与审计（PROV-O）载体（D-O10）；须 v0.6.8+" }
+  ]
+}

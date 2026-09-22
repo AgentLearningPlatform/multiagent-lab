@@ -589,3 +589,61 @@ export interface ForkOntologyInput {
   name?: string
   description?: string
 }
+
+// ---------------------------------------------------------------------------
+// 工具链配置（REQ-75/76，GET/POST /api/pipelines 等；04 §4.6）
+// ---------------------------------------------------------------------------
+
+/** 七阶段候选工具（tools.json 数据驱动，REQ-77 开放性） */
+export interface PipelineStageTool {
+  id: string
+  stage: string
+  name: string
+  license?: string
+  mode: 'builtin' | 'guided' | 'managed'
+  eats?: string[]
+  gives?: string[]
+  guide?: { install?: string; handoff?: string; entry?: string }
+  learning?: string
+}
+
+/** 单阶段选择（pipeline_profile.stages 的值） */
+export interface PipelineStageSelection {
+  tool: string
+  mode: string
+  params?: Record<string, unknown>
+}
+
+/** 工具链配置（pipeline_profile 行） */
+export interface PipelineProfile {
+  id: string
+  name: string
+  ontology_id?: string
+  runtime_profile_id?: string
+  stages: Record<string, PipelineStageSelection>
+  checklist: Record<string, unknown>
+  created_at?: string
+  updated_at?: string
+}
+
+/** 引导清单条目（guided 阶段聚合；key = tool:<stage>:<tool_id>） */
+export interface PipelineChecklistItem {
+  key: string
+  kind: 'tool' | 'task'
+  stage: string
+  title: string
+  detail?: string
+  entry_url?: string
+}
+
+/** catalog 响应（七阶段固定顺序 + 分组清单） */
+export interface PipelineCatalogResponse {
+  stages: string[]
+  catalog: Record<string, PipelineStageTool[]>
+}
+
+/** 配置详情响应（profile + checklist 视图） */
+export interface PipelineDetail {
+  profile: PipelineProfile
+  checklist: PipelineChecklistItem[]
+}
