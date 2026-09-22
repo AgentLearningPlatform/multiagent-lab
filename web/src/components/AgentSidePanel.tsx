@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Divider, Form, Input, InputNumber, Popconfirm, Select, Tooltip } from 'antd'
+import { Button, Divider, Form, Input, InputNumber, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
 import {
+  ApiOutlined,
   BranchesOutlined,
   CloseOutlined,
+  DeleteOutlined,
   FolderOutlined,
+  PlusOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
@@ -26,6 +29,40 @@ function Section({ children, first }: { children: ReactNode; first?: boolean }) 
     <Divider titlePlacement="left" plain style={{ margin: first ? '0 0 12px' : '4px 0 12px' }}>
       {children}
     </Divider>
+  )
+}
+
+/** 本地已知 MCP server 预设（REQ-99 ③：semantica 一键挂载；后续 open-ontologies 等随里程碑补入） */
+const MCP_PRESETS: { name: string; url: string; desc: string }[] = [
+  { name: 'semantica', url: 'http://127.0.0.1:8093/mcp', desc: 'Semantica 语义检索 / 图谱 / 决策记录（需 semantica-worker 运行中）' },
+]
+
+/** MCP server 编辑行（name + url，Form.List 受控） */
+function McpServerRow({ name, remove }: { name: number; remove: (i: number) => void }) {
+  return (
+    <Space.Compact block style={{ marginBottom: 6 }}>
+      <Form.Item
+        name={[name, 'name']}
+        noStyle
+        rules={[
+          { required: true, message: '名称必填' },
+          { pattern: /^[a-zA-Z0-9_-]+$/, message: '字母/数字/下划线/连字符' },
+        ]}
+      >
+        <Input placeholder="名称（如 semantica）" style={{ width: '38%' }} />
+      </Form.Item>
+      <Form.Item
+        name={[name, 'url']}
+        noStyle
+        rules={[
+          { required: true, message: 'URL 必填' },
+          { pattern: /^https?:\/\//, message: '须为 http(s) URL（Streamable HTTP MCP）' },
+        ]}
+      >
+        <Input placeholder="http://127.0.0.1:8093/mcp" style={{ width: '52%' }} />
+      </Form.Item>
+      <Button icon={<DeleteOutlined />} onClick={() => remove(name)} aria-label="移除该 MCP server" />
+    </Space.Compact>
   )
 }
 
@@ -131,7 +168,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         tools: v.tools ?? [],
         // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
         skills: agent.skills ?? [],
-        mcp_servers: agent.mcp_servers ?? [],
+        mcp_servers: (v.mcp_servers ?? []).filter((s: { name?: string; url?: string }) => s?.name && s?.url),
       })
       showToast('已保存，下次运行生效')
       bumpData()
@@ -230,6 +267,41 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
             )}
           />
         </Form.Item>
+
+        <Section>MCP Servers</Section>
+        <div style={{ marginBottom: 8 }}>
+          <ApiOutlined style={{ marginRight: 6 }} />
+          <span className="model-meta">外部 MCP 工具源（Streamable HTTP）；工具以 <code>{'{server}__{tool}'}</code> 前缀并入白名单候选，连接失败降级不阻断运行。</span>
+        </div>
+        <Form.List name="mcp_servers">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map(({ key, name }) => (
+                <McpServerRow key={key} name={name} remove={remove} />
+              ))}
+              <Space wrap size={4}>
+                <Button size="small" icon={<PlusOutlined />} onClick={() => add({ name: '', url: '' })}>
+                  添加 Server
+                </Button>
+                {MCP_PRESETS.map((p) => {
+                  const cur: { name?: string; url?: string }[] = Form.useWatch('mcp_servers', form) ?? []
+                  const mounted = cur.some((s) => s?.name === p.name || s?.url === p.url)
+                  return (
+                    <Button
+                      key={p.name}
+                      size="small"
+                      disabled={mounted}
+                      onClick={() => add({ name: p.name, url: p.url })}
+                      title={p.desc}
+                    >
+                      {mounted ? <Tag color="green" style={{ marginInlineEnd: 0 }}>已挂载 {p.name}</Tag> : `挂载 ${p.name}`}
+                    </Button>
+                  )
+                })}
+              </Space>
+            </>
+          )}
+        </Form.List>
 
         <Section>执行</Section>
         <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
