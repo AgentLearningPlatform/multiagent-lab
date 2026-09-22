@@ -19,12 +19,34 @@ from pydantic import BaseModel
 
 SEMANTICA_VERSION = "0.6.8"
 PERSIST_PATH = Path(os.getenv("SEMANTICA_DATA_DIR", "./data/semantica/graph.json"))
-app = FastAPI(title="semantica-worker", version=SEMANTICA_VERSION)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 _lock = threading.Lock()
 _graph = None
 _context = None
 _warnings: list[str] = []
+_mcp = None  # FastMCP 单例（mcp SDK 可用时挂载 /mcp 端点，REQ-99 ③）
+
+from contextlib import asynccontextmanager as _asynccontextmanager
+
+@_asynccontextmanager
+async def _lifespan(app):
+    """图初始化 + MCP session manager 生命周期。
+
+    ⚠️ Starlette 挂载子应用不会自动运行其 lifespan——FastMCP 的 session_manager
+    必须由父应用 lifespan 显式驱动，否则 /mcp 端点 503。
+    """
+    try:
+        _ensure_graph()
+    except Exception as e:  # noqa: BLE001
+        warnings.warn(f"semantica 图初始化失败: {e}")
+    sm = getattr(_mcp, "session_manager", None) if _mcp is not None else None
+    if sm is not None:
+        async with sm:
+            yield
+    else:
+        yield
+
+app = FastAPI(title="semantica-worker", version=SEMANTICA_VERSION, lifespan=_lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # ---- 防御式工具：semantica 各版本方法名/返回形状存在差异，全部容错 ----
 def _pick(obj, *keys, default=None):
@@ -127,6 +149,151 @@ def _normalize_claims(result):
              "source_node": _pick(c, "source_node", "source", "node", "provenance"),
              "score": _pick(c, "score", "similarity", "confidence")} for c in _as_list(raw)]
 
+# ---- MCP 端点（REQ-99 ③）：Streamable HTTP，与 REST 共享同一图/上下文单例 ----
+# 平台挂载：agent 级 mcp_servers 配 {name:"semantica", url:"http://127.0.0.1:8093/mcp"}
+try:
+    from mcp.server.fastmcp import FastMCP  # mcp>=1.2.0,<2（v2 改名 MCPServer，破坏性）
+    _mcp = FastMCP("semantica")
+
+    @_mcp.tool()
+    def extract_entities(text: str, method: str = "pattern") -> list:
+        """从文本抽取实体（pattern 法默认，无需模型下载）。"""
+        from semantica.semantic_extract import NERExtractor
+        try:
+            ner = NERExtractor(method=method)
+        except TypeError:
+            ner = NERExtractor()
+        call = _method(ner, "extract_entities", "extract", "process")
+        raw = call(text) if call else ner
+        return [str(_pick(e, "name", "text", "entity", default=e)) for e in _as_list(raw)]
+
+    @_mcp.tool()
+    def extract_relations(text: str) -> list:
+        """从文本抽取关系三元组。"""
+        from semantica.semantic_extract import RelationExtractor
+        try:
+            rex = RelationExtractor(bidirectional=True)
+        except TypeError:
+            rex = RelationExtractor()
+        call = _method(rex, "extract_relations", "extract")
+        raw = call(text) if call else rex
+        return [{"head": str(_pick(r, "head", "source", "from", default="")),
+                 "relation": str(_pick(r, "relation", "type", "label", default="")),
+                 "tail": str(_pick(r, "tail", "target", "to", default="")),
+                 "confidence": _pick(r, "confidence", "score")} for r in _as_list(raw)]
+
+    @_mcp.tool()
+    def record_decision(category: str, scenario: str, reasoning: str, outcome: str,
+                        confidence: float = 1.0) -> str:
+        """记录一条决策（PROV-O 溯源入口），返回 decision_id。"""
+        g = _ensure_graph()
+        try:
+            did = g.record_decision(category=category, scenario=scenario,
+                                    reasoning=reasoning, outcome=outcome, confidence=confidence)
+        except TypeError:
+            did = g.record_decision(category, scenario, reasoning, outcome)
+        _save_graph()
+        return str(_pick(did, "decision_id", "id", default=did))
+
+    @_mcp.tool()
+    def query_decisions(category: str = "", limit: int = 20) -> list:
+        """按类别（可空=全部）查询决策记录。"""
+        rows = decisions(limit * 4)["decisions"]
+        if category:
+            rows = [d for d in rows if d.get("category") == category]
+        return rows[: max(0, limit)]
+
+    @_mcp.tool()
+    def find_precedents(query: str, max_results: int = 5) -> list:
+        """按语义相似查找历史决策先例。"""
+        g = _ensure_graph()
+        finder = _method(g, "find_similar_decisions")
+        if finder is None:
+            return []
+        try:
+            return _as_list(finder(query, max_results))
+        except TypeError:
+            return _as_list(finder(query))
+
+    @_mcp.tool()
+    def get_causal_chain(decision_id: str) -> object:
+        """追溯决策因果链（PROV-O 溯源）。"""
+        g = _ensure_graph()
+        tracer = _method(g, "trace_decision_chain")
+        return tracer(decision_id) if tracer else {"error": "graph 不支持因果链追溯"}
+
+    @_mcp.tool()
+    def add_entity(name: str, entity_type: str = "", attributes: dict | None = None) -> str:
+        """向知识图谱添加实体。"""
+        g = _ensure_graph()
+        add = _method(g, "add_entity", "add_node")
+        if add is None:
+            return "graph 不支持 add_entity"
+        try:
+            add(name, entity_type, attributes or {})
+        except TypeError:
+            add(name)
+        _save_graph()
+        return f"实体 {name} 已添加"
+
+    @_mcp.tool()
+    def add_relationship(from_entity: str, to_entity: str, relation: str) -> str:
+        """向知识图谱添加关系（from → to）。"""
+        g = _ensure_graph()
+        add = _method(g, "add_relationship", "add_edge")
+        if add is None:
+            return "graph 不支持 add_relationship"
+        try:
+            add(from_entity, to_entity, relation)
+        except TypeError:
+            add(from_entity, relation, to_entity)
+        _save_graph()
+        return f"关系 {from_entity} -{relation}-> {to_entity} 已添加"
+
+    @_mcp.tool()
+    def run_reasoning(query: str) -> dict:
+        """图检索（reasoning 模块 API 不稳定，暂以关键词图检索代替）。"""
+        g = _ensure_graph()
+        q = _method(g, "query")
+        raw = q(query) if q else {}
+        return {"query": query, "results": _as_list(_pick(raw, "results", "nodes", default=raw))[:20]}
+
+    @_mcp.tool()
+    def get_graph_analytics() -> dict:
+        """知识图谱分析摘要（计数 + 可用分析器结果）。"""
+        g = _ensure_graph()
+        out: dict[str, object] = {"entities": _count(_pick(g, "entities", "nodes", default=[])),
+                                  "relationships": _count(_pick(g, "relationships", "edges", default=[])),
+                                  "decisions": _count(_pick(g, "decisions", default=[]))}
+        analyzer = _method(g, "analyze_graph")
+        if analyzer is not None:
+            try:
+                out["analytics"] = _pick(analyzer(g), "analytics", default=analyzer(g))
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    @_mcp.tool()
+    def export_graph() -> dict:
+        """导出知识图谱为 dict（to_kg_dict）。"""
+        g = _ensure_graph()
+        exporter = _method(g, "to_kg_dict")
+        return exporter() if exporter else {}
+
+    @_mcp.tool()
+    def get_graph_summary() -> dict:
+        """知识图谱摘要（计数 + 实体样例）。"""
+        g = _ensure_graph()
+        ents = _as_list(_pick(g, "entities", "nodes", default=[]))
+        return {"entities": len(ents),
+                "relationships": _count(_pick(g, "relationships", "edges", default=[])),
+                "decisions": _count(_pick(g, "decisions", default=[])),
+                "sample_entities": [str(_pick(e, "name", "id", "label", default=e)) for e in ents[:10]]}
+
+    app.mount("/mcp", _mcp.streamable_http_app())
+except ImportError as e:  # noqa: BLE001
+    warnings.warn(f"mcp SDK 未安装（pip install 'mcp>=1.2.0,<2'），/mcp 端点不可用: {e}")
+
 # ---- 契约端点 ----
 class IngestReq(BaseModel):
     ontology_id: str
@@ -140,13 +307,6 @@ class DecisionReq(BaseModel):
     reasoning: str
     outcome: str
     confidence: float | None = None
-
-@app.on_event("startup")
-def _startup():
-    try:
-        _ensure_graph()
-    except Exception as e:  # noqa: BLE001
-        warnings.warn(f"semantica 图初始化失败: {e}")
 
 @app.get("/health")
 def health():

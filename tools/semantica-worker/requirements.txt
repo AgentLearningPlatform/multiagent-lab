@@ -13,3 +13,7 @@ uvicorn==0.34.0
 
 # pydantic 由 fastapi / semantica 传递引入；锁 2.x 大版本，避免与 semantica 自身约束冲突
 pydantic>=2.0,<3.0
+
+# MCP 端点（REQ-99 ③，Streamable HTTP，挂载于 /mcp）
+# ⚠️ 锁 <2：mcp 2.x 将 FastMCP 改名为 MCPServer（破坏性变更）；v1.30.0 已实测验证
+mcp>=1.2.0,<2

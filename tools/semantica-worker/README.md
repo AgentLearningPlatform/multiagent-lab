@@ -39,6 +39,16 @@ bash tools/semantica-worker/run.sh
 主平台经反向代理同源访问：`/api/semantica/health` → worker `/health`（前缀剥离）。
 代理目标由 `SEMANTICA_WORKER_URL` 配置，默认 `http://127.0.0.1:8093`。
 
+## MCP 端点（REQ-99 ③）
+
+worker 同时暴露 **Streamable HTTP** MCP 端点：`http://127.0.0.1:8093/mcp`（依赖 `mcp>=1.2.0,<2`，已入 requirements）。
+
+- 与 REST 端点**共享同一内存图与文件持久化**——REST 写入对 MCP 工具可见，反之亦然。
+- 工具清单（12）：`extract_entities` / `extract_relations` / `record_decision` / `query_decisions` / `find_precedents` / `get_causal_chain` / `add_entity` / `add_relationship` / `run_reasoning`（关键词图检索）/ `get_graph_analytics` / `export_graph` / `get_graph_summary`。
+- 主平台挂载：智能体属性 → MCP servers 配 `{name: "semantica", url: "http://127.0.0.1:8093/mcp"}`（Streamable HTTP，与 mark3labs/mcp-go 客户端兼容）。
+- 生命周期：FastMCP 的 session_manager 由 worker 的 FastAPI lifespan 驱动（挂载子应用不会自动运行自身 lifespan——已显式处理）。
+- 已知边界：semantica 原生 `semantica-mcp` 为 stdio 传输，主平台 HTTP 客户端无法直连——本端点即官方 stdio 之外的 HTTP 等价实现（工具语义对齐其 MCP 工具清单）。
+
 ## 已知边界
 
 - **内存图 + 文件持久化**：ContextGraph 常驻内存（模块级单例），每次变更后 `save_to_file` 落盘；
