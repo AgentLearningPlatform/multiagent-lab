@@ -6,9 +6,11 @@ import { EditorView } from '@codemirror/view'
 import { api } from '../../../api/client'
 import type { Spec, VersionMeta } from '../../../api/types'
 import { useUI } from '../../../store/ui'
+import VersionDiff from './VersionDiff'
 
 // ---------------------------------------------------------------------------
 // 源码视图（REQ-93）：版本选择 + CodeMirror 只读渲染 + Spec JSON 格式化视图
+// 版本 Tab 内嵌版本 diff（REQ-95）
 // ---------------------------------------------------------------------------
 
 /** 源码视图：超过此体积不渲染，改为下载查看（REQ-93） */
@@ -33,7 +35,7 @@ export default function SourceView({ ontologyId, currentVersion, spec }: { ontol
   const [origErr, setOrigErr] = useState<string | null>(null)
   const [origLoading, setOrigLoading] = useState(false)
   const [tooLarge, setTooLarge] = useState(false)
-  const [sub, setSub] = useState<'original' | 'spec'>('original')
+  const [sub, setSub] = useState<'original' | 'spec' | 'diff'>('original')
 
   // 版本列表（失败 → 回退仅当前版本，隐藏选择器）
   useEffect(() => {
@@ -231,6 +233,18 @@ export default function SourceView({ ontologyId, currentVersion, spec }: { ontol
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未保存 Spec（保存后可在此查看格式化 JSON）" />
           ),
+        },
+        {
+          key: 'diff',
+          label: '版本对比',
+          children:
+            list && list.length > 0 ? (
+              <VersionDiff ontologyId={ontologyId} versions={list} currentVersion={currentVersion} />
+            ) : listErr ? (
+              <Typography.Text type="secondary">版本列表不可用（{listErr}），无法对比</Typography.Text>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无版本快照（保存后生成）" />
+            ),
         },
       ]}
     />
