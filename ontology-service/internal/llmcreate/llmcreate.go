@@ -105,6 +105,35 @@ func buildPrompt(description, extraHint string, fixErrors []string) string {
 	return b.String()
 }
 
+// RawChat 自由文本对话（REQ-103 模式 A 补全轮归纳用）：同一平台代理，不做 schema 约束。
+func (c *Creator) RawChat(prompt string) (reply string, usage any, err error) {
+	body, _ := json.Marshal(map[string]any{"prompt": prompt, "schema": `{"type":"object","properties":{"reply":{"type":"string"}},"required":["reply"]}`})
+	resp, err := c.HTTP.Post(strings.TrimRight(c.PlatformURL, "/")+"/api/ontology-llm/generate", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", nil, fmt.Errorf("调用主平台模型代理失败: %w", err)
+	}
+	defer resp.Body.Close()
+	var res struct {
+		DraftJSON string `json:"draft_json"`
+		Usage     any    `json:"usage"`
+		Error     string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", nil, fmt.Errorf("主平台响应解析失败: %w", err)
+	}
+	if res.Error != "" {
+		return "", nil, fmt.Errorf("主平台模型代理错误: %s", res.Error)
+	}
+	// 期望 {"reply": "..."}；容忍模型直接输出纯文本
+	var wrapped struct {
+		Reply string `json:"reply"`
+	}
+	if json.Unmarshal([]byte(res.DraftJSON), &wrapped) == nil && strings.TrimSpace(wrapped.Reply) != "" {
+		return wrapped.Reply, res.Usage, nil
+	}
+	return res.DraftJSON, res.Usage, nil
+}
+
 func (c *Creator) callGenerate(prompt string) (draft string, usage any, err error) {
 	body, _ := json.Marshal(map[string]any{"prompt": prompt, "schema": specSchemaHint})
 	resp, err := c.HTTP.Post(strings.TrimRight(c.PlatformURL, "/")+"/api/ontology-llm/generate", "application/json", bytes.NewReader(body))

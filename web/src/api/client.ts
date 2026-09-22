@@ -17,6 +17,8 @@ import type {
   Message,
   ModelConnection,
   Ontology,
+  OntoChatSession,
+  OntoChatTurnResult,
   Project,
   ProjectDirListing,
   ProviderModelList,
@@ -335,6 +337,25 @@ export const api = {
   /** fork 本体：POST /api/ontologies/{id}/fork → 201 新本体（forked_from=源 id，version 重置 1） */
   forkOntology: (id: string, input: ForkOntologyInput = {}) =>
     req<Ontology>(`/api/ontologies/${id}/fork`, { method: 'POST', body: JSON.stringify(input) }),
+
+  // ---- OntoChat 多轮引导（REQ-103 模式 A；构建平面 /api/ontochat/*）----
+  listOntoChatSessions: () => req<OntoChatSession[]>('/api/ontochat/sessions'),
+  createOntoChatSession: (title?: string) =>
+    req<OntoChatSession>('/api/ontochat/sessions', { method: 'POST', body: JSON.stringify({ title }) }),
+  getOntoChatSession: (id: string) => req<OntoChatSession>(`/api/ontochat/sessions/${id}`),
+  deleteOntoChatSession: (id: string) => req<{ deleted: string }>(`/api/ontochat/sessions/${id}`, { method: 'DELETE' }),
+  /** 一轮交互：text 用户输入；feedback 非空 = refine 修正轮（意见回喂重新生成） */
+  ontoChatTurn: (id: string, text: string, feedback?: string) =>
+    req<OntoChatTurnResult>(`/api/ontochat/sessions/${id}/turn`, {
+      method: 'POST',
+      body: JSON.stringify({ text, feedback }),
+    }),
+  /** 草稿入库（预览确认门控，REQ-82）：201 {ontology, session} */
+  ontoChatSave: (id: string, name: string) =>
+    req<{ ontology: Ontology; session: OntoChatSession }>(`/api/ontochat/sessions/${id}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
 }
 
 /**

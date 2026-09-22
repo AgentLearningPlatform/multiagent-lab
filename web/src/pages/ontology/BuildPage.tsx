@@ -12,6 +12,7 @@ import type { AiDraftResult, ImportReport, Spec, ValidationError } from '../../a
 import { useUI } from '../../store/ui'
 import { ERR_COLUMNS } from './shared'
 import SpecGraph from './components/SpecGraph'
+import OntoChatFlow from './OntoChatFlow'
 
 // ---------------------------------------------------------------------------
 // 本体构建（BuildPage，REQ-104 ②）：按构建路径分二级模块（五路径分层标注状态）
@@ -24,7 +25,7 @@ type BuildPath = 'custom' | 'ontochat' | 'semantica' | 'ontoextend' | 'oo'
 
 const PATHS: { key: BuildPath; label: string; state: 'ok' | 'partial' | 'guide'; desc: string }[] = [
   { key: 'custom', label: '自定义构建', state: 'ok', desc: 'S1 来源 → S2 编辑 → S3 校验 → S4 可视化（七阶段前 4 步）' },
-  { key: 'ontochat', label: 'OntoChat 流程', state: 'partial', desc: '对话式 CQ 引导生成（REQ-103 模式 A，P2 前段交付）' },
+  { key: 'ontochat', label: 'OntoChat 流程', state: 'ok', desc: '对话式 CQ 引导 → 逐轮补全 → 草稿入库（REQ-103 模式 A）' },
   { key: 'semantica', label: 'semantica 流程', state: 'guide', desc: '入口卡跳转 semantica 独立栏（D-O10 零侵入不破）' },
   { key: 'ontoextend', label: 'OntoExtend 流程', state: 'guide', desc: '对话式扩展现有本体（引导先行，工程化另行评估）' },
   { key: 'oo', label: 'Open Ontologies 流程', state: 'guide', desc: '双轨引导 + 产物回流（REQ-78 互通后顺畅）' },
@@ -32,7 +33,7 @@ const PATHS: { key: BuildPath; label: string; state: 'ok' | 'partial' | 'guide';
 
 const STATE_TAG: Record<BuildPath, { color: string; text: string }> = {
   custom: { color: 'green', text: '可用' },
-  ontochat: { color: 'gold', text: '部分可用' },
+  ontochat: { color: 'green', text: '可用' },
   semantica: { color: 'cyan', text: '引导' },
   ontoextend: { color: 'cyan', text: '引导先行' },
   oo: { color: 'cyan', text: '引导' },
@@ -89,7 +90,7 @@ export default function BuildPage() {
       </div>
 
       {buildPath === 'custom' && <CustomFlow />}
-      {buildPath === 'ontochat' && <OntoChatGuide />}
+      {buildPath === 'ontochat' && <OntoChatFlow onSaved={() => { /* 入库后产物进资产栏；此处留在会话页展示 done 态 */ }} />}
       {buildPath === 'semantica' && <SemanticaGuide />}
       {buildPath === 'ontoextend' && <OntoExtendGuide />}
       {buildPath === 'oo' && <OoGuide />}
@@ -652,43 +653,8 @@ function S3ValidatePane({ ontologyId, onNext }: { ontologyId: string; onNext: ()
 }
 
 // ---------------------------------------------------------------------------
-// OntoChat 流程（REQ-103 模式 A 载体：交互骨架 + 排期态，不做空壳交互）
+// OntoChat 流程：完整交互见 OntoChatFlow.tsx（REQ-103 模式 A 已交付）
 // ---------------------------------------------------------------------------
-
-function OntoChatGuide() {
-  const { showToast } = useUI()
-  return (
-    <Card className="work-card" size="small">
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 12 }}
-        message="对话式本体构建（OntoChat 流程）——多轮引导生成排期中（REQ-103 模式 A，P2 前段交付）"
-        description="规划交互：对话式 CQ 引导（先列能力问题）→ 逐轮补全概念/关系 → spec_json 草稿 → 校验循环回喂 → 预览入库。复用 /api/ontology-llm/generate 扩展会话上下文，无新服务。"
-      />
-      <div className="onto-sec" style={{ marginTop: 0 }}>
-        <span className="onto-sec-title">当前可用的替代路径</span>
-      </div>
-      <ul className="onto-report-list">
-        <li><strong>单轮 AI 创建</strong>：「自定义构建 → S1 → AI 创建」已支持 CQ 引导输入（REQ-90），生成后预览确认入库</li>
-        <li><strong>参考论文</strong>：OntoChat 三部曲（登记簿 T1）——CQ 采集 → 知识提取 → 迭代评估的对话式本体工程方法</li>
-      </ul>
-      <Space style={{ marginTop: 12 }}>
-        <Button
-          type="primary"
-          icon={<ThunderboltOutlined />}
-          onClick={() => {
-            localStorage.setItem(ONTO_BUILD_PATH_KEY, 'custom')
-            window.dispatchEvent(new CustomEvent('onto-sidebar-change'))
-            showToast('已切换到自定义构建（S1 → AI 创建）')
-          }}
-        >
-          前往单轮 AI 创建
-        </Button>
-      </Space>
-    </Card>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // semantica 流程（入口卡，D-O10 零侵入不破）

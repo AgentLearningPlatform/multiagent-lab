@@ -17,18 +17,22 @@ import (
 
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/importer"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/llmcreate"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/ontochat"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/repo"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/seed"
 )
 
 type Server struct {
-	Store   *repo.Store
-	Sidecar *importer.Sidecar
-	LLM     *llmcreate.Creator
+	Store    *repo.Store
+	Sidecar  *importer.Sidecar
+	LLM      *llmcreate.Creator
+	OntoChat *ontochat.Engine
+
+	ontoChatDB *ontochat.Store // 惰性初始化（rest_ontochat.go）
 }
 
 func New(st *repo.Store, sc *importer.Sidecar, llm *llmcreate.Creator) *Server {
-	return &Server{Store: st, Sidecar: sc, LLM: llm}
+	return &Server{Store: st, Sidecar: sc, LLM: llm, OntoChat: &ontochat.Engine{LLM: llm}}
 }
 
 // Mount 注册到主平台兼容的 1.22 pattern mux。
@@ -54,6 +58,13 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/ontologies/{id}/diff", s.diffVersions)
 	m.HandleFunc("POST /api/ontologies/{id}/ingest-csv", s.ingestCSV)
 	m.HandleFunc("POST /api/ontologies/{id}/fork", s.fork)
+	// OntoChat 多轮引导（REQ-103 模式 A）
+	m.HandleFunc("GET /api/ontochat/sessions", s.listOntoChatSessions)
+	m.HandleFunc("POST /api/ontochat/sessions", s.createOntoChatSession)
+	m.HandleFunc("GET /api/ontochat/sessions/{id}", s.getOntoChatSession)
+	m.HandleFunc("DELETE /api/ontochat/sessions/{id}", s.deleteOntoChatSession)
+	m.HandleFunc("POST /api/ontochat/sessions/{id}/turn", s.ontoChatTurn)
+	m.HandleFunc("POST /api/ontochat/sessions/{id}/save", s.ontoChatSave)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

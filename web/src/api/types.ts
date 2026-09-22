@@ -296,6 +296,46 @@ export interface AiDraftResult {
   warning?: string
 }
 
+// ---- OntoChat 多轮引导（REQ-103 模式 A）----
+
+/** 会话阶段：cq 列 CQ → domain 逐轮补全 → draft/refine 草稿与修正 → done 已入库 */
+export type OntoChatStage = 'cq' | 'domain' | 'draft' | 'refine' | 'done'
+
+export interface OntoChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  ts: string
+}
+
+export interface OntoChatContext {
+  description: string
+  cqs?: string[]
+  hints?: string[]
+  draft_spec?: unknown
+}
+
+export interface OntoChatSession {
+  id: string
+  title: string
+  stage: OntoChatStage
+  round: number
+  messages?: OntoChatMessage[]
+  context?: OntoChatContext
+  ontology_id?: string
+  created_at: string
+  updated_at: string
+}
+
+/** turn 响应：reply 为 assistant 回复；draft 仅生成轮产出 */
+export interface OntoChatTurnResult {
+  reply: string
+  stage: OntoChatStage
+  round: number
+  draft?: Spec
+  warning?: string
+  session: OntoChatSession
+}
+
 /** 注入指引（GET /api/ontologies/{id}/guide） */
 export interface GuideResponse {
   ontology_id: string

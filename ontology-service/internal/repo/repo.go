@@ -104,6 +104,9 @@ func splitSQL(script string) []string {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// DB 暴露底层连接（同库扩展表使用，如 ontochat 会话存储；勿做 schema 变更——迁移走 migrations/）。
+func (s *Store) DB() *sql.DB { return s.db }
+
 // ---- 元数据 CRUD ----
 
 func (s *Store) ListOntologies() ([]Ontology, error) {
