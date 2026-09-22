@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Avatar, Button, Collapse, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd'
-import { BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
@@ -205,6 +205,8 @@ export default function ChatWindow({
   onOpenAgentDrawer,
   onOpenProjectDrawer,
   onConversationUpdated,
+  sidePanelOpen,
+  onToggleSidePanel,
 }: {
   conversation: Conversation
   agents: Agent[]
@@ -212,6 +214,9 @@ export default function ChatWindow({
   onOpenAgentDrawer: () => void
   onOpenProjectDrawer: () => void
   onConversationUpdated: () => void
+  /** REQ-102：项目侧边栏开合（仅 project scope 提供；由页面持有状态与面板） */
+  sidePanelOpen?: boolean
+  onToggleSidePanel?: () => void
 }) {
   const { bumpData, showToast } = useUI()
   const isProjectScope = conversation.scope === 'project'
@@ -636,6 +641,17 @@ export default function ChatWindow({
           >
             配置
           </Button>
+          {isProjectScope && project && onToggleSidePanel && (
+            <Tooltip title={sidePanelOpen ? '收起项目侧边栏' : '项目侧边栏（文件 / Git / 配置）'}>
+              <Button
+                size="small"
+                type={sidePanelOpen ? 'primary' : 'default'}
+                icon={<AppstoreOutlined />}
+                aria-label="项目侧边栏"
+                onClick={onToggleSidePanel}
+              />
+            </Tooltip>
+          )}
         </Space>
       </div>
 

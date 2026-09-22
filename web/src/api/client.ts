@@ -6,6 +6,7 @@ import type {
   CsvIngestApplyResult,
   CsvIngestPreview,
   DiffResult,
+  DirValidation,
   ForkOntologyInput,
   GuideResponse,
   ImportReport,
@@ -17,6 +18,7 @@ import type {
   ModelConnection,
   Ontology,
   Project,
+  ProjectDirListing,
   ProviderModelList,
   RunEventDTO,
   RuntimeProfile,
@@ -126,6 +128,15 @@ export const api = {
   setProjectAgents: (id: string, members: { agent_id: string; role: 'coordinator' | 'member' }[]) =>
     req<Project>(`/api/projects/${id}/agents`, { method: 'PUT', body: JSON.stringify(members) }),
   deleteProject: (id: string) => req<{ deleted: string }>(`/api/projects/${id}`, { method: 'DELETE' }),
+  /** REQ-101：检测本地目录（存在/目录/Git 状态） */
+  validateProjectDir: (dir: string) =>
+    req<DirValidation>('/api/projects/validate-dir', { method: 'POST', body: JSON.stringify({ dir }) }),
+  /** REQ-102：列出绑定目录下的条目（未绑定 → 400）；path 为相对子路径 */
+  listProjectDirFiles: (id: string, path?: string) =>
+    req<ProjectDirListing>(`/api/projects/${id}/dir-files${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  /** REQ-102：读取目录内文件文本内容（≤1MB；超限 → 400） */
+  getProjectDirFile: (id: string, path: string) =>
+    reqText(`/api/projects/${id}/dir-file?path=${encodeURIComponent(path)}`),
 
   // conversations
   listConversations: (q: { scope?: string; agent_id?: string; project_id?: string } = {}) => {

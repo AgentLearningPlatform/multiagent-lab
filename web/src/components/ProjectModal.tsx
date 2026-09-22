@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Checkbox, Col, Divider, Form, Input, Modal, Popconfirm, Row, Select, Space } from 'antd'
+import { Alert, Button, Checkbox, Col, Divider, Form, Input, Modal, Popconfirm, Row, Select, Space, Spin, Tag } from 'antd'
 import { api } from '../api/client'
-import type { Agent, Project } from '../api/types'
+import type { Agent, DirValidation, Project } from '../api/types'
 import { useUI } from '../store/ui'
 
 /** 弹窗小节标题（左对齐小标题；inline 边距覆盖 antd Divider 默认间距） */
@@ -42,6 +42,11 @@ export default function ProjectModal({
   })
   const [saving, setSaving] = useState(false)
 
+  // REQ-101：本地目录绑定 + 检测
+  const localDir = Form.useWatch('local_dir', form)
+  const [dirCheck, setDirCheck] = useState<DirValidation | null>(null)
+  const [checking, setChecking] = useState(false)
+
   useEffect(() => {
     form.setFieldsValue({
       name: project.name,
@@ -49,8 +54,24 @@ export default function ProjectModal({
       collab_mode: project.collab_mode ?? 'agent_as_tool',
       workflow_mode: project.workflow_mode ?? 'free',
       constraints: project.constraints,
+      local_dir: project.local_dir ?? '',
     })
+    setDirCheck(null)
   }, [project.id, form])
+
+  const checkDir = async () => {
+    const dir = (localDir ?? '').trim()
+    if (!dir) return
+    setChecking(true)
+    setDirCheck(null)
+    try {
+      setDirCheck(await api.validateProjectDir(dir))
+    } catch (e: any) {
+      setDirCheck({ exists: false, is_dir: false, is_git: false, error: e?.message ?? '检测失败' })
+    } finally {
+      setChecking(false)
+    }
+  }
 
   const save = async () => {
     let v: any
@@ -113,6 +134,61 @@ export default function ProjectModal({
         <Form.Item name="description" label="描述">
           <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} />
         </Form.Item>
+
+        <Section>本地目录（可选）</Section>
+        <Form.Item
+          label="本地目录（绝对路径）"
+          extra="绑定后，对话生成的文档（save_file）与文件列表将落在该目录；留空表示不绑定。"
+        >
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item name="local_dir" noStyle>
+              <Input placeholder="如 /home/me/projects/demo" allowClear />
+            </Form.Item>
+            <Button onClick={checkDir} loading={checking} disabled={!(localDir ?? '').trim()}>
+              检测
+            </Button>
+          </Space.Compact>
+        </Form.Item>
+        {dirCheck && (
+          <div className="dir-check">
+            {dirCheck.error ? (
+              <Alert type="error" showIcon message="目录检测失败" description={dirCheck.error} />
+            ) : (
+              <Space size={6} wrap>
+                <Tag color={dirCheck.exists ? 'green' : 'red'} style={{ margin: 0 }}>
+                  {dirCheck.exists ? '存在' : '不存在'}
+                </Tag>
+                <Tag color={dirCheck.is_dir ? 'green' : 'red'} style={{ margin: 0 }}>
+                  {dirCheck.is_dir ? '目录' : '非目录'}
+                </Tag>
+                {dirCheck.is_git ? (
+                  <>
+                    <Tag color="blue" style={{ margin: 0 }}>
+                      分支 {dirCheck.git_branch || '—'}
+                    </Tag>
+                    <Tag style={{ margin: 0 }}>{(dirCheck.git_commit || '').slice(0, 10) || '—'}</Tag>
+                    {dirCheck.git_dirty ? (
+                      <Tag color="orange" style={{ margin: 0 }}>
+                        已修改
+                      </Tag>
+                    ) : (
+                      <Tag color="green" style={{ margin: 0 }}>
+                        干净
+                      </Tag>
+                    )}
+                  </>
+                ) : (
+                  <Tag style={{ margin: 0 }}>非 Git 仓库</Tag>
+                )}
+              </Space>
+            )}
+          </div>
+        )}
+        {checking && !dirCheck && (
+          <div className="dir-check">
+            <Spin size="small" />
+          </div>
+        )}
 
         <Section>协作模式</Section>
         <Row gutter={16}>

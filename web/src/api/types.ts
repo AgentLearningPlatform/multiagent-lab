@@ -26,8 +26,38 @@ export interface Project {
   constraints: string
   agent_ids: string[]
   coordinator: string
+  /** REQ-101：绑定的本地目录（绝对路径；空串 = 未绑定） */
+  local_dir: string
   created_at: string
   updated_at: string
+}
+
+// ---- M12 项目本地目录（REQ-101/102/103）----
+
+/** 目录检测结果（POST /api/projects/validate-dir） */
+export interface DirValidation {
+  exists: boolean
+  is_dir: boolean
+  is_git: boolean
+  git_branch?: string | null
+  git_commit?: string | null
+  git_dirty?: boolean | null
+  error?: string | null
+}
+
+/** 目录条目（GET /api/projects/{id}/dir-files） */
+export interface ProjectDirEntry {
+  name: string
+  is_dir: boolean
+  size: number
+  mod_time: string
+  /** git porcelain 状态（M/A/??/D 或语义词）；非 git 或未跟踪为空 */
+  git_status?: string | null
+}
+
+export interface ProjectDirListing {
+  path: string
+  entries: ProjectDirEntry[] | null
 }
 
 export interface Conversation {

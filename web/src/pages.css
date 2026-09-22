@@ -401,3 +401,81 @@
   display: flex; align-items: center; justify-content: center; gap: 8px;
   background: #fbfbfd; color: var(--c-ink-3); font-size: 12.5px;
 }
+
+/* ---- M12 项目本地目录（REQ-101/102/103）---- */
+
+/* 项目配置弹窗：目录检测结果 */
+.dir-check { margin: -6px 0 14px; }
+
+/* 项目内容区：对话区 + 右侧侧边栏（flex 兄弟节点，互不遮挡） */
+.proj-content-row { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.proj-content-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+/* 侧边栏：左 ~44px 图标条（activity bar）+ 右 ~320px 视图区 */
+.proj-panel {
+  flex: none; display: flex; width: 364px; min-height: 0;
+  border-left: 1px solid var(--c-line); background: #fff;
+  animation: proj-panel-in .18s ease;
+}
+@keyframes proj-panel-in {
+  from { opacity: .4; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+.proj-panel-bar {
+  flex: none; width: 44px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 0; background: #f7f8fc; border-right: 1px solid var(--c-line);
+}
+.proj-bar-btn {
+  width: 34px; height: 34px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+  color: var(--c-ink-3); font-size: 16px; display: inline-flex; align-items: center; justify-content: center;
+  transition: background .15s ease, color .15s ease;
+}
+.proj-bar-btn:hover { background: #eef0f6; color: var(--c-ink); }
+.proj-bar-btn.active { background: #eef0fe; color: var(--c-brand); }
+.proj-bar-spacer { flex: 1; }
+
+.proj-panel-view { flex: 1; min-width: 0; overflow: auto; padding: 12px 12px 20px; }
+.proj-view-body { display: flex; flex-direction: column; gap: 10px; min-height: 100%; }
+.proj-view-note { font-size: 11.5px; color: var(--c-ink-3); line-height: 1.6; }
+.proj-view-toolbar { display: flex; align-items: center; gap: 6px; }
+.proj-view-actions { margin-top: auto; display: flex; gap: 8px; }
+
+/* 面包屑（根 / 子目录，可点击下钻） */
+.proj-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: 12px; }
+.proj-crumb {
+  border: 0; background: none; padding: 0 3px; cursor: pointer; border-radius: 4px;
+  color: var(--c-brand); font-family: inherit; font-size: 12px;
+}
+.proj-crumb:hover { background: #eef0fe; }
+.proj-crumb-seg { display: inline-flex; align-items: center; }
+.proj-crumb-sep { color: var(--c-ink-3); }
+
+/* 条目列表（目录在前；文件带体积与 git 状态） */
+.proj-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.proj-entry {
+  display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 7px; cursor: pointer;
+  font-size: 12.5px; color: var(--c-ink);
+}
+.proj-entry:hover { background: #eef0f6; }
+.proj-entry-icon { flex: none; color: var(--c-ink-3); font-size: 13px; display: inline-flex; }
+.proj-entry-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-entry-size { flex: none; font-size: 11px; color: var(--c-ink-3); font-variant-numeric: tabular-nums; }
+.proj-entry-empty { padding: 6px; font-size: 12px; color: var(--c-ink-3); }
+
+/* 文件预览（inline，等宽） */
+.proj-preview {
+  margin: 0; flex: 1; min-height: 0; overflow: auto;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--c-ink-2);
+  white-space: pre-wrap; word-break: break-word;
+  background: #f6f7fb; border: 1px solid #e3e6f0; border-radius: 8px; padding: 10px 12px;
+}
+.proj-preview-path {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 11px; color: var(--c-ink-3);
+}
+
+/* 配置 / Git 视图的键值行 */
+.proj-kv { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--c-ink); }
+.proj-k { flex: none; width: 64px; color: var(--c-ink-3); font-size: 12px; }
+.proj-mono { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
+.proj-pre { white-space: pre-wrap; word-break: break-word; }

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Result, Splitter } from 'antd'
+import { Button, Result, Space, Splitter } from 'antd'
+import { FolderOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import ProjectModal from '../components/ProjectModal'
+import ProjectSidePanel from '../components/ProjectSidePanel'
 import NameModal from '../components/NameModal'
 
 /**
@@ -20,6 +22,8 @@ export default function ProjectsPage() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [configProjectId, setConfigProjectId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  // REQ-102：项目右侧侧边栏（文件 / Git / 配置）开合状态
+  const [sidePanelOpen, setSidePanelOpen] = useState(false)
 
   const reload = () => {
     api.listProjects().then((ps) => {
@@ -101,30 +105,50 @@ export default function ProjectsPage() {
         />
       </Splitter.Panel>
       <Splitter.Panel className="content-panel">
-
-        {currentConv && currentConv.scope === 'project' ? (
-          <ChatWindow
-            conversation={currentConv}
-            agents={agents}
-            projects={projects}
-            onOpenAgentDrawer={() => {}}
-            onOpenProjectDrawer={() => activeProject && setConfigProjectId(activeProject.id)}
-            onConversationUpdated={reload}
-          />
-        ) : (
-          <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Result
-              icon={null}
-              title="选择左侧项目，与其开始对话"
-              subTitle="会话界面与智能体视图一致；项目对话由成员智能体协作处理（M4 起生效）。"
-              extra={
-                <Button type="primary" disabled={!activeProject} onClick={() => activeProject && newConversation(activeProject.id)}>
-                  ＋ 为「{activeProject?.name ?? '当前项目'}」新建对话
-                </Button>
-              }
-            />
+        {/* REQ-102：对话区 + 右侧项目侧边栏（flex 兄弟节点，互不遮挡） */}
+        <div className="proj-content-row">
+          <div className="proj-content-main">
+            {currentConv && currentConv.scope === 'project' ? (
+              <ChatWindow
+                conversation={currentConv}
+                agents={agents}
+                projects={projects}
+                onOpenAgentDrawer={() => {}}
+                onOpenProjectDrawer={() => activeProject && setConfigProjectId(activeProject.id)}
+                onConversationUpdated={reload}
+                sidePanelOpen={sidePanelOpen}
+                onToggleSidePanel={() => setSidePanelOpen((o) => !o)}
+              />
+            ) : (
+              <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Result
+                  icon={null}
+                  title="选择左侧项目，与其开始对话"
+                  subTitle="会话界面与智能体视图一致；项目对话由成员智能体协作处理（M4 起生效）。"
+                  extra={
+                    <Space>
+                      <Button type="primary" disabled={!activeProject} onClick={() => activeProject && newConversation(activeProject.id)}>
+                        ＋ 为「{activeProject?.name ?? '当前项目'}」新建对话
+                      </Button>
+                      <Button disabled={!activeProject} icon={<FolderOutlined />} onClick={() => setSidePanelOpen(true)}>
+                        项目文件 / 侧边栏
+                      </Button>
+                    </Space>
+                  }
+                />
+              </div>
+            )}
           </div>
-        )}
+
+          {activeProject && sidePanelOpen && (
+            <ProjectSidePanel
+              project={activeProject}
+              open={sidePanelOpen}
+              onClose={() => setSidePanelOpen(false)}
+              onEditProject={() => setConfigProjectId(activeProject.id)}
+            />
+          )}
+        </div>
 
         {configProject && (
           <ProjectModal
