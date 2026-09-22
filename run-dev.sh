@@ -19,14 +19,22 @@ if ! command -v python3 >/dev/null 2>&1; then
 elif ! python3 -c "import rdflib" >/dev/null 2>&1; then
   echo "[run-dev] 警告: python3 缺少 rdflib，本体导入(OWL/TTL)与导出不可用（pip install rdflib）" >&2
 fi
-if command -v oxigraph_server >/dev/null 2>&1; then
-  OXIGRAPH_BIN_CMD="oxigraph_server"
-elif [ -x data/bin/oxigraph_server ]; then
-  OXIGRAPH_BIN_CMD="$PWD/data/bin/oxigraph_server"
+# oxigraph 引擎（0.5+ 二进制改名 oxigraph；engine 适配器用 load/serve 子命令）
+if command -v oxigraph >/dev/null 2>&1; then
+  OXIGRAPH_BIN_CMD="oxigraph"
+elif [ -x tools/bin/oxigraph ]; then
+  OXIGRAPH_BIN_CMD="$PWD/tools/bin/oxigraph"
   echo "[run-dev] 使用本地引擎二进制: $OXIGRAPH_BIN_CMD"
+elif [ -x data/bin/oxigraph_server ]; then
+  OXIGRAPH_BIN_CMD="$PWD/data/bin/oxigraph_server"   # 旧版二进制名（≤0.3）
+  echo "[run-dev] 使用本地引擎二进制(旧版命名): $OXIGRAPH_BIN_CMD"
 else
-  OXIGRAPH_BIN_CMD="oxigraph_server"
-  echo "[run-dev] 警告: 未找到 oxigraph_server，运行方案启动(start)不可用。安装: https://github.com/oxigraph/oxigraph/releases 下载后加入 PATH，或放到 data/bin/oxigraph_server，或设置 OXIGRAPH_BIN（见 docs/04 §4.2）" >&2
+  echo "[run-dev] 警告: 未找到 oxigraph 引擎，运行方案启动(start)不可用。安装（x86_64）:" >&2
+  echo "[run-dev]   mkdir -p tools/bin && curl -fsSL https://github.com/oxigraph/oxigraph/releases/download/v0.5.11/oxigraph_v0.5.11_x86_64_linux_gnu -o tools/bin/oxigraph && chmod +x tools/bin/oxigraph" >&2
+  echo "[run-dev]   （aarch64 换 oxigraph_v0.5.11_aarch64_linux_gnu；详见 docs/13 §2）" >&2
+fi
+if [ -n "${OXIGRAPH_BIN_CMD:-}" ]; then
+  export OXIGRAPH_BIN="$OXIGRAPH_BIN_CMD"
 fi
 
 # 前端构建：dist 缺失、源码比 dist 新（如 git pull 之后）、或 FORCE_BUILD=1 时执行
