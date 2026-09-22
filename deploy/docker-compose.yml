@@ -14,6 +14,7 @@ services:
     environment:
       BUILD_SVC_URL: http://ontology-service:8091
       RUNTIME_MGR_URL: http://runtime-manager:8090
+      SEMANTICA_WORKER_URL: http://semantica-worker:8093
       # Docker 沙箱（进阶，默认关）：需挂载 /var/run/docker.sock 并改写回连地址
       # SANDBOX_IMAGE: eino-lab/agentd:latest
       # PLATFORM_URL_EXTERNAL: http://<宿主IP>:8080
@@ -22,11 +23,28 @@ services:
     depends_on:
       - ontology-service
       - runtime-manager
+      - semantica-worker
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  semantica-worker:
+    build:
+      context: ..
+      dockerfile: tools/semantica-worker/Dockerfile
+    # ⚠️ 镜像 6~10 GB（semantica 0.6.8 重依赖），构建耗时较长——见 docs/13 §9 痛点待办
+    volumes:
+      - semantica-data:/app/data
+    # 前端经 backend 反代 /api/semantica/* 访问；如需直连调试可放开端口
+    # ports: ["8093:8093"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8093/health',timeout=4)"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   ontology-service:
     build:
@@ -71,4 +89,5 @@ volumes:
   ontology-data:
   runtime-data:
   runtime-logs:
+  semantica-data:
   qdrant-data:

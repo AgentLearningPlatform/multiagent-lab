@@ -27,6 +27,8 @@ components:
         value: http://eino-lab-ontology-service:8091
       - name: RUNTIME_MGR_URL
         value: http://eino-lab-runtime-manager:8090
+      - name: SEMANTICA_WORKER_URL
+        value: http://eino-lab-semantica-worker:8093
       # - name: KB_VECTOR_BACKEND
       #   value: qdrant
       # - name: QDRANT_URL
@@ -48,6 +50,14 @@ components:
     env:
       - name: BUILD_SVC_URL
         value: http://eino-lab-ontology-service:8091
+  - name: semantica-worker
+    image: eino-lab/semantica-worker
+    tag: latest
+    port: 8093
+    storage: 5Gi
+    env:
+      - name: SEMANTICA_DATA_DIR
+        value: /app/data/graph.json
 
 resources:
   requests:
