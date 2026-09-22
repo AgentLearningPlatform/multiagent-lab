@@ -18,16 +18,17 @@ import { STAGE_DEFS } from './shared'
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// 方法论卡片（REQ-90 五模块精简版，每卡 300~500 字；内容资产随版本维护）
+// 方法论卡片（REQ-90 五模块，v0.2 深度版：body 精简骨架 + deep 深度增量；全文见 seeds/learning/methodology/）
 // ---------------------------------------------------------------------------
 
-const METHODOLOGY: { key: string; stage: string; title: string; tag: string; body: string }[] = [
+const METHODOLOGY: { key: string; stage: string; title: string; tag: string; body: string; deep: string }[] = [
   {
     key: 'cq',
     stage: 's1',
     title: '能力问题法（Competency Questions）',
     tag: '问题驱动',
     body: '动手建模之前，先回答一个问题："这个本体要帮我回答什么问题？"这些提问就叫能力问题（CQ），是本体工程的第一件武器。好的 CQ 有三个特征：涉及多个概念的关系（"某缺陷源于哪个需求"而不是"缺陷有哪些"）、能用当前领域的词汇回答、答案可以被验证。实践上先写 3~5 条 CQ，再从每条 CQ 里提取名词（候选概念）与动词（候选关系）——CQ 是概念抽取的脚手架，也是日后验收本体的测试用例：建完的本体若答不上最初的 CQ，说明建模跑偏了。',
+    deep: 'CQ 分级给建模深度提供客观依据：L1 检索型（只验证概念与属性）、L2 关系型（逼出对象属性，主力档位）、L3 推理型（答案依赖 subClassOf 传导，需带推理的运行方式）、L4 约束型（逼出 disjointWith/基数，进入 OWL 层的信号）。写 CQ 时标注 L 级别：L1~L2 用 RDFS 就够，L3 需要推理方案，L4 才值得引入 OWL 公理。反例：把功能清单当 CQ（"支持导出 Excel"不是 CQ）；CQ 过载（50 条意味着领域边界没划清）；只写不验（推理对照 REQ-94 就是 L3 类 CQ 的验证工具）。',
   },
   {
     key: 'domain',
@@ -35,6 +36,7 @@ const METHODOLOGY: { key: string; stage: string; title: string; tag: string; bod
     title: '领域分析与概念抽取',
     tag: '方法论',
     body: '领域分析的输入是文档、访谈、流程图与既有数据表；输出是一份"候选概念清单 + 关系草案"。三个实用技法：①名词/动词扫描——在需求文本里圈出名词（候选概念或实例）与动词（候选关系）；②上下位追问——对每个候选问"它是什么的一种？"（得到父类）与"它有哪几种？"（得到子类），层次自然浮现；③边界测试——两个概念若属性完全相同则合并，若只在某个属性上不同则考虑保留父子而非平级。注意区分"类"与"实例"：Pod 是类，pod-nginx-7f9 是实例；一个词条在 CQ 里被"逐个列举"时往往是实例。',
+    deep: '三条来源路径差异：文档要警惕"流程步骤被误抽为概念"；数据表是现成草案（表→概念、外键→关系），但连接表是多对多关系的物化、不该抽成概念；词表先查重再自造。层次泛滥反例："缺陷→软件缺陷→在线缺陷→支付在线缺陷"——每多一层必须能说出该层独有的属性或关系，说不出就合并。属性 vs 关系的判定：问"这个值以后要不要当查询主体？"——要就是关系（可导航的连接），不要就是属性（描述）。',
   },
   {
     key: 'reuse',
@@ -42,6 +44,7 @@ const METHODOLOGY: { key: string; stage: string; title: string; tag: string; bod
     title: '复用既有词表与顶层本体',
     tag: '复用优先',
     body: '建模前先找现成词表：FOAF（人物与组织）、SKOS（分类体系与主题词表）、schema.org（通用实体）、Dublin Core（文献元数据）、BFO / DOLCE（顶层本体，提供" continuant / occurrent"等最高层区分）。复用的收益是互操作——你的"组织"与外部世界的"组织"对得上号，Agent 检索时能吃到通用语义。实操建议：自建概念若与词表条目语义一致，用注记（如 rdfs:seeAlso 或等价声明）挂接而非重造；顶层本体不必全盘采用，但"物质/过程""抽象/具体"这类最高层区分值得借鉴。本平台的「组织与人员」示例演示了对照 FOAF 术语的复用路径。',
+    deep: '三种挂接强度：注记级（rdfs:seeAlso，最弱，语义只是相近时用）、等价级（owl:equivalentClass，最强，语义完全一致且词表可信时用）、子类级（自建 ⊑ 词表概念，中间档，多数场景的最优解）——选错强度是常见事故，等价声明挂在语义相近但不同的概念上，推理结果会悄悄变错。顶层本体的价值不在条目而在"第一刀怎么切"：continuant（设备、人员）/ occurrent（故障、维护）。反例：为复用而复用（别把 schema.org Person 的 30+ 属性搬进来）；skos:Concept ≠ owl:Class（"缺陷类型"用 SKOS 分类，"缺陷"本身用 OWL 类）。',
   },
   {
     key: 'naming',
@@ -49,6 +52,7 @@ const METHODOLOGY: { key: string; stage: string; title: string; tag: string; bod
     title: '命名与 URI 规范',
     tag: '工程规范',
     body: '命名是本体的"公共接口"，坏了最难补救。四条底线：①概念用单数名词（Pod 而非 Pods），关系用动词或动词短语（exposes、belongsTo）；②大小写惯例全库一致（常见 PascalCase 类名 + camelCase 属性名）；③避免缩写歧义——svc 到底是 Service 还是 supervisor？写全称，label 里放别名；④spec_json 的 name 字段是标识符，一旦被关系/实例引用就不要改（改了等于全体引用断裂），显示名放 label。URI 场景（导出 TTL 后）还要保证同一实体全域唯一、可解引用。',
+    deep: 'name/label/URI 三层模型各司其职：name 是机器标识符（稳定、永不改）、label 是人类显示名（可多语言可改）、URI 是导出后的全局标识（跨本体引用的凭据）。本平台 spec_json 兼容中文 name，但导出 TTL 后 URI 含非 ASCII 字符、跨工具兼容性下降——工程实践：name 用英文、label 放中文，中文 name 仅用于快速原型。命名空间纪律：前缀唯一且有意义、不与已挂接词表冲突、跨版本 URI 不变（URI 里不要带版本号）。版本 diff（REQ-95）里 changed 集合若出现 name 变更，就是命名纪律失守的信号。',
   },
   {
     key: 'patterns',
@@ -56,6 +60,7 @@ const METHODOLOGY: { key: string; stage: string; title: string; tag: string; bod
     title: '常见 OWL 建模模式',
     tag: '进阶',
     body: '五个高频模式：①子类分层（rdfs:subClassOf）表达"is-a"，继承父类的全部属性与关系约束；②互斥（owl:disjointWith）让矛盾在推理时暴露而非沉默——"故障"与"正常"应互斥；③部分-整体用专门关系（hasPart）而非子类，引擎（Engine）不是车（Car）的子类，是车的组成部分；④属性域/值域（rdfs:domain/rdfs:range）让错误断言可校验；⑤反属性（如 causes / causedBy）成对声明，方便双向查询。在 SPARQL 型方案里这些公理不参与推理（精确匹配优先），带推理的方案（Fuseki/oo）才会让 subClassOf 传导生效——这正是「运行方式对照」要演示的对照点。',
+    deep: '每条公理都是一份推理承诺：声明 disjointWith 前想清楚它帮验证什么（对应一条 L4 级 CQ），答不上就别加。适用边界：subClassOf 最安全但多继承让结果难预期（继承链超 3 层该警惕）；domain/range 既是约束也是推断器——推理机会从属性断言反推实例类型（"D1 exposes S1" ⇒ D1 是 Service），这个副作用常被忽略；transitive 属性查询方便但要做环检测。spec_json 与 OWL 层分工：spec_json 表达结构、OWL 公理表达约束与语义细节——先让结构对，再让约束严。同一本体在 Fuseki（OWL-FB 规则）与 oo（OWL-RL）下推理结果可能不同，这本身就是一个值得做的对照实验。',
   },
 ]
 
@@ -344,7 +349,22 @@ export default function LearnPage() {
                     <Typography.Text type="secondary" style={{ fontSize: 11 }}>方法论卡片 · REQ-90</Typography.Text>
                   </Space>
                 ),
-                children: <p className="onto-learn-method-body">{m.body}</p>,
+                children: (
+                  <>
+                    <p className="onto-learn-method-body">{m.body}</p>
+                    <Collapse
+                      size="small"
+                      ghost
+                      items={[
+                        {
+                          key: 'deep',
+                          label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>深度版（REQ-90 P2 补齐）</Typography.Text>,
+                          children: <p className="onto-learn-method-body" style={{ fontSize: 12 }}>{m.deep}</p>,
+                        },
+                      ]}
+                    />
+                  </>
+                ),
               }]}
             />
           ))}
@@ -513,7 +533,7 @@ export default function LearnPage() {
                     </Button>
                   </div>
                 ))}
-                <Alert type="info" showIcon message="5 示例体系随 P2 补齐（03 v0.10 REQ-91/108）" description="规划覆盖六条构建路径：K8s 迷你运维（手写）、软件缺陷管理（AI 生成）、组织与人员（fork/复用对照 FOAF）、设备故障知识（SKOS+灌装）、设备故障知识库→设备故障本体（KB 构建路径，随 O13）。" />
+                <Alert type="success" showIcon message="4 示例本体已齐（REQ-91 ③ 交付）" description="覆盖构建路径：K8s 迷你运维（手写，seed-sample）、软件缺陷管理（AI 生成）、组织与人员（复用对照 FOAF）、设备故障知识（分类+灌装路径）。每份示例附建模说明（seeds/learning/examples/*.README.md：背景/CQ/决策记录/局限）。第 5 示例「设备故障知识库→设备故障本体」随 O13（KB 构建路径）。" />
               </div>
             ),
           },
