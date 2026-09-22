@@ -107,15 +107,17 @@ semantica 各版本方法名/返回形状存在差异（lib-3 研究证实：文
 
 | 模式 | 说明 | 优点 | 缺点 | 适用 | 推荐 |
 | --- | --- | --- | --- | --- | --- |
-| **A. 本地 venv**（现状） | setup.sh 建 venv + run.sh/run-dev 启动 | 零额外设施 | 痛点 1~4 全中 | 已装好的开发机 | ★★（维持但不推荐新装） |
-| **B. 容器化（推荐）** | `docker build -f tools/semantica-worker/Dockerfile` + compose/helm 已就绪（§5 镜像清单） | 环境一致、免本地 venv、compose/helm 已配齐 | 镜像 6~10 GB、首次拉取慢 | **服务器部署 + 本地开发（docker run 单容器替代本地 venv）** | ★★★（当前主推） |
-| **C. 远连服务端** | `SEMANTICA_WORKER_URL` 指向远端已部署实例（多机/客户端共享） | 本地零安装 | 依赖网络与远端可用性 | 客户端模式 / 多人团队 | ★★（客户端 v1 首选） |
-| **D. 0.7.0 瘦身迁移** | 核心瘦身至 22 包、重依赖转 extras | venv 从数 GB 降到轻量 | **未上 PyPI**（仅 main 分支） | 上 PyPI 后切换 | 跟踪中（P-1A） |
+| **A. 本地 venv**（现状） | setup.sh 建 venv + run.sh/run-dev 启动 | 零额外设施；worker 冷启动快（semantica 延迟 import） | 安装阶段痛点 1~4 全中（多 GB、易失败、venv 分发难） | 已装好的开发机 | ★★（维持但不推荐新装） |
+| **B. 容器化** | `docker build -f tools/semantica-worker/Dockerfile` + compose/helm 已就绪 | **解决"靠谱"**：环境一致（免 PEP 668/Python 版本/venv 路径问题）、requirements 不变时层缓存使重建近零成本、可推 registry 供 `docker pull` 分发 | **不解决"快"**：首次获取仍需搬 6~10 GB（build 或 pull）；运行时 import 重量不变（semantica 延迟 import 链照旧） | **服务器部署 + 本地开发（docker run 单容器替代本地 venv）** | ★★（解决一致性与可复现，非速度） |
+| **C. 远连服务端** | `SEMANTICA_WORKER_URL` 指向远端已部署实例（多机/客户端共享） | 本地零安装、零体积 | 依赖网络与远端可用性 | 客户端模式 / 多人团队 | ★★（客户端 v1 首选） |
+| **D. 0.7.0 瘦身迁移** | 核心瘦身至 22 包、重依赖转 extras | **治本**：安装与 import 重量同时大降 | **未上 PyPI**（仅 main 分支）；迁移需回归验证（防御式归一覆盖） | 上 PyPI 后切换 | 跟踪中（P-1A，治本首选） |
 | **E. PyInstaller 冻结** | worker 冻结为单二进制 → Tauri sidecar | 客户端分发友好 | 冻结 torch 系体积仍大、构建矩阵复杂 | 客户端离线需求出现时 | ★（随需求） |
-| **F. 整体摘除** | 零侵入设计保障：删 worker + 反代路由 + 导航项即完全移除 | 主平台不受任何影响 | — | 不需要消费/审计演示时 | 保障性能力 |
+| **F. 整体摘除** | 零侵入设计保障：删 worker + 反代路由 + 导航项即完全移除 | 主平台不受任何影响；**开发其他模块时可不跑 worker（零成本）** | 消费/审计演示不可用 | 不需要消费/审计演示时 | 保障性能力 |
 
-**推荐组合**：
-- **本地开发**：Mode B（`docker compose up semantica-worker` 单容器，本地零 venv）——立即解决"不靠谱"；已装 venv 的机器可继续 Mode A。
+**代价三阶段模型**（诚实评估基准）：①安装（一次性，多 GB 下载+venv，30min+）②worker 冷启动（快——semantica 延迟 import，顶层仅 fastapi）③首次功能调用（触发 semantica import 链，数秒~数十秒）。**容器化只改善 ①的可靠性与可分发，对 ②③ 无实质收益**；治本 = D（0.7.0）+ CPU 裁剪验证（P-2）。
+
+**推荐组合（修正）**：
+- **本地开发**：开发其他模块时不跑 worker（F 零成本）；需演示消费/审计时——已装 venv 者继续 A，未装者用 B（一次性获取后层缓存生效）。
 - **服务器**：Mode B（compose/helm 已就绪）。
 - **客户端**：Mode C（远连）起步，离线需求出现后评估 Mode E。
 - **长期**：Mode D（0.7.0 上 PyPI 后迁移瘦身核心）。
