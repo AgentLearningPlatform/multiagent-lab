@@ -230,7 +230,7 @@ type ArtifactMeta struct {
 }
 
 func (s *Store) ListArtifacts(ontologyID string) ([]ArtifactMeta, error) {
-	rows, err := s.db.Query(`SELECT format,length(content),is_normalized,imported_at FROM ontology_artifact WHERE ontology_id=? ORDER BY format`, ontologyID)
+	rows, err := s.db.Query(`SELECT format,length(content),is_normalized,imported_at FROM ontology_artifact WHERE ontology_id=? AND format<>'ingest_mapping_json' ORDER BY format`, ontologyID)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +257,7 @@ type ArtifactContent struct {
 
 // ListArtifactContents 返回某本体全部形态内容（REQ-83 fork 复制）。
 func (s *Store) ListArtifactContents(ontologyID string) ([]ArtifactContent, error) {
-	rows, err := s.db.Query(`SELECT format,content,is_normalized FROM ontology_artifact WHERE ontology_id=? ORDER BY format`, ontologyID)
+	rows, err := s.db.Query(`SELECT format,content,is_normalized FROM ontology_artifact WHERE ontology_id=? AND format<>'ingest_mapping_json' ORDER BY format`, ontologyID)
 	if err != nil {
 		return nil, err
 	}

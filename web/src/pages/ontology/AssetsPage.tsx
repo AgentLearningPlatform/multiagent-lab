@@ -32,11 +32,12 @@ import { useUI } from '../../store/ui'
 import { ERR_COLUMNS, ReloadHintAlert, sourceTag, stageDoneFlags, ontoStatus, type ValidationState } from './shared'
 import SpecGraph from './components/SpecGraph'
 import SourceView from './components/SourceView'
+import CsvIngestPane from './components/CsvIngestPane'
 
 // ---------------------------------------------------------------------------
 // 本体资产（AssetsPage，REQ-104 ③）：全部已构建本体统一管理
 //   列表（来源/形态/版本/构建段完成度/被引用）+ 详情工作区 Tabs：
-//   Spec 编辑 | 校验 | 版本（含源码视图 REQ-93）| 产物 | 可视化 | TTL 导出
+//   Spec 编辑 | 校验 | 版本（含源码视图 REQ-93）| 产物 | 可视化 | TTL 导出 | CSV 灌装（REQ-96）
 //   正交红线：不出现任何引擎、端口、启停配置（运行看本体运行栏）
 // ---------------------------------------------------------------------------
 
@@ -324,6 +325,17 @@ export default function AssetsPage() {
                   key: 'export',
                   label: 'TTL 导出',
                   children: <ExportPane ontology={active} />,
+                },
+                {
+                  key: 'ingest',
+                  label: 'CSV 灌装',
+                  children: (
+                    <CsvIngestPane
+                      ontologyId={active.id}
+                      spec={spec}
+                      onIngested={() => refreshAfterSave()}
+                    />
+                  ),
                 },
               ]}
             />

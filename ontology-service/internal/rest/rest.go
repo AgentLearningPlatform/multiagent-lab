@@ -57,6 +57,8 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/ontologies/{id}/versions/{version}/original", s.versionOriginal)
 	m.HandleFunc("GET /api/ontologies/{id}/diff", s.diffVersions)
 	m.HandleFunc("POST /api/ontologies/{id}/ingest-csv", s.ingestCSV)
+	m.HandleFunc("GET /api/ontologies/{id}/ingest-mapping", s.getIngestMapping)
+	m.HandleFunc("PUT /api/ontologies/{id}/ingest-mapping", s.putIngestMapping)
 	m.HandleFunc("POST /api/ontologies/{id}/fork", s.fork)
 	// OntoChat 多轮引导（REQ-103 模式 A）
 	m.HandleFunc("GET /api/ontochat/sessions", s.listOntoChatSessions)
@@ -942,12 +944,51 @@ func splitCSVList(s string) csvList {
 	return out
 }
 
+// ingestConfig 灌装配置（REQ-96）：P2a 同名映射 + P2b 映射向导增量。
+// TypeRules 列名→转换类型（int/number/date/bool，缺省 string 原样）；
+// MultiValueSep 关系列多值分隔符（空 = 整格单值，保持 P2a 语义）。
 type ingestConfig struct {
-	Concept          string  `json:"concept"`
-	KeyColumn        string  `json:"key_column"`
-	RelationColumns  csvList `json:"relation_columns"`
-	AttributeColumns csvList `json:"attribute_columns"`
-	SkipRows         int     `json:"skip_rows"`
+	Concept          string            `json:"concept"`
+	KeyColumn        string            `json:"key_column"`
+	RelationColumns  csvList           `json:"relation_columns"`
+	AttributeColumns csvList           `json:"attribute_columns"`
+	SkipRows         int               `json:"skip_rows"`
+	TypeRules        map[string]string `json:"type_rules,omitempty"`
+	MultiValueSep    string            `json:"multi_value_sep,omitempty"`
+}
+
+// convertCell P2b 类型转换：合法返回转换值，非法返回 error（由调用方记 warning 并降级为原字符串）。
+func convertCell(col, v string, rules map[string]string) (any, error) {
+	switch rules[col] {
+	case "int":
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("不是整数")
+		}
+		return n, nil
+	case "number":
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return nil, fmt.Errorf("不是数值")
+		}
+		return f, nil
+	case "bool":
+		switch strings.ToLower(v) {
+		case "true", "1", "yes", "y", "是":
+			return true, nil
+		case "false", "0", "no", "n", "否":
+			return false, nil
+		}
+		return nil, fmt.Errorf("不是布尔值")
+	case "date":
+		for _, layout := range []string{"2006-01-02", "2006/01/02", "2006-01-02 15:04:05", "20060102"} {
+			if t, err := time.Parse(layout, v); err == nil {
+				return t.Format("2006-01-02"), nil
+			}
+		}
+		return nil, fmt.Errorf("不是日期（支持 2006-01-02 / 2006/01/02 / 20060102）")
+	}
+	return v, nil // string / 未配置：原样
 }
 
 type ingestStats struct {
@@ -1155,10 +1196,15 @@ func (s *Server) ingestCSV(w http.ResponseWriter, r *http.Request) {
 		inst := pkgspec.Instance{Name: name, Concept: cfg.Concept}
 		for _, c := range attrCols {
 			if v := cell(colIdx[c]); v != "" {
+				cv, err := convertCell(c, v, cfg.TypeRules)
+				if err != nil {
+					cv = v // 降级：非法值按原字符串保留
+					warnings = append(warnings, fmt.Sprintf("第 %d 行属性列 %s 值 %q %v，按原字符串保留", rowNo, c, v, err))
+				}
 				if inst.Attributes == nil {
 					inst.Attributes = map[string]any{}
 				}
-				inst.Attributes[c] = v
+				inst.Attributes[c] = cv
 			}
 		}
 		for _, c := range relCols {
@@ -1167,7 +1213,23 @@ func (s *Server) ingestCSV(w http.ResponseWriter, r *http.Request) {
 				warnings = append(warnings, fmt.Sprintf("第 %d 行关系列 %s 目标为空，已跳过", rowNo, c))
 				continue
 			}
-			inst.Relations = append(inst.Relations, pkgspec.InstanceRel{Rel: c, Target: v})
+			// P2b 多值分隔符：一格多个目标（如 "D1;D2"）拆成多条断言。
+			targets := []string{v}
+			if cfg.MultiValueSep != "" {
+				targets = nil
+				for _, p := range strings.Split(v, cfg.MultiValueSep) {
+					if p = strings.TrimSpace(p); p != "" {
+						targets = append(targets, p)
+					}
+				}
+				if len(targets) == 0 {
+					warnings = append(warnings, fmt.Sprintf("第 %d 行关系列 %s 拆分后无有效目标，已跳过", rowNo, c))
+					continue
+				}
+			}
+			for _, t := range targets {
+				inst.Relations = append(inst.Relations, pkgspec.InstanceRel{Rel: c, Target: t})
+			}
 		}
 		draft = append(draft, inst)
 		stats.InstancesGenerated++
@@ -1223,6 +1285,48 @@ func (s *Server) ingestCSV(w http.ResponseWriter, r *http.Request) {
 	v, _ := s.Store.BumpVersion(id)
 	_ = s.Store.SaveVersion(id, v, string(bts2), "", "")
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "version": v, "stats": stats, "warnings": warnings})
+}
+
+// ---- REQ-96 P2b 映射配置存取 ----
+
+// getIngestMapping GET /api/ontologies/{id}/ingest-mapping：读取已保存的映射配置（无则 404）。
+// 存 artifact format=ingest_mapping_json：不 bump version、不进产物列表（ListArtifacts 过滤）、不随 fork 复制。
+func (s *Server) getIngestMapping(w http.ResponseWriter, r *http.Request) {
+	raw, _, err := s.Store.GetArtifact(r.PathValue("id"), "ingest_mapping_json")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write([]byte(raw))
+}
+
+// putIngestMapping PUT /api/ontologies/{id}/ingest-mapping：保存映射配置（结构即 ingestConfig 的 JSON）。
+func (s *Server) putIngestMapping(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.Store.GetOntology(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var cfg ingestConfig
+	if err := decodeJSON(r, &cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "JSON 解析失败: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(cfg.Concept) == "" || strings.TrimSpace(cfg.KeyColumn) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "concept 与 key_column 必填"})
+		return
+	}
+	bts, err := json.Marshal(cfg)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.Store.PutArtifact(id, "ingest_mapping_json", string(bts), true); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
 }
 
 // ---- REQ-83 fork ----

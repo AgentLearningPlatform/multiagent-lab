@@ -571,6 +571,19 @@ export interface CsvIngestApplyResult {
   stats: CsvIngestStats
 }
 
+/** CSV 灌装映射配置（REQ-96 P2b；GET/PUT /api/ontologies/{id}/ingest-mapping） */
+export interface IngestMapping {
+  concept: string
+  key_column: string
+  relation_columns?: string[]
+  attribute_columns?: string[]
+  skip_rows?: number
+  /** 列名 → 转换类型（int/number/date/bool；缺省 string 原样） */
+  type_rules?: Record<string, string>
+  /** 关系列多值分隔符（空 = 整格单值） */
+  multi_value_sep?: string
+}
+
 /** fork 入参（POST /api/ontologies/{id}/fork；REQ-83） */
 export interface ForkOntologyInput {
   name?: string

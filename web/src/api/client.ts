@@ -4,6 +4,7 @@ import type {
   ArtifactMeta,
   Conversation,
   CsvIngestApplyResult,
+  IngestMapping,
   CsvIngestPreview,
   DiffResult,
   DirValidation,
@@ -334,6 +335,11 @@ export const api = {
   ingestCsvPreview: (id: string, form: FormData) => reqMultipart<CsvIngestPreview>(`/api/ontologies/${id}/ingest-csv`, form),
   /** CSV 灌装确认入库：同 multipart，mode=apply；400 校验失败带 validation_errors */
   ingestCsvApply: (id: string, form: FormData) => reqMultipart<CsvIngestApplyResult>(`/api/ontologies/${id}/ingest-csv`, form),
+  /** 映射配置读取（REQ-96 P2b）：GET /api/ontologies/{id}/ingest-mapping；未保存过 → 404 */
+  getIngestMapping: (id: string) => req<IngestMapping>(`/api/ontologies/${id}/ingest-mapping`),
+  /** 映射配置保存（P2b）：PUT 同路径；结构即灌装配置（concept/key_column/列绑定/类型规则/分隔符/跳行） */
+  putIngestMapping: (id: string, mapping: IngestMapping) =>
+    req<{ saved: boolean }>(`/api/ontologies/${id}/ingest-mapping`, { method: 'PUT', body: JSON.stringify(mapping) }),
   /** fork 本体：POST /api/ontologies/{id}/fork → 201 新本体（forked_from=源 id，version 重置 1） */
   forkOntology: (id: string, input: ForkOntologyInput = {}) =>
     req<Ontology>(`/api/ontologies/${id}/fork`, { method: 'POST', body: JSON.stringify(input) }),
