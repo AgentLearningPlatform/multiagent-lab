@@ -21,11 +21,12 @@ import OntoChatFlow from './OntoChatFlow'
 //   未工程化路径显示引导卡、不做空壳交互（D-O11）
 // ---------------------------------------------------------------------------
 
-type BuildPath = 'custom' | 'ontochat' | 'semantica' | 'ontoextend' | 'oo'
+type BuildPath = 'custom' | 'ontochat' | 'semantica' | 'ontoextend' | 'oo' | 'kb'
 
 const PATHS: { key: BuildPath; label: string; state: 'ok' | 'partial' | 'guide'; desc: string }[] = [
   { key: 'custom', label: '自定义构建', state: 'ok', desc: 'S1 来源 → S2 编辑 → S3 校验 → S4 可视化（七阶段前 4 步）' },
   { key: 'ontochat', label: 'OntoChat 流程', state: 'ok', desc: '对话式 CQ 引导 → 逐轮补全 → 草稿入库（REQ-103 模式 A）' },
+  { key: 'kb', label: '由知识库构建', state: 'guide', desc: 'KB chunk→LLM 抽取 / KG→直转（D-O14 第六路径，工程化排期 P2 前段）' },
   { key: 'semantica', label: 'semantica 流程', state: 'guide', desc: '入口卡跳转 semantica 独立栏（D-O10 零侵入不破）' },
   { key: 'ontoextend', label: 'OntoExtend 流程', state: 'guide', desc: '对话式扩展现有本体（引导先行，工程化另行评估）' },
   { key: 'oo', label: 'Open Ontologies 流程', state: 'guide', desc: '双轨引导 + 产物回流（REQ-78 互通后顺畅）' },
@@ -34,6 +35,7 @@ const PATHS: { key: BuildPath; label: string; state: 'ok' | 'partial' | 'guide';
 const STATE_TAG: Record<BuildPath, { color: string; text: string }> = {
   custom: { color: 'green', text: '可用' },
   ontochat: { color: 'green', text: '可用' },
+  kb: { color: 'cyan', text: '引导' },
   semantica: { color: 'cyan', text: '引导' },
   ontoextend: { color: 'cyan', text: '引导先行' },
   oo: { color: 'cyan', text: '引导' },
@@ -91,6 +93,7 @@ export default function BuildPage() {
 
       {buildPath === 'custom' && <CustomFlow />}
       {buildPath === 'ontochat' && <OntoChatFlow onSaved={() => { /* 入库后产物进资产栏；此处留在会话页展示 done 态 */ }} />}
+      {buildPath === 'kb' && <KbBuildGuide />}
       {buildPath === 'semantica' && <SemanticaGuide />}
       {buildPath === 'ontoextend' && <OntoExtendGuide />}
       {buildPath === 'oo' && <OoGuide />}
@@ -655,6 +658,33 @@ function S3ValidatePane({ ontologyId, onNext }: { ontologyId: string; onNext: ()
 // ---------------------------------------------------------------------------
 // OntoChat 流程：完整交互见 OntoChatFlow.tsx（REQ-103 模式 A 已交付）
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 由知识库构建（第六路径引导卡，D-O14 / REQ-108；工程化 O13 排期 P2 前段）
+// ---------------------------------------------------------------------------
+
+function KbBuildGuide() {
+  return (
+    <Card className="work-card" size="small">
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message="由知识库构建本体——构建栏第六路径（D-O14，引导先行）"
+        description="定位：把已有知识库（KB）作为本体构建的数据源——RAG 子模块的 chunk 语料经 LLM 抽取 spec_json（策略 A），GraphRAG 子模块的 KG 实体/关系直转（策略 B），或 KG 作初稿 + LLM 校验补全（策略 C）。与 semantica 流程互为对偶：本路径是「KB→本体」构建方向，semantica 流程是「本体→KG」消费方向。"
+      />
+      <div className="onto-sec" style={{ marginTop: 0 }}>
+        <span className="onto-sec-title">规划的三种抽取策略（04 §3.7）</span>
+      </div>
+      <ol className="onto-report-list">
+        <li><strong>策略 A：chunk → LLM</strong>（可即时上线）——选 KB → 按知识包选 chunk 语料 → CQ 引导（REQ-90）→ 复用 /api/ontology-llm/generate 抽取 spec_json → 校验 → 预览 → 入库</li>
+        <li><strong>策略 B：KG → 直转</strong>（P2 后评估）——GraphRAG KG 的 entity→Concept / relation→Relation / claim→Attribute 薄映射层（&lt;300 行），不做抽取；保真度依赖 semantica 抽取质量</li>
+        <li><strong>策略 C：混合</strong>（P2）——策略 B 产初稿 → 策略 A 喂 LLM 做校验 + 补全 definition / domain / range</li>
+      </ol>
+      <Alert type="warning" showIcon style={{ marginTop: 12 }} message="工程化排期" description="入口端点（POST /api/ontologies/build-from-kb、GET /api/kbs/selectable-for-ontology-build、kg-to-spec-json）与独立流程页随 O13（P2 前段）交付；依赖 M6 KB + M14 KB 双子模块（已就绪）。当前可先到「知识库」栏体验 KB 构建与 GraphRAG。" />
+    </Card>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // semantica 流程（入口卡，D-O10 零侵入不破）

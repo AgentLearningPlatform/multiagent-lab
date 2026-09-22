@@ -186,7 +186,7 @@ const STAGE_COLORS: Record<string, string> = {
 }
 
 // ---------------------------------------------------------------------------
-// 构建方式对照（五路径卡，D-O11 分层状态）
+// 构建方式对照（六路径卡，D-O11 分层 + D-O14 第六路径）
 // ---------------------------------------------------------------------------
 
 const BUILD_PATH_CARDS: { key: string; title: string; scene: string; points: string; state: { color: string; text: string }; example: string }[] = [
@@ -203,8 +203,16 @@ const BUILD_PATH_CARDS: { key: string; title: string; scene: string; points: str
     title: 'OntoChat 流程',
     scene: '对话式多轮引导（CQ → 补全 → 草稿 → 校验 → 入库）',
     points: '对话式知识工程方法（OntoChat 论文三部曲）',
-    state: { color: 'gold', text: '部分可用' },
+    state: { color: 'green', text: '可用' },
     example: '软件缺陷管理（AI 生成路径演示）',
+  },
+  {
+    key: 'kb',
+    title: '由知识库构建',
+    scene: 'KB chunk→LLM 抽取 / GraphRAG KG→直转（KB→本体构建方向）',
+    points: '知识资产复用：语料/图谱 → 语义资产的直接通路（D-O14）',
+    state: { color: 'cyan', text: '引导' },
+    example: '设备故障知识库 → 设备故障本体（第 5 示例，随 O13）',
   },
   {
     key: 'semantica',
@@ -233,7 +241,7 @@ const BUILD_PATH_CARDS: { key: string; title: string; scene: string; points: str
 ]
 
 // ---------------------------------------------------------------------------
-// 运行方式对照（引擎差异卡）
+// 运行方式对照（引擎差异卡；O6 已交付，推理对照已激活）
 // ---------------------------------------------------------------------------
 
 const RUNTIME_CARDS: { engine: string; tag: { color: string; text: string };推理: string; points: string; entry: string }[] = [
@@ -246,10 +254,10 @@ const RUNTIME_CARDS: { engine: string; tag: { color: string; text: string };推�
   },
   {
     engine: 'Fuseki',
-    tag: { color: 'gold', text: '随 O6 交付' },
-    推理: '带推理（RDFS/OWL 级别可选）',
-    points: '推理对照（REQ-94）：同查询两方案 diff，新增实例高亮并附解释模板',
-    entry: '本体运行 → Fuseki（点亮后）',
+    tag: { color: 'green', text: '可用' },
+    推理: '带推理（RDFS/OWL 规则推理，方案级开关）',
+    points: '推理对照（REQ-94）已激活：同本体建两套方案一开一关推理，同一 SPARQL 对照结果差异（如 subClassOf 实例类型传导）；对照实验建议见方案向导',
+    entry: '本体运行 → Fuseki',
   },
   {
     engine: 'Open Ontologies',
@@ -444,11 +452,11 @@ export default function LearnPage() {
             children: (
               <>
                 <Alert
-                  type="info"
+                  type="success"
                   showIcon
                   style={{ marginBottom: 10 }}
                   message="同一份本体在不同引擎下行为不同——这是本体运行环节的核心学习点"
-                  description="推理对照入口随 Fuseki（O6）激活：同一 SPARQL 并行发往带推理与不带推理两套方案并 diff 结果。"
+                  description="推理对照已随 Fuseki（O6）激活：对同一本体建两套 Fuseki 方案（推理一开一关），同一 SPARQL 并行发往两套方案对照结果差异（推荐用 subClassOf 子类实例验证类型传导）。"
                 />
                 <div className="onto-learn-cards">
                   {RUNTIME_CARDS.map((c) => (
@@ -505,7 +513,7 @@ export default function LearnPage() {
                     </Button>
                   </div>
                 ))}
-                <Alert type="info" showIcon message="4 示例体系随 P2 补齐（03 v0.9 REQ-91）" description="规划覆盖四条构建路径：K8s 迷你运维（手写）、软件缺陷管理（AI 生成）、组织与人员（fork/复用对照 FOAF）、设备故障知识（SKOS+灌装）。" />
+                <Alert type="info" showIcon message="5 示例体系随 P2 补齐（03 v0.10 REQ-91/108）" description="规划覆盖六条构建路径：K8s 迷你运维（手写）、软件缺陷管理（AI 生成）、组织与人员（fork/复用对照 FOAF）、设备故障知识（SKOS+灌装）、设备故障知识库→设备故障本体（KB 构建路径，随 O13）。" />
               </div>
             ),
           },
