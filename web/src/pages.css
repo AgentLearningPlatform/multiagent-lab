@@ -479,3 +479,13 @@
 .proj-k { flex: none; width: 64px; color: var(--c-ink-3); font-size: 12px; }
 .proj-mono { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
 .proj-pre { white-space: pre-wrap; word-break: break-word; }
+
+/* REQ-103：侧边栏内嵌配置表单（窄面板适配；字段纵向排布） */
+.proj-panel .ant-form-item { margin-bottom: 12px; }
+.proj-panel .ant-form-item:last-child { margin-bottom: 0; }
+.proj-panel .ant-form-item .ant-form-item-extra { font-size: 11.5px; line-height: 1.6; }
+.proj-panel .member-row { flex-wrap: wrap; }
+.proj-panel .member-hint { font-size: 11.5px; }
+/* activity bar 占位图标（后续扩展） */
+.proj-bar-btn:disabled { opacity: .38; cursor: not-allowed; }
+.proj-bar-btn:disabled:hover { background: none; color: var(--c-ink-3); }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Empty, Spin, Tag, Tooltip, Typography } from 'antd'
+import type { ReactNode } from 'react'
+import { Alert, Button, Checkbox, Divider, Empty, Form, Input, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import {
   BranchesOutlined,
   CloseOutlined,
@@ -11,9 +12,39 @@ import {
   SettingOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
-import type { DirValidation, Project, ProjectDirEntry } from '../api/types'
+import type { Agent, DirValidation, Project, ProjectDirEntry } from '../api/types'
+import { useUI } from '../store/ui'
 
-type PanelView = 'files' | 'git' | 'config'
+export type PanelView = 'files' | 'git' | 'config'
+
+/** 侧边栏小节标题（左对齐小标题；窄面板收紧边距） */
+function Section({ children, first }: { children: ReactNode; first?: boolean }) {
+  return (
+    <Divider titlePlacement="left" plain style={{ margin: first ? '0 0 12px' : '4px 0 12px' }}>
+      {children}
+    </Divider>
+  )
+}
+
+/** 项目成员选中态（与 ProjectModal 一致：默认 member，coordinator 覆盖） */
+function initMembers(project: Project): Record<string, 'coordinator' | 'member'> {
+  const init: Record<string, 'coordinator' | 'member'> = {}
+  for (const id of project.agent_ids) init[id] = 'member'
+  if (project.coordinator) init[project.coordinator] = 'coordinator'
+  return init
+}
+
+const COLLAB_OPTIONS = [
+  { value: 'agent_as_tool', label: 'agent_as_tool（主智能体调度）' },
+  { value: 'transfer', label: 'transfer（路由移交）' },
+  { value: 'single', label: 'single（单智能体）' },
+]
+const WORKFLOW_OPTIONS = [
+  { value: 'free', label: 'free（自由协作）' },
+  { value: 'sequential', label: 'sequential（顺序）' },
+  { value: 'parallel', label: 'parallel（并行）' },
+  { value: 'loop', label: 'loop（循环）' },
+]
 
 /** 单文件预览体积上限（与后端 dir-file ≤1MB 对齐） */
 const LARGE_FILE = 1_000_000
@@ -54,23 +85,21 @@ function gitStatusTag(s?: string | null) {
  */
 export default function ProjectSidePanel({
   project,
+  agents,
   open,
+  view,
+  onViewChange,
   onClose,
-  onEditProject,
+  onChanged,
 }: {
   project: Project
+  agents: Agent[]
   open: boolean
+  view: PanelView
+  onViewChange: (v: PanelView) => void
   onClose: () => void
-  /** 配置视图「编辑项目」→ 打开 ProjectModal（由页面提供） */
-  onEditProject?: () => void
+  onChanged?: () => void
 }) {
-  const [view, setView] = useState<PanelView>('files')
-
-  // 切换项目时回到文件视图
-  useEffect(() => {
-    setView('files')
-  }, [project.id])
-
   return (
     <aside className={`proj-panel${open ? ' open' : ''}`}>
       <div className="proj-panel-bar" role="tablist" aria-label="项目侧边栏视图">
@@ -81,7 +110,7 @@ export default function ProjectSidePanel({
             aria-label="文件视图"
             aria-selected={view === 'files'}
             role="tab"
-            onClick={() => setView('files')}
+            onClick={() => onViewChange('files')}
           >
             <FolderOutlined />
           </button>
@@ -93,7 +122,7 @@ export default function ProjectSidePanel({
             aria-label="Git 视图"
             aria-selected={view === 'git'}
             role="tab"
-            onClick={() => setView('git')}
+            onClick={() => onViewChange('git')}
           >
             <BranchesOutlined />
           </button>
@@ -105,7 +134,7 @@ export default function ProjectSidePanel({
             aria-label="配置视图"
             aria-selected={view === 'config'}
             role="tab"
-            onClick={() => setView('config')}
+            onClick={() => onViewChange('config')}
           >
             <SettingOutlined />
           </button>
@@ -119,9 +148,9 @@ export default function ProjectSidePanel({
       </div>
 
       <div className="proj-panel-view">
-        {view === 'files' && <FilesView project={project} onOpenConfig={() => setView('config')} />}
+        {view === 'files' && <FilesView project={project} onOpenConfig={() => onViewChange('config')} />}
         {view === 'git' && <GitView project={project} />}
-        {view === 'config' && <ConfigView project={project} onEdit={onEditProject} />}
+        {view === 'config' && <ConfigView project={project} agents={agents} onChanged={onChanged} />}
       </div>
     </aside>
   )
@@ -385,43 +414,215 @@ function GitView({ project }: { project: Project }) {
 }
 
 // ---------------------------------------------------------------------------
-// 配置视图（REQ-103：配置作为侧边栏一页入口；完整迁入后续迭代）
+// 配置视图（REQ-103：原 ProjectModal 编辑表单迁入；仅承载容器变化，字段/校验/提交不变）
 // ---------------------------------------------------------------------------
 
-function ConfigView({ project, onEdit }: { project: Project; onEdit?: () => void }) {
+function ConfigView({ project, agents, onChanged }: { project: Project; agents: Agent[]; onChanged?: () => void }) {
+  const { showToast, bumpData } = useUI()
+  const [form] = Form.useForm()
+  const [selected, setSelected] = useState<Record<string, 'coordinator' | 'member'>>(() => initMembers(project))
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // REQ-101：本地目录绑定 + 检测
+  const localDir = Form.useWatch('local_dir', form)
+  const [dirCheck, setDirCheck] = useState<DirValidation | null>(null)
+  const [checking, setChecking] = useState(false)
+
+  useEffect(() => {
+    form.setFieldsValue({
+      name: project.name,
+      description: project.description,
+      collab_mode: project.collab_mode ?? 'agent_as_tool',
+      workflow_mode: project.workflow_mode ?? 'free',
+      constraints: project.constraints,
+      local_dir: project.local_dir ?? '',
+    })
+    setSelected(initMembers(project))
+    setDirCheck(null)
+  }, [project.id, form])
+
+  const checkDir = async () => {
+    const dir = (localDir ?? '').trim()
+    if (!dir) return
+    setChecking(true)
+    setDirCheck(null)
+    try {
+      setDirCheck(await api.validateProjectDir(dir))
+    } catch (e: any) {
+      setDirCheck({ exists: false, is_dir: false, is_git: false, error: e?.message ?? '检测失败' })
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const save = async () => {
+    let v: any
+    try {
+      v = await form.validateFields()
+    } catch {
+      return
+    }
+    const members = Object.entries(selected).map(([agent_id, role]) => ({ agent_id, role }))
+    setSaving(true)
+    try {
+      await api.updateProject(project.id, v)
+      await api.setProjectAgents(project.id, members)
+      showToast('已保存')
+      bumpData()
+      onChanged?.()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async () => {
+    setDeleting(true)
+    try {
+      await api.deleteProject(project.id)
+      showToast('已删除')
+      bumpData()
+      onChanged?.()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="proj-view-body">
-      <div className="proj-view-note">项目配置摘要（只读）</div>
-      <div className="proj-kv">
-        <span className="proj-k">名称</span>
-        <span>{project.name}</span>
-      </div>
-      <div className="proj-kv">
-        <span className="proj-k">本地目录</span>
-        <span className="proj-mono">{project.local_dir || '未绑定'}</span>
-      </div>
-      <div className="proj-kv">
-        <span className="proj-k">协作模式</span>
-        <span>{project.collab_mode || '—'}</span>
-      </div>
-      <div className="proj-kv">
-        <span className="proj-k">工作流模式</span>
-        <span>{project.workflow_mode || '—'}</span>
-      </div>
-      <div className="proj-kv">
-        <span className="proj-k">成员智能体</span>
-        <span>
-          {project.agent_ids?.length ?? 0} 个{project.coordinator ? ` · 主 ${project.coordinator}` : ''}
-        </span>
-      </div>
-      <div className="proj-kv">
-        <span className="proj-k">项目级约束</span>
-        <span className="proj-pre">{project.constraints || '—'}</span>
-      </div>
+      <Form form={form} layout="vertical" requiredMark={false} size="small">
+        <Section first>基本信息</Section>
+        <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item name="description" label="描述">
+          <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} />
+        </Form.Item>
+
+        <Section>本地目录（可选）</Section>
+        <Form.Item
+          label="本地目录"
+          extra="支持 Windows 盘符路径（C:\Users\…）与 POSIX 路径；绑定后，对话生成的文档（save_file）与文件列表将落在该目录。"
+        >
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item name="local_dir" noStyle>
+              <Input placeholder={'如 /home/me/project 或 C:\\Users\\me\\project'} allowClear />
+            </Form.Item>
+            <Button onClick={checkDir} loading={checking} disabled={!(localDir ?? '').trim()}>
+              检测
+            </Button>
+          </Space.Compact>
+        </Form.Item>
+        {dirCheck && (
+          <div className="dir-check">
+            {dirCheck.error ? (
+              <Alert type="error" showIcon message="目录检测失败" description={dirCheck.error} />
+            ) : (
+              <Space size={6} wrap>
+                <Tag color={dirCheck.exists ? 'green' : 'red'} style={{ margin: 0 }}>
+                  {dirCheck.exists ? '存在' : '不存在'}
+                </Tag>
+                <Tag color={dirCheck.is_dir ? 'green' : 'red'} style={{ margin: 0 }}>
+                  {dirCheck.is_dir ? '目录' : '非目录'}
+                </Tag>
+                {dirCheck.is_git ? (
+                  <>
+                    <Tag color="blue" style={{ margin: 0 }}>
+                      分支 {dirCheck.git_branch || '—'}
+                    </Tag>
+                    <Tag style={{ margin: 0 }}>{(dirCheck.git_commit || '').slice(0, 10) || '—'}</Tag>
+                    {dirCheck.git_dirty ? (
+                      <Tag color="orange" style={{ margin: 0 }}>
+                        已修改
+                      </Tag>
+                    ) : (
+                      <Tag color="green" style={{ margin: 0 }}>
+                        干净
+                      </Tag>
+                    )}
+                  </>
+                ) : (
+                  <Tag style={{ margin: 0 }}>非 Git 仓库</Tag>
+                )}
+              </Space>
+            )}
+          </div>
+        )}
+        {checking && !dirCheck && (
+          <div className="dir-check">
+            <Spin size="small" />
+          </div>
+        )}
+
+        <Section>协作模式</Section>
+        <Form.Item name="collab_mode" label="协作模式（M4 生效）">
+          <Select options={COLLAB_OPTIONS} />
+        </Form.Item>
+        <Form.Item name="workflow_mode" label="工作流模式（M4 生效）">
+          <Select options={WORKFLOW_OPTIONS} />
+        </Form.Item>
+
+        <Section>成员智能体</Section>
+        <div className="member-block">
+          <div className="member-hint">项目会话由主智能体调度（M4 生效）；勾选成员并指定主智能体。</div>
+          {agents.length === 0 && <div className="empty-hint">还没有智能体，请先到「智能体」页创建</div>}
+          {agents.map((a) => (
+            <div key={a.id} className="member-row">
+              <Checkbox
+                checked={!!selected[a.id]}
+                onChange={(e) =>
+                  setSelected((s) => {
+                    const next = { ...s }
+                    if (e.target.checked) next[a.id] = 'member'
+                    else delete next[a.id]
+                    return next
+                  })
+                }
+              >
+                {a.name}
+              </Checkbox>
+              {selected[a.id] && (
+                <Select
+                  size="small"
+                  style={{ width: 120 }}
+                  value={selected[a.id]}
+                  onChange={(role) => setSelected((s) => ({ ...s, [a.id]: role }))}
+                  options={[
+                    { value: 'member', label: '成员' },
+                    { value: 'coordinator', label: '主智能体' },
+                  ]}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+
+        <Section>项目级约束</Section>
+        <Form.Item name="constraints" label="项目级约束（统一注入成员提示词，P1）">
+          <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} />
+        </Form.Item>
+      </Form>
+
       <div className="proj-view-actions">
-        <Button type="primary" size="small" icon={<SettingOutlined />} disabled={!onEdit} onClick={onEdit}>
-          编辑项目
+        <Button type="primary" size="small" loading={saving} onClick={save}>
+          保存
         </Button>
+        <Popconfirm
+          title={`删除项目「${project.name}」？`}
+          description="其对话与消息将一并删除。"
+          okText="删除"
+          okButtonProps={{ danger: true }}
+          cancelText="取消"
+          onConfirm={remove}
+        >
+          <Button danger size="small" loading={deleting}>
+            删除项目
+          </Button>
+        </Popconfirm>
       </div>
     </div>
   )

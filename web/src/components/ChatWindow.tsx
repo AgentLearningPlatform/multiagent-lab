@@ -641,13 +641,21 @@ export default function ChatWindow({
           >
             配置
           </Button>
-          {isProjectScope && project && onToggleSidePanel && (
-            <Tooltip title={sidePanelOpen ? '收起项目侧边栏' : '项目侧边栏（文件 / Git / 配置）'}>
+          {onToggleSidePanel && ((isProjectScope && project) || (!isProjectScope && agent)) && (
+            <Tooltip
+              title={
+                sidePanelOpen
+                  ? '收起侧边栏'
+                  : isProjectScope
+                    ? '项目侧边栏（文件 / Git / 配置）'
+                    : '智能体侧边栏（配置）'
+              }
+            >
               <Button
                 size="small"
                 type={sidePanelOpen ? 'primary' : 'default'}
                 icon={<AppstoreOutlined />}
-                aria-label="项目侧边栏"
+                aria-label={isProjectScope ? '项目侧边栏' : '智能体侧边栏'}
                 onClick={onToggleSidePanel}
               />
             </Tooltip>

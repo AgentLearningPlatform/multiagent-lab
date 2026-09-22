@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Alert, Button, Checkbox, Col, Divider, Form, Input, Modal, Popconfirm, Row, Select, Space, Spin, Tag } from 'antd'
+import { Alert, Button, Checkbox, Col, Divider, Form, Input, Modal, Row, Select, Space, Spin, Tag } from 'antd'
 import { api } from '../api/client'
-import type { Agent, DirValidation, Project } from '../api/types'
+import type { Agent, DirValidation } from '../api/types'
 import { useUI } from '../store/ui'
 
 /** 弹窗小节标题（左对齐小标题；inline 边距覆盖 antd Divider 默认间距） */
@@ -15,31 +15,22 @@ function Section({ children, first }: { children: ReactNode; first?: boolean }) 
 }
 
 /**
- * 项目配置弹窗（原型 06：每个项目节点提供 ⚙ 配置入口）。
- * 布局分组：基本信息 → 协作模式 → 成员智能体 → 项目级约束；
- * 短字段走两列 Row/Col，长文本整行 autoSize，成员区在协作模式与约束之间。
+ * 新建项目弹窗（REQ-103：编辑用途已迁至右侧边栏配置视图，本弹窗仅用于新建）。
+ * 布局分组：基本信息 → 本地目录 → 协作模式 → 成员智能体 → 项目级约束；
+ * 短字段走两列 Row/Col，长文本整行 autoSize。
  */
 export default function ProjectModal({
-  project,
   agents,
   onClose,
-  onChanged,
-  onDeleted,
+  onCreated,
 }: {
-  project: Project
   agents: Agent[]
   onClose: () => void
-  onChanged: () => void
-  onDeleted: () => void
+  onCreated: (id: string) => void
 }) {
   const { showToast, bumpData } = useUI()
   const [form] = Form.useForm()
-  const [selected, setSelected] = useState<Record<string, 'coordinator' | 'member'>>(() => {
-    const init: Record<string, 'coordinator' | 'member'> = {}
-    for (const id of project.agent_ids) init[id] = 'member'
-    if (project.coordinator) init[project.coordinator] = 'coordinator'
-    return init
-  })
+  const [selected, setSelected] = useState<Record<string, 'coordinator' | 'member'>>({})
   const [saving, setSaving] = useState(false)
 
   // REQ-101：本地目录绑定 + 检测
@@ -48,16 +39,8 @@ export default function ProjectModal({
   const [checking, setChecking] = useState(false)
 
   useEffect(() => {
-    form.setFieldsValue({
-      name: project.name,
-      description: project.description,
-      collab_mode: project.collab_mode ?? 'agent_as_tool',
-      workflow_mode: project.workflow_mode ?? 'free',
-      constraints: project.constraints,
-      local_dir: project.local_dir ?? '',
-    })
-    setDirCheck(null)
-  }, [project.id, form])
+    form.setFieldsValue({ collab_mode: 'agent_as_tool', workflow_mode: 'free' })
+  }, [form])
 
   const checkDir = async () => {
     const dir = (localDir ?? '').trim()
@@ -83,11 +66,18 @@ export default function ProjectModal({
     const members = Object.entries(selected).map(([agent_id, role]) => ({ agent_id, role }))
     setSaving(true)
     try {
-      await api.updateProject(project.id, v)
-      await api.setProjectAgents(project.id, members)
-      showToast('已保存')
+      const p = await api.createProject({
+        name: v.name,
+        description: v.description ?? '',
+        collab_mode: v.collab_mode ?? 'agent_as_tool',
+        workflow_mode: v.workflow_mode ?? 'free',
+        constraints: v.constraints ?? '',
+        local_dir: v.local_dir ?? '',
+      })
+      if (members.length) await api.setProjectAgents(p.id, members)
+      showToast('项目已创建')
       bumpData()
-      onChanged()
+      onCreated(p.id)
     } catch (e: any) {
       showToast(e.message, 'err')
     } finally {
@@ -95,41 +85,27 @@ export default function ProjectModal({
     }
   }
 
-  const remove = async () => {
-    try {
-      await api.deleteProject(project.id)
-      showToast('已删除')
-      bumpData()
-      onDeleted()
-    } catch (e: any) {
-      showToast(e.message, 'err')
-    }
-  }
-
   return (
     <Modal
       open
       onCancel={onClose}
-      title={`项目配置 · ${project.name}`}
+      title="新建项目"
       width={680}
       centered
       styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingRight: 8 } }}
       footer={
-        <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-          <Popconfirm title={`删除项目「${project.name}」？`} description="其对话与消息将一并删除。" okText="删除" okButtonProps={{ danger: true }} cancelText="取消" onConfirm={remove}>
-            <Button danger type="text">删除项目</Button>
-          </Popconfirm>
-          <Space>
-            <Button onClick={onClose}>取消</Button>
-            <Button type="primary" loading={saving} onClick={save}>保存</Button>
-          </Space>
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={save}>
+            创建
+          </Button>
         </Space>
       }
     >
       <Form form={form} layout="vertical" requiredMark={false}>
         <Section first>基本信息</Section>
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]}>
-          <Input />
+          <Input placeholder="项目名称" />
         </Form.Item>
         <Form.Item name="description" label="描述">
           <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} />
@@ -138,11 +114,11 @@ export default function ProjectModal({
         <Section>本地目录（可选）</Section>
         <Form.Item
           label="本地目录（绝对路径）"
-          extra="绑定后，对话生成的文档（save_file）与文件列表将落在该目录；留空表示不绑定。"
+          extra="支持 Windows 盘符路径（C:\Users\…）与 POSIX 路径；绑定后，对话生成的文档（save_file）与文件列表将落在该目录；留空表示不绑定。"
         >
           <Space.Compact style={{ width: '100%' }}>
             <Form.Item name="local_dir" noStyle>
-              <Input placeholder="如 /home/me/projects/demo" allowClear />
+              <Input placeholder={'如 /home/me/project 或 C:\\Users\\me\\project'} allowClear />
             </Form.Item>
             <Button onClick={checkDir} loading={checking} disabled={!(localDir ?? '').trim()}>
               检测

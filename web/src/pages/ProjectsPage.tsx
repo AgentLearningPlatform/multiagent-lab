@@ -7,12 +7,12 @@ import { useUI } from '../store/ui'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import ProjectModal from '../components/ProjectModal'
-import ProjectSidePanel from '../components/ProjectSidePanel'
-import NameModal from '../components/NameModal'
+import ProjectSidePanel, { type PanelView } from '../components/ProjectSidePanel'
 
 /**
  * 项目视图（原型 06 §3.2）：
  * 左栏为项目折叠列表（每节点常驻「＋新对话」「⚙配置」），右侧为与智能体视图一致的对话窗口。
+ * REQ-103：项目配置改为右侧边栏配置视图（原 ProjectModal 编辑表单迁入）；ProjectModal 仅用于新建。
  */
 export default function ProjectsPage() {
   const { currentConvId, setCurrentConv, dataVersion, bumpData, showToast } = useUI()
@@ -20,10 +20,10 @@ export default function ProjectsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [convs, setConvs] = useState<Conversation[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
-  const [configProjectId, setConfigProjectId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
-  // REQ-102：项目右侧侧边栏（文件 / Git / 配置）开合状态
+  // REQ-102/103：右侧侧边栏（文件 / Git / 配置）开合与当前视图
   const [sidePanelOpen, setSidePanelOpen] = useState(false)
+  const [panelView, setPanelView] = useState<PanelView>('files')
 
   const reload = () => {
     api.listProjects().then((ps) => {
@@ -37,7 +37,6 @@ export default function ProjectsPage() {
   useEffect(reload, [dataVersion])
 
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null
-  const configProject = projects.find((p) => p.id === configProjectId) ?? null
   const currentConv = useMemo(() => convs.find((c) => c.id === currentConvId) ?? null, [convs, currentConvId])
 
   // 选中对话不属于当前项目（或属于智能体）时，归位到空态
@@ -46,25 +45,6 @@ export default function ProjectsPage() {
       setCurrentConv(null)
     }
   }, [activeProjectId, currentConv])
-
-  const createProject = async (name: string) => {
-    setCreateOpen(false)
-    try {
-      const p = await api.createProject({
-        name,
-        description: '',
-        collab_mode: 'agent_as_tool',
-        workflow_mode: 'free',
-        constraints: '',
-      })
-      bumpData()
-      setActiveProjectId(p.id)
-      showToast('项目已创建，请在配置中完善信息并添加成员智能体')
-      setConfigProjectId(p.id)
-    } catch (e: any) {
-      showToast(e.message, 'err')
-    }
-  }
 
   const newConversation = async (projectId: string) => {
     try {
@@ -77,9 +57,26 @@ export default function ProjectsPage() {
     }
   }
 
+  /** 项目节点 ⚙ → 右侧边栏配置视图（侧边栏若未开则同时打开） */
   const configureProject = (projectId: string) => {
     setActiveProjectId(projectId)
-    setConfigProjectId(projectId)
+    setSidePanelOpen(true)
+    setPanelView('config')
+  }
+
+  /** ChatWindow「配置」→ 打开当前项目侧边栏配置视图 */
+  const openSidePanelConfig = () => {
+    setSidePanelOpen(true)
+    setPanelView('config')
+  }
+
+  const onProjectCreated = (id: string) => {
+    setCreateOpen(false)
+    reload()
+    setActiveProjectId(id)
+    setSidePanelOpen(true)
+    setPanelView('config')
+    showToast('项目已创建，请在侧边栏完善配置')
   }
 
   return (
@@ -114,7 +111,7 @@ export default function ProjectsPage() {
                 agents={agents}
                 projects={projects}
                 onOpenAgentDrawer={() => {}}
-                onOpenProjectDrawer={() => activeProject && setConfigProjectId(activeProject.id)}
+                onOpenProjectDrawer={openSidePanelConfig}
                 onConversationUpdated={reload}
                 sidePanelOpen={sidePanelOpen}
                 onToggleSidePanel={() => setSidePanelOpen((o) => !o)}
@@ -130,8 +127,8 @@ export default function ProjectsPage() {
                       <Button type="primary" disabled={!activeProject} onClick={() => activeProject && newConversation(activeProject.id)}>
                         ＋ 为「{activeProject?.name ?? '当前项目'}」新建对话
                       </Button>
-                      <Button disabled={!activeProject} icon={<FolderOutlined />} onClick={() => setSidePanelOpen(true)}>
-                        项目文件 / 侧边栏
+                      <Button disabled={!activeProject} icon={<FolderOutlined />} onClick={() => { setSidePanelOpen(true); setPanelView('config') }}>
+                        项目配置 / 侧边栏
                       </Button>
                     </Space>
                   }
@@ -143,27 +140,17 @@ export default function ProjectsPage() {
           {activeProject && sidePanelOpen && (
             <ProjectSidePanel
               project={activeProject}
+              agents={agents}
               open={sidePanelOpen}
+              view={panelView}
+              onViewChange={setPanelView}
               onClose={() => setSidePanelOpen(false)}
-              onEditProject={() => setConfigProjectId(activeProject.id)}
+              onChanged={reload}
             />
           )}
         </div>
 
-        {configProject && (
-          <ProjectModal
-            project={configProject}
-            agents={agents}
-            onClose={() => setConfigProjectId(null)}
-            onChanged={reload}
-            onDeleted={() => {
-              setConfigProjectId(null)
-              reload()
-            }}
-          />
-        )}
-
-        <NameModal open={createOpen} title="新建项目" placeholder="项目名称" onCancel={() => setCreateOpen(false)} onSubmit={createProject} />
+        {createOpen && <ProjectModal agents={agents} onClose={() => setCreateOpen(false)} onCreated={onProjectCreated} />}
       </Splitter.Panel>
     </Splitter>
   )

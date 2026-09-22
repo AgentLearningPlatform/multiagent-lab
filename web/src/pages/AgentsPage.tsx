@@ -6,19 +6,21 @@ import { useUI } from '../store/ui'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import AgentModal from '../components/AgentModal'
-import NameModal from '../components/NameModal'
+import AgentSidePanel from '../components/AgentSidePanel'
 
 /**
  * 智能体视图（原型 06 §3.1）：
  * 左栏为智能体折叠列表（每节点常驻「＋新对话」「⚙配置」），右侧为对话窗口。
+ * REQ-103：智能体配置改为右侧边栏配置视图（原 AgentModal 编辑表单迁入）；AgentModal 仅用于新建。
  */
 export default function AgentsPage() {
   const { currentConvId, setCurrentConv, dataVersion, bumpData, showToast } = useUI()
   const [agents, setAgents] = useState<Agent[]>([])
   const [convs, setConvs] = useState<Conversation[]>([])
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
-  const [configOpen, setConfigOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  // REQ-103：右侧智能体侧边栏（配置视图）开合
+  const [sidePanelOpen, setSidePanelOpen] = useState(false)
 
   const reload = () => {
     api.listAgents().then((as) => {
@@ -40,19 +42,6 @@ export default function AgentsPage() {
     }
   }, [activeAgentId, currentConv])
 
-  const createAgent = async (name: string) => {
-    setCreateOpen(false)
-    try {
-      const a = await api.createAgent({ name, description: '', instruction: '' })
-      bumpData()
-      setActiveAgentId(a.id)
-      showToast('智能体已创建，请在配置中完善信息')
-      setConfigOpen(true)
-    } catch (e: any) {
-      showToast(e.message, 'err')
-    }
-  }
-
   // 为指定智能体新建对话
   const newConversation = async (agentId: string) => {
     try {
@@ -65,9 +54,21 @@ export default function AgentsPage() {
     }
   }
 
+  /** 智能体节点 ⚙ → 右侧边栏配置视图（侧边栏若未开则同时打开） */
   const configureAgent = (agentId: string) => {
     setActiveAgentId(agentId)
-    setConfigOpen(true)
+    setSidePanelOpen(true)
+  }
+
+  /** ChatWindow「配置」→ 打开当前智能体侧边栏配置视图 */
+  const openSidePanelConfig = () => setSidePanelOpen(true)
+
+  const onAgentCreated = (id: string) => {
+    setCreateOpen(false)
+    reload()
+    setActiveAgentId(id)
+    setSidePanelOpen(true)
+    showToast('智能体已创建，请在侧边栏完善配置')
   }
 
   return (
@@ -93,36 +94,47 @@ export default function AgentsPage() {
         />
       </Splitter.Panel>
       <Splitter.Panel className="content-panel">
-
-        {currentConv && currentConv.scope === 'agent' ? (
-          <ChatWindow
-            conversation={currentConv}
-            agents={agents}
-            projects={[]}
-            onOpenAgentDrawer={() => setConfigOpen(true)}
-            onOpenProjectDrawer={() => {}}
-            onConversationUpdated={reload}
-          />
-        ) : (
-          <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Result
-              icon={null}
-              title="选择左侧智能体，与其开始对话"
-              subTitle="每个智能体可挂多个对话；左侧节点上的 ＋ 可直接新建对话。"
-              extra={
-                <Button type="primary" disabled={!activeAgent} onClick={() => activeAgent && newConversation(activeAgent.id)}>
-                  ＋ 为「{activeAgent?.name ?? '当前智能体'}」新建对话
-                </Button>
-              }
-            />
+        {/* REQ-103：对话区 + 右侧智能体侧边栏（flex 兄弟节点，互不遮挡） */}
+        <div className="proj-content-row">
+          <div className="proj-content-main">
+            {currentConv && currentConv.scope === 'agent' ? (
+              <ChatWindow
+                conversation={currentConv}
+                agents={agents}
+                projects={[]}
+                onOpenAgentDrawer={openSidePanelConfig}
+                onOpenProjectDrawer={() => {}}
+                onConversationUpdated={reload}
+                sidePanelOpen={sidePanelOpen}
+                onToggleSidePanel={() => setSidePanelOpen((o) => !o)}
+              />
+            ) : (
+              <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Result
+                  icon={null}
+                  title="选择左侧智能体，与其开始对话"
+                  subTitle="每个智能体可挂多个对话；左侧节点上的 ＋ 可直接新建对话。"
+                  extra={
+                    <Button type="primary" disabled={!activeAgent} onClick={() => activeAgent && newConversation(activeAgent.id)}>
+                      ＋ 为「{activeAgent?.name ?? '当前智能体'}」新建对话
+                    </Button>
+                  }
+                />
+              </div>
+            )}
           </div>
-        )}
 
-        {configOpen && activeAgent && (
-          <AgentModal agent={activeAgent} onClose={() => setConfigOpen(false)} onChanged={reload} />
-        )}
+          {activeAgent && sidePanelOpen && (
+            <AgentSidePanel
+              agent={activeAgent}
+              open={sidePanelOpen}
+              onClose={() => setSidePanelOpen(false)}
+              onChanged={reload}
+            />
+          )}
+        </div>
 
-        <NameModal open={createOpen} title="新建智能体" placeholder="智能体名称" onCancel={() => setCreateOpen(false)} onSubmit={createAgent} />
+        {createOpen && <AgentModal onClose={() => setCreateOpen(false)} onCreated={onAgentCreated} />}
       </Splitter.Panel>
     </Splitter>
   )
