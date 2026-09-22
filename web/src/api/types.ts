@@ -396,3 +396,113 @@ export interface SemanticaStats {
   relationships: number
   decisions: number
 }
+
+// ---- Semantica 审计/溯源（REQ-101，§4.9.4）----
+
+/** 因果/先例关系类型（POST /api/semantica/causal） */
+export type SemanticaCausalType = 'CAUSED' | 'INFLUENCED' | 'PRECEDENT_FOR'
+
+/** 决策链节点（GET /api/semantica/decision-chain/{id}；worker 防御式归一化） */
+export interface SemanticaChainNode {
+  id: string
+  category?: string | null
+  scenario?: string | null
+  outcome?: string | null
+  confidence?: number | string | null
+  relation?: string | null
+  ts?: string | null
+}
+
+export interface SemanticaDecisionChain {
+  decision_id: string
+  chain: SemanticaChainNode[] | null
+  warnings?: string[] | null
+}
+
+/** PROV-O 溯源条目（GET /api/semantica/lineage/{entity_id}；source/metadata/type 形状不定） */
+export interface SemanticaProvNode {
+  id: string
+  source?: unknown
+  metadata?: unknown
+  type?: unknown
+}
+
+export interface SemanticaLineage {
+  entity_id: string
+  lineage: SemanticaProvNode[] | null
+  warnings?: string[] | null
+}
+
+export interface SemanticaCausalResult {
+  ok: boolean
+  from_id: string
+  to_id: string
+  type: string
+}
+
+// ---- P2 本体增量（REQ-95 版本 diff / REQ-96 CSV 灌装 / REQ-83 fork） ----
+
+/** diff 字段级变化：from → to（REQ-95） */
+export interface DiffFieldChange {
+  from: unknown
+  to: unknown
+}
+
+/** diff 变更条目：元素名 + 字段级变化集合 */
+export interface DiffChanged {
+  name: string
+  fields: Record<string, DiffFieldChange>
+}
+
+/** diff 元素（三集合之一：概念 / 关系 / 实例，按 id=name 对齐） */
+export type DiffItem = SpecConcept | SpecRelation | SpecInstance
+
+/** diff 单集合（concepts / relations / instances 同构） */
+export interface DiffCollection {
+  added: DiffItem[]
+  removed: DiffItem[]
+  changed: DiffChanged[]
+}
+
+/** 引用影响统计：变更元素被 relations/instances 引用的次数 */
+export interface DiffImpact {
+  name: string
+  referenced_by: number
+}
+
+/** 版本 diff（GET /api/ontologies/{id}/diff?from&to；400 版本无快照 / 404） */
+export interface DiffResult {
+  from_version: number
+  to_version: number
+  concepts: DiffCollection
+  relations: DiffCollection
+  instances: DiffCollection
+  impact: DiffImpact[]
+}
+
+/** CSV 灌装统计（preview / apply 同口径） */
+export interface CsvIngestStats {
+  rows_read: number
+  instances_generated: number
+  skipped_empty_key: number
+}
+
+/** CSV 灌装预览（POST /api/ontologies/{id}/ingest-csv，mode=preview） */
+export interface CsvIngestPreview {
+  stats: CsvIngestStats
+  warnings: string[] | null
+  draft: SpecInstance[] | null
+}
+
+/** CSV 灌装确认入库（mode=apply；400 校验失败带 validation_errors） */
+export interface CsvIngestApplyResult {
+  saved: boolean
+  version: number
+  stats: CsvIngestStats
+}
+
+/** fork 入参（POST /api/ontologies/{id}/fork；REQ-83） */
+export interface ForkOntologyInput {
+  name?: string
+  description?: string
+}

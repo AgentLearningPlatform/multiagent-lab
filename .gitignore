@@ -6,3 +6,4 @@ web/tsconfig.tsbuildinfo
 *.tsbuildinfo
 /data/
 __pycache__/
+tools/bin/

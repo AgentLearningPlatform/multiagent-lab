@@ -188,6 +188,17 @@ func (s *Store) DeleteOntology(id string) error {
 	return nil
 }
 
+// CreateOntologyFork 创建派生本体：version 从 1 起、时间戳全新，forked_from 记录源本体（REQ-83）。
+func (s *Store) CreateOntologyFork(id, name, description, forkedFrom string) (*Ontology, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.Exec(`INSERT INTO ontology(id,name,description,version,forked_from,created_at,updated_at) VALUES(?,?,?,1,?,?,?)`,
+		id, name, description, forkedFrom, now, now)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetOntology(id)
+}
+
 // ---- 形态资产 ----
 
 // PutArtifact 写入形态。spec_json 版本演进时由调用方 bump version。
@@ -230,6 +241,33 @@ func (s *Store) ListArtifacts(ontologyID string) ([]ArtifactMeta, error) {
 		}
 		m.Normalized = n != 0
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ArtifactContent 形态内容（fork 复制用）。
+type ArtifactContent struct {
+	Format     string
+	Content    string
+	Normalized bool
+}
+
+// ListArtifactContents 返回某本体全部形态内容（REQ-83 fork 复制）。
+func (s *Store) ListArtifactContents(ontologyID string) ([]ArtifactContent, error) {
+	rows, err := s.db.Query(`SELECT format,content,is_normalized FROM ontology_artifact WHERE ontology_id=? ORDER BY format`, ontologyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ArtifactContent{}
+	for rows.Next() {
+		var a ArtifactContent
+		var n int
+		if err := rows.Scan(&a.Format, &a.Content, &n); err != nil {
+			return nil, err
+		}
+		a.Normalized = n != 0
+		out = append(out, a)
 	}
 	return out, rows.Err()
 }

@@ -3,6 +3,10 @@ import type {
   AiDraftResult,
   ArtifactMeta,
   Conversation,
+  CsvIngestApplyResult,
+  CsvIngestPreview,
+  DiffResult,
+  ForkOntologyInput,
   GuideResponse,
   ImportReport,
   KBHit,
@@ -16,10 +20,14 @@ import type {
   ProviderModelList,
   RunEventDTO,
   RuntimeProfile,
+  SemanticaCausalResult,
+  SemanticaCausalType,
+  SemanticaDecisionChain,
   SemanticaDecisionInput,
   SemanticaDecisionsResponse,
   SemanticaHealth,
   SemanticaIngestResult,
+  SemanticaLineage,
   SemanticaQueryResult,
   SemanticaStats,
   Skill,
@@ -290,6 +298,32 @@ export const api = {
   semanticaStats: () => req<SemanticaStats>('/api/semantica/stats'),
   /** 导出本体 Turtle 原文（ingest 数据源；复用既有构建平面导出端点，text/turtle） */
   exportOntologyTurtle: (ontologyId: string) => reqText(`/api/ontologies/${ontologyId}/export?format=turtle`),
+  /** 决策因果链（GET /api/semantica/decision-chain/{id}；PROV-O 溯源，REQ-101） */
+  semanticaDecisionChain: (decisionId: string) =>
+    req<SemanticaDecisionChain>(`/api/semantica/decision-chain/${encodeURIComponent(decisionId)}`),
+  /** 实体 PROV-O 溯源（GET /api/semantica/lineage/{entity_id}；REQ-101） */
+  semanticaLineage: (entityId: string) =>
+    req<SemanticaLineage>(`/api/semantica/lineage/${encodeURIComponent(entityId)}`),
+  /** PROV-O 导出（GET /api/semantica/prov-export?format=turtle）→ text/turtle 原文（错误为 JSON {error}） */
+  semanticaProvExport: (format = 'turtle') => reqText(`/api/semantica/prov-export?format=${encodeURIComponent(format)}`),
+  /** 写入因果/先例关系（POST /api/semantica/causal；type ∈ CAUSED|INFLUENCED|PRECEDENT_FOR） */
+  semanticaAddCausal: (fromId: string, toId: string, type: SemanticaCausalType = 'CAUSED') =>
+    req<SemanticaCausalResult>('/api/semantica/causal', {
+      method: 'POST',
+      body: JSON.stringify({ from_id: fromId, to_id: toId, type }),
+    }),
+
+  // ---- P2 本体增量（REQ-95 diff / REQ-96 CSV 灌装 / REQ-83 fork）----
+  /** 版本 diff：GET /api/ontologies/{id}/diff?from&to；400 版本无快照 / 404 → ApiError（UI 内联 Alert） */
+  diffOntologyVersions: (id: string, fromV: number, toV: number) =>
+    req<DiffResult>(`/api/ontologies/${id}/diff?from=${fromV}&to=${toV}`),
+  /** CSV 灌装预览：multipart（csv + concept/key_column/relation_columns/attribute_columns/skip_rows/mode=preview） */
+  ingestCsvPreview: (id: string, form: FormData) => reqMultipart<CsvIngestPreview>(`/api/ontologies/${id}/ingest-csv`, form),
+  /** CSV 灌装确认入库：同 multipart，mode=apply；400 校验失败带 validation_errors */
+  ingestCsvApply: (id: string, form: FormData) => reqMultipart<CsvIngestApplyResult>(`/api/ontologies/${id}/ingest-csv`, form),
+  /** fork 本体：POST /api/ontologies/{id}/fork → 201 新本体（forked_from=源 id，version 重置 1） */
+  forkOntology: (id: string, input: ForkOntologyInput = {}) =>
+    req<Ontology>(`/api/ontologies/${id}/fork`, { method: 'POST', body: JSON.stringify(input) }),
 }
 
 /**

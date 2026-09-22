@@ -4,8 +4,11 @@
 #    首次 pip install 需下载数 GB、耗时较长；生成的 .venv 体积同样达数 GB，属正常现象。
 #    要求 Python 3.10–3.12（见 setup.sh 校验）。
 
-# 消费/检索/审计能力主体（v0.6.8 起含 12 项已披露安全漏洞修复，勿降级）
-semantica==0.6.8
+# 消费/检索/审计能力主体 + Explorer UI（REQ-101，§4.9.2/§4.9.4）
+# [explorer] extra 拉起 Explorer ASGI 依赖（其传递依赖 fastapi/uvicorn/websockets 等，
+# 与下列显式 pin 去重后交由 pip 统一解析，避免重复声明）
+# v0.6.8 起含 12 项已披露安全漏洞修复，勿降级
+semantica[explorer]==0.6.8
 
 # REST 服务框架
 fastapi==0.115.6
@@ -13,3 +16,7 @@ uvicorn==0.34.0
 
 # pydantic 由 fastapi / semantica 传递引入；锁 2.x 大版本，避免与 semantica 自身约束冲突
 pydantic>=2.0,<3.0
+
+# MCP 端点（REQ-99 ③，Streamable HTTP，挂载于 /mcp）
+# ⚠️ 锁 <2：mcp 2.x 将 FastMCP 改名为 MCPServer（破坏性变更）；v1.30.0 已实测验证
+mcp>=1.2.0,<2

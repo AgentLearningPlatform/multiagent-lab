@@ -120,7 +120,8 @@ func withStatic(next http.Handler) http.Handler {
 	}
 	fs := http.FileServer(http.Dir(abs))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") ||
+			strings.HasPrefix(r.URL.Path, "/semantica/") { // Semantica Explorer iframe（§4.9.2/§4.9.4）
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -31,6 +31,7 @@ import type { BadgeProps } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   ApiOutlined,
+  BranchesOutlined,
   CheckCircleOutlined,
   CodeOutlined,
   CopyOutlined,
@@ -64,12 +65,18 @@ import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import type {
   AiDraftResult,
   Conversation,
+  CsvIngestPreview,
+  DiffCollection,
+  DiffImpact,
+  DiffItem,
+  DiffResult,
   ImportReport,
   LearningExample,
   Ontology,
   RuntimeProfile,
   Spec,
   SpecConcept,
+  SpecInstance,
   TraceEntry,
   ValidationError,
   VersionMeta,
@@ -188,6 +195,9 @@ export default function OntologyPage() {
   const [validations, setValidations] = useState<Record<string, ValidationState>>({})
   const [step, setStep] = useState(0)
   const [renameOpen, setRenameOpen] = useState(false)
+  const [forkName, setForkName] = useState('')
+  const [forkBusy, setForkBusy] = useState(false)
+  const [forkErr, setForkErr] = useState<string | null>(null)
 
   const reloadOntos = (selectId?: string) => {
     api
@@ -276,6 +286,30 @@ export default function OntologyPage() {
     } catch (e: any) {
       showToast(e.message, 'err')
     }
+  }
+
+  /** REQ-83：fork 为独立新本体（forked_from=源 id，version 重置 1），并选中新本体 */
+  const doFork = async () => {
+    if (!active) return
+    setForkBusy(true)
+    setForkErr(null)
+    try {
+      const o = await api.forkOntology(active.id, forkName.trim() ? { name: forkName.trim() } : {})
+      showToast(`已 Fork 为「${o.name}」`)
+      setForkName('')
+      reloadOntos(o.id)
+      reloadProfiles()
+    } catch (e: any) {
+      setForkErr(e?.message ?? 'Fork 失败')
+    } finally {
+      setForkBusy(false)
+    }
+  }
+
+  /** CSV 灌装入库后：刷新 Spec / 左栏进度（版本列表在 S2 挂载时自取） */
+  const handleIngested = () => {
+    reloadOntos(activeId ?? undefined)
+    setSpecTick((t) => t + 1)
   }
 
   return (
@@ -379,6 +413,34 @@ export default function OntologyPage() {
                   <p className="work-head-desc">{active.description || '未填写描述'}</p>
                 </div>
                 <Space>
+                  <Popconfirm
+                    icon={null}
+                    title="Fork 为新本体"
+                    description={
+                      <Space direction="vertical" style={{ width: 300 }} size={8}>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          复制该本体的全部 Spec 与产物为新本体（forked_from 记录来源，版本重置为 1）。
+                        </Typography.Text>
+                        <Input
+                          value={forkName}
+                          onChange={(e) => setForkName(e.target.value)}
+                          placeholder={`新名称（可选，默认「${active.name} 副本」）`}
+                        />
+                      </Space>
+                    }
+                    okText="Fork"
+                    cancelText="取消"
+                    okButtonProps={{ loading: forkBusy }}
+                    onOpenChange={(o) => {
+                      if (o) {
+                        setForkName('')
+                        setForkErr(null)
+                      }
+                    }}
+                    onConfirm={doFork}
+                  >
+                    <Button icon={<BranchesOutlined />}>Fork 本体</Button>
+                  </Popconfirm>
                   <Button icon={<EditOutlined />} onClick={() => setRenameOpen(true)}>
                     重命名
                   </Button>
@@ -396,6 +458,17 @@ export default function OntologyPage() {
                   </Popconfirm>
                 </Space>
               </div>
+
+              {forkErr && (
+                <Alert
+                  type="error"
+                  showIcon
+                  closable
+                  message="Fork 失败"
+                  description={forkErr}
+                  onClose={() => setForkErr(null)}
+                />
+              )}
 
               <div className="onto-steps">
                 <Steps
@@ -441,7 +514,7 @@ export default function OntologyPage() {
                   </Space>
                 }
               >
-                {step === 0 && <S1Source activeOntology={active} onChanged={handleCreated} />}
+                {step === 0 && <S1Source activeOntology={active} onChanged={handleCreated} onIngested={handleIngested} />}
                 {step === 1 && (
                   <S2Edit
                     ontology={active}
@@ -494,7 +567,16 @@ export default function OntologyPage() {
 // S1 本体来源
 // ---------------------------------------------------------------------------
 
-function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | null; onChanged: (selectId?: string) => void }) {
+function S1Source({
+  activeOntology,
+  onChanged,
+  onIngested,
+}: {
+  activeOntology: Ontology | null
+  onChanged: (selectId?: string) => void
+  /** CSV 灌装入库后回调（刷新 Spec / 版本列表 / 左栏进度）；无目标本体时不传 */
+  onIngested?: () => void
+}) {
   const { showToast } = useUI()
   const [importMode, setImportMode] = useState<'file' | 'paste'>('file')
   const [pasteFilename, setPasteFilename] = useState('')
@@ -567,11 +649,15 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
     setAiBusy(true)
     setAiResult(null)
     try {
+      // REQ-82：CQ 引导折叠进 extraHint（后端 extraHint 参数已支持，无需 capability_questions 字段）
       const cqs = aiCq
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean)
-      const r = await api.aiDraftOntology(aiDesc.trim(), aiHint.trim() || undefined, cqs.length ? cqs : undefined)
+      const hintParts: string[] = []
+      if (cqs.length) hintParts.push(`能力问题：\n${cqs.map((c, i) => `${i + 1}. ${c}`).join('\n')}`)
+      if (aiHint.trim()) hintParts.push(aiHint.trim())
+      const r = await api.aiDraftOntology(aiDesc.trim(), hintParts.join('\n\n') || undefined)
       setAiResult(r)
       setAiName(r.spec?.name ?? '')
       showToast('草案已生成，请确认后创建')
@@ -750,6 +836,21 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
             label: 'AI 创建',
             children: (
               <>
+                <div className="onto-sec" style={{ marginTop: 0 }}>
+                  <span className="onto-sec-title">能力问题（CQ）引导（可选，每行一个）</span>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    先列 3~5 个本体要回答的问题，会并入生成上下文（REQ-82）
+                  </Typography.Text>
+                </div>
+                <Input.TextArea
+                  value={aiCq}
+                  onChange={(e) => setAiCq(e.target.value)}
+                  autoSize={{ minRows: 2, maxRows: 5 }}
+                  placeholder={'本体应能回答的关键问题，每行一个：\n某缺陷源于哪个需求？\n某故障应采取什么维护措施？'}
+                />
+                <div className="onto-sec">
+                  <span className="onto-sec-title">领域描述（必填）</span>
+                </div>
                 <Input.TextArea
                   value={aiDesc}
                   onChange={(e) => setAiDesc(e.target.value)}
@@ -761,15 +862,6 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
                   value={aiHint}
                   onChange={(e) => setAiHint(e.target.value)}
                   placeholder="额外提示（可选，如：聚焦 Deployment / Service / Pod 三类）"
-                />
-                <Input.TextArea
-                  style={{ marginTop: 8 }}
-                  value={aiCq}
-                  onChange={(e) => setAiCq(e.target.value)}
-                  autoSize={{ minRows: 2, maxRows: 5 }}
-                  placeholder={
-                    '能力问题 CQ（可选，每行一条）：本体应能回答的关键问题\n如：某缺陷源于哪个需求？某故障应采取什么维护措施？'
-                  }
                 />
                 <Button
                   type="primary"
@@ -803,6 +895,20 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
                   </div>
                 )}
               </>
+            ),
+          },
+          {
+            key: 'csv',
+            label: 'CSV 灌装',
+            children: activeOntology ? (
+              <CsvIngest ontology={activeOntology} onIngested={onIngested} />
+            ) : (
+              <Alert
+                type="info"
+                showIcon
+                message="CSV 灌装需先选择目标本体"
+                description="该路径把 CSV 行按同名映射灌装为 Spec 实例（REQ-96 P2a，数据进 spec_json 体系）。请先创建 / 导入一个本体并选中它，再回到 S1 执行灌装。"
+              />
             ),
           },
           {
@@ -856,6 +962,359 @@ function S1Source({ activeOntology, onChanged }: { activeOntology: Ontology | nu
           },
         ]}
       />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// S1 路径：CSV 灌装（REQ-96 P2a：同名映射 → Spec 实例草稿 → 校验入库）
+// ---------------------------------------------------------------------------
+
+/** 解析 CSV 首行表头（简单逗号切分；去引号 / BOM / 空白） */
+function parseCsvHeader(text: string): string[] {
+  const first = text.split(/\r?\n/, 1)[0] ?? ''
+  return first
+    .split(',')
+    .map((h) => h.trim().replace(/^"|"$/g, '').replace(/^\uFEFF/, ''))
+    .filter((h) => h.length > 0)
+}
+
+/** 组装灌装 multipart（preview / apply 共用，mode 区分；relation/attribute 逗号连接） */
+function buildIngestForm(
+  file: File,
+  cfg: { concept: string; keyColumn: string; relationColumns: string[]; attributeColumns: string[]; skipRows: number },
+  mode: 'preview' | 'apply',
+): FormData {
+  const fd = new FormData()
+  fd.append('csv', file)
+  fd.append('concept', cfg.concept)
+  fd.append('key_column', cfg.keyColumn)
+  fd.append('relation_columns', cfg.relationColumns.join(','))
+  fd.append('attribute_columns', cfg.attributeColumns.join(','))
+  fd.append('skip_rows', String(cfg.skipRows))
+  fd.append('mode', mode)
+  return fd
+}
+
+function attrSummary(attrs?: Record<string, unknown>): string {
+  if (!attrs) return '—'
+  const parts = Object.entries(attrs).map(([k, v]) => `${k}=${v === null || v === undefined ? '' : String(v)}`)
+  return parts.length ? parts.join(', ') : '—'
+}
+
+function relSummary(rels?: SpecInstance['relations']): string {
+  if (!rels || rels.length === 0) return '—'
+  return rels.map((r) => `${r.rel}→${r.target}`).join(', ')
+}
+
+const DRAFT_COLUMNS: ColumnsType<SpecInstance> = [
+  { title: '实例名', dataIndex: 'name', width: 180, render: (v) => <Typography.Text code style={{ fontSize: 12 }}>{String(v)}</Typography.Text> },
+  { title: '概念', dataIndex: 'concept', width: 140 },
+  { title: '属性', dataIndex: 'attributes', render: (_, r) => <Typography.Text type="secondary" style={{ fontSize: 12 }}>{attrSummary(r.attributes)}</Typography.Text> },
+  { title: '关系', dataIndex: 'relations', render: (_, r) => <Typography.Text type="secondary" style={{ fontSize: 12 }}>{relSummary(r.relations)}</Typography.Text> },
+]
+
+function CsvIngest({ ontology, onIngested }: { ontology: Ontology; onIngested?: () => void }) {
+  const { showToast } = useUI()
+  const [concepts, setConcepts] = useState<SpecConcept[]>([])
+  const [specErr, setSpecErr] = useState<string | null>(null)
+
+  const [file, setFile] = useState<File | null>(null)
+  const [headers, setHeaders] = useState<string[]>([])
+  const [concept, setConcept] = useState<string | undefined>()
+  const [keyColumn, setKeyColumn] = useState<string | undefined>()
+  const [relationColumns, setRelationColumns] = useState<string[]>([])
+  const [attributeColumns, setAttributeColumns] = useState<string[]>([])
+  const [skipRows, setSkipRows] = useState<number>(0)
+
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [preview, setPreview] = useState<CsvIngestPreview | null>(null)
+  const [previewErr, setPreviewErr] = useState<string | null>(null)
+
+  const [applyBusy, setApplyBusy] = useState(false)
+  const [applyErrors, setApplyErrors] = useState<ValidationError[]>([])
+
+  // 目标本体的 Spec 概念（供 concept 选择；404 视为尚未保存）
+  useEffect(() => {
+    let alive = true
+    api
+      .getSpec(ontology.id)
+      .then((s) => {
+        if (alive) {
+          setConcepts(s.concepts ?? [])
+          setSpecErr(null)
+        }
+      })
+      .catch((e: any) => {
+        if (!alive) return
+        setConcepts([])
+        if (!(e instanceof ApiError && e.status === 404)) setSpecErr(e?.message ?? 'Spec 加载失败')
+      })
+    return () => {
+      alive = false
+    }
+  }, [ontology.id])
+
+  // 切换本体：重置映射与预览（避免跨本体残留）
+  useEffect(() => {
+    setFile(null)
+    setHeaders([])
+    setConcept(undefined)
+    setKeyColumn(undefined)
+    setRelationColumns([])
+    setAttributeColumns([])
+    setSkipRows(0)
+    setPreview(null)
+    setPreviewErr(null)
+    setApplyErrors([])
+  }, [ontology.id])
+
+  const pickFile = async (f: File) => {
+    try {
+      const text = await f.text()
+      setFile(f)
+      setHeaders(parseCsvHeader(text))
+      setPreview(null)
+      setPreviewErr(null)
+      setApplyErrors([])
+    } catch (e: any) {
+      showToast(e?.message ?? '文件读取失败', 'err')
+    }
+  }
+
+  const validate = (): boolean => {
+    if (!file) {
+      showToast('请先上传 CSV 文件', 'err')
+      return false
+    }
+    if (!concept) {
+      showToast('请选择目标概念（concept）', 'err')
+      return false
+    }
+    if (!keyColumn) {
+      showToast('请选择主键列（key_column）', 'err')
+      return false
+    }
+    return true
+  }
+
+  const cfg = { concept: concept ?? '', keyColumn: keyColumn ?? '', relationColumns, attributeColumns, skipRows }
+
+  const doPreview = async () => {
+    if (!validate() || !file) return
+    setPreviewBusy(true)
+    setPreviewErr(null)
+    setApplyErrors([])
+    try {
+      const r = await api.ingestCsvPreview(ontology.id, buildIngestForm(file, cfg, 'preview'))
+      setPreview(r)
+    } catch (e: any) {
+      setPreview(null)
+      setPreviewErr(e?.message ?? '预览失败')
+    } finally {
+      setPreviewBusy(false)
+    }
+  }
+
+  const doApply = async () => {
+    if (!validate() || !file) return
+    setApplyBusy(true)
+    setApplyErrors([])
+    try {
+      const r = await api.ingestCsvApply(ontology.id, buildIngestForm(file, cfg, 'apply'))
+      showToast(`灌装成功（version ${r.version}）`)
+      setPreview(null)
+      onIngested?.()
+    } catch (e: any) {
+      if (e instanceof ApiError && e.validationErrors?.length) setApplyErrors(e.validationErrors)
+      showToast(e?.message ?? '灌装失败', 'err')
+    } finally {
+      setApplyBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="onto-sec" style={{ marginTop: 0 }}>
+        <span className="onto-sec-title">CSV 灌装（REQ-96 P2a · 同名映射）</span>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          目标本体「{ontology.name}」· 概念 {concepts.length} 个
+        </Typography.Text>
+      </div>
+
+      {specErr && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message="Spec 加载失败" description={specErr} />}
+      {!specErr && concepts.length === 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message="该本体尚无概念"
+          description="CSV 灌装需目标概念与列映射；请先在 S2 保存含概念的 Spec 后再灌装。"
+        />
+      )}
+
+      <Upload.Dragger
+        accept=".csv,.txt"
+        multiple={false}
+        showUploadList={false}
+        beforeUpload={(f) => {
+          void pickFile(f)
+          return false
+        }}
+      >
+        <p className="ant-upload-drag-icon">
+          <InboxOutlined />
+        </p>
+        <p className="ant-upload-text">点击或拖拽 CSV 文件到此区域</p>
+        <p className="ant-upload-hint">首行作为表头；行按同名映射生成 Spec 实例草稿，确认后校验入库为新版本</p>
+      </Upload.Dragger>
+
+      {file && (
+        <div className="onto-sec">
+          <span className="onto-sec-title">文件</span>
+          <Tag color="blue" style={{ margin: 0 }}>
+            {file.name}
+          </Tag>
+          <Tag style={{ margin: 0 }}>{headers.length} 列</Tag>
+        </div>
+      )}
+
+      {file && (
+        <div className="onto-csv-grid">
+          <div className="onto-csv-field">
+            <span className="cfg-label">目标概念 concept（必填）</span>
+            <Select
+              style={{ width: '100%' }}
+              value={concept}
+              onChange={setConcept}
+              placeholder={concepts.length ? '选择 Spec 概念' : '无可用概念'}
+              options={concepts.map((c) => ({ value: c.name, label: `${c.label || c.name}（${c.name}）` }))}
+            />
+          </div>
+          <div className="onto-csv-field">
+            <span className="cfg-label">主键列 key_column（必填）</span>
+            <Select
+              style={{ width: '100%' }}
+              value={keyColumn}
+              onChange={setKeyColumn}
+              placeholder="选择 CSV 表头列"
+              options={headers.map((h) => ({ value: h, label: h }))}
+            />
+          </div>
+          <div className="onto-csv-field">
+            <span className="cfg-label">关系列 relation_columns（可选）</span>
+            <Select
+              mode="multiple"
+              allowClear
+              style={{ width: '100%' }}
+              value={relationColumns}
+              onChange={setRelationColumns}
+              placeholder="选择列（逗号连接）"
+              options={headers.map((h) => ({ value: h, label: h }))}
+            />
+          </div>
+          <div className="onto-csv-field">
+            <span className="cfg-label">属性列 attribute_columns（可选）</span>
+            <Select
+              mode="multiple"
+              allowClear
+              style={{ width: '100%' }}
+              value={attributeColumns}
+              onChange={setAttributeColumns}
+              placeholder="选择列（逗号连接）"
+              options={headers.map((h) => ({ value: h, label: h }))}
+            />
+          </div>
+          <div className="onto-csv-field">
+            <span className="cfg-label">跳过行 skip_rows</span>
+            <InputNumber
+              min={0}
+              max={100000}
+              value={skipRows}
+              onChange={(v) => setSkipRows(typeof v === 'number' ? v : 0)}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {file && (
+        <Space size={10} wrap style={{ marginTop: 10 }}>
+          <Button type="primary" loading={previewBusy} onClick={doPreview}>
+            预览草稿
+          </Button>
+          <Button type="primary" ghost loading={applyBusy} disabled={!preview} onClick={doApply}>
+            确认灌装
+          </Button>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            预览仅统计与草稿；确认后经校验入库并递增版本（400 校验失败展示结构化错误）。
+          </Typography.Text>
+        </Space>
+      )}
+
+      {previewErr && <Alert type="error" showIcon style={{ marginTop: 10 }} message="预览失败" description={previewErr} />}
+
+      {preview && (
+        <>
+          <div className="onto-sec">
+            <span className="onto-sec-title">预览结果</span>
+          </div>
+          <div className="onto-csv-stats">
+            <span>
+              读取行 <b>{preview.stats?.rows_read ?? 0}</b>
+            </span>
+            <span>
+              生成实例 <b>{preview.stats?.instances_generated ?? 0}</b>
+            </span>
+            <span>
+              跳过空主键 <b>{preview.stats?.skipped_empty_key ?? 0}</b>
+            </span>
+          </div>
+          {preview.warnings && preview.warnings.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 10 }}
+              message={`警告 ${preview.warnings.length} 条`}
+              description={
+                <ul className="onto-report-list">
+                  {preview.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              }
+            />
+          )}
+          <Table<SpecInstance>
+            rowKey={(r, i) => `${r.name}-${i ?? 0}`}
+            columns={DRAFT_COLUMNS}
+            dataSource={(preview.draft ?? []).slice(0, 20)}
+            pagination={false}
+            size="small"
+            scroll={{ x: 'max-content' }}
+            locale={{ emptyText: '无草稿实例' }}
+          />
+          {(preview.draft?.length ?? 0) > 20 && (
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+              仅展示前 20 条（共 {preview.draft?.length ?? 0} 条）
+            </Typography.Text>
+          )}
+        </>
+      )}
+
+      {applyErrors.length > 0 && (
+        <>
+          <Alert type="error" showIcon style={{ marginTop: 12 }} message={`灌装校验未通过（${applyErrors.length} 项）`} />
+          <Table<ValidationError>
+            rowKey={(r) => `${r.path}::${r.message}`}
+            columns={ERR_COLUMNS}
+            dataSource={applyErrors}
+            pagination={false}
+            size="small"
+            style={{ marginTop: 8 }}
+          />
+        </>
+      )}
     </>
   )
 }
@@ -1038,6 +1497,10 @@ function S2Edit({
       <div style={{ marginTop: 16 }}>
         <VersionHistory ontologyId={ontology.id} refreshSignal={vhRefresh} />
       </div>
+
+      <div style={{ marginTop: 16 }}>
+        <VersionDiff ontologyId={ontology.id} refreshSignal={vhRefresh} />
+      </div>
     </>
   )
 }
@@ -1152,6 +1615,326 @@ function VersionHistory({ ontologyId, refreshSignal }: { ontologyId: string; ref
             </Button>
           </div>
           <pre className="onto-guide-pre">{original.text}</pre>
+        </>
+      )}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 版本对比（REQ-95：GET /api/ontologies/{id}/diff?from&to）
+// ---------------------------------------------------------------------------
+
+/** 元素摘要（按联合类型判别：实例 / 关系 / 概念） */
+function diffItemSummary(it: DiffItem): string {
+  if ('concept' in it) return `概念 ${String(it.concept)}`
+  if ('from' in it && 'to' in it) return `${String(it.from)} → ${String(it.to)}`
+  if ('definition' in it && it.definition) return String(it.definition)
+  if ('parents' in it && (it.parents?.length ?? 0) > 0) return `父 ${(it.parents ?? []).join(', ')}`
+  return ''
+}
+
+function fmtDiffValue(v: unknown): string {
+  if (v === null || v === undefined) return '（空）'
+  if (typeof v === 'string') return v.length > 120 ? `${v.slice(0, 120)}…` : v
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+/** 防御式归一化（后端缺集合字段时不崩） */
+function normalizeCollection(c?: DiffCollection): DiffCollection {
+  return { added: c?.added ?? [], removed: c?.removed ?? [], changed: c?.changed ?? [] }
+}
+
+const IMPACT_COLUMNS: ColumnsType<DiffImpact> = [
+  { title: '名称', dataIndex: 'name', render: (v) => <Typography.Text code style={{ fontSize: 12 }}>{String(v)}</Typography.Text> },
+  { title: '被引用次数', dataIndex: 'referenced_by', width: 140 },
+]
+
+/** 客户端生成 Markdown 对比报告（REQ-95） */
+function buildDiffMarkdown(r: DiffResult): string {
+  const lines: string[] = [`# 版本对比报告 v${r.from_version} → v${r.to_version}`, '']
+  const sections: [string, DiffCollection][] = [
+    ['概念', normalizeCollection(r.concepts)],
+    ['关系', normalizeCollection(r.relations)],
+    ['实例', normalizeCollection(r.instances)],
+  ]
+  for (const [title, c] of sections) {
+    lines.push(`## ${title}`, '')
+    lines.push(`### 新增（${c.added.length}）`)
+    c.added.forEach((it) => lines.push(`- ${it.name}${diffItemSummary(it) ? ` — ${diffItemSummary(it)}` : ''}`))
+    lines.push('', `### 删除（${c.removed.length}）`)
+    c.removed.forEach((it) => lines.push(`- ${it.name}${diffItemSummary(it) ? ` — ${diffItemSummary(it)}` : ''}`))
+    lines.push('', `### 修改（${c.changed.length}）`)
+    c.changed.forEach((ch) => {
+      lines.push(`- ${ch.name}`)
+      Object.entries(ch.fields ?? {}).forEach(([f, d]) => lines.push(`  - ${f}: \`${fmtDiffValue(d?.from)}\` → \`${fmtDiffValue(d?.to)}\``))
+    })
+    lines.push('')
+  }
+  lines.push('## 引用影响', '', '| 名称 | 被引用次数 |', '| --- | --- |')
+  ;[...(r.impact ?? [])]
+    .sort((a, b) => (b.referenced_by ?? 0) - (a.referenced_by ?? 0))
+    .forEach((i) => lines.push(`| ${i.name} | ${i.referenced_by} |`))
+  return lines.join('\n')
+}
+
+function DiffSectionLabel({ title, c }: { title: string; c: DiffCollection }) {
+  return (
+    <Space size={8} wrap>
+      <span>{title}</span>
+      <Tag color="green" style={{ margin: 0 }}>
+        +{c.added.length}
+      </Tag>
+      <Tag color="red" style={{ margin: 0 }}>
+        -{c.removed.length}
+      </Tag>
+      <Tag color="orange" style={{ margin: 0 }}>
+        ~{c.changed.length}
+      </Tag>
+    </Space>
+  )
+}
+
+/** 单集合渲染：added/removed 双栏并排 + changed 字段级 from→to */
+function DiffCollectionView({ collection }: { collection: DiffCollection }) {
+  const { added, removed, changed } = collection
+  if (added.length + removed.length + changed.length === 0) {
+    return (
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        无变化
+      </Typography.Text>
+    )
+  }
+  return (
+    <div className="onto-diff-collection">
+      <div className="onto-diff-cols">
+        <div className="onto-diff-col add">
+          <div className="onto-diff-col-head">
+            新增 <Tag color="green" style={{ margin: 0 }}>{added.length}</Tag>
+          </div>
+          {added.length === 0 ? (
+            <span className="onto-diff-empty">—</span>
+          ) : (
+            <ul className="onto-diff-list">
+              {added.map((it, i) => (
+                <li key={`${it.name}-${i}`}>
+                  <span className="onto-diff-name">{it.name}</span>
+                  {diffItemSummary(it) && <span className="onto-diff-sub">{diffItemSummary(it)}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="onto-diff-col del">
+          <div className="onto-diff-col-head">
+            删除 <Tag color="red" style={{ margin: 0 }}>{removed.length}</Tag>
+          </div>
+          {removed.length === 0 ? (
+            <span className="onto-diff-empty">—</span>
+          ) : (
+            <ul className="onto-diff-list">
+              {removed.map((it, i) => (
+                <li key={`${it.name}-${i}`}>
+                  <span className="onto-diff-name">{it.name}</span>
+                  {diffItemSummary(it) && <span className="onto-diff-sub">{diffItemSummary(it)}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+      <div className="onto-diff-changed">
+        <div className="onto-diff-col-head">
+          修改 <Tag color="orange" style={{ margin: 0 }}>{changed.length}</Tag>
+        </div>
+        {changed.length === 0 ? (
+          <span className="onto-diff-empty">—</span>
+        ) : (
+          changed.map((c, i) => (
+            <div className="onto-diff-changed-item" key={`${c.name}-${i}`}>
+              <span className="onto-diff-name">{c.name}</span>
+              <ul className="onto-diff-fields">
+                {Object.entries(c.fields ?? {}).map(([f, ch]) => (
+                  <li key={f}>
+                    <Typography.Text code style={{ fontSize: 12 }}>
+                      {f}
+                    </Typography.Text>
+                    <span className="onto-diff-from">{fmtDiffValue(ch?.from)}</span>
+                    <span className="onto-diff-arrow">→</span>
+                    <span className="onto-diff-to">{fmtDiffValue(ch?.to)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function VersionDiff({ ontologyId, refreshSignal }: { ontologyId: string; refreshSignal: number }) {
+  const { showToast } = useUI()
+  const [versions, setVersions] = useState<VersionMeta[] | null>(null)
+  const [vErr, setVErr] = useState<string | null>(null)
+  const [vLoading, setVLoading] = useState(false)
+  const [from, setFrom] = useState<number | undefined>()
+  const [to, setTo] = useState<number | undefined>()
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<DiffResult | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    setVLoading(true)
+    setVErr(null)
+    api
+      .listVersions(ontologyId)
+      .then((r) => {
+        if (alive) setVersions(r.versions ?? [])
+      })
+      .catch((e: any) => {
+        if (alive) {
+          setVersions(null)
+          setVErr(e?.message ?? '版本列表获取失败')
+        }
+      })
+      .finally(() => {
+        if (alive) setVLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [ontologyId, refreshSignal])
+
+  // 切换本体：重置选择与结果
+  useEffect(() => {
+    setFrom(undefined)
+    setTo(undefined)
+    setResult(null)
+    setErr(null)
+  }, [ontologyId])
+
+  // 默认 from=倒数第二、to=最新
+  useEffect(() => {
+    if (!versions || versions.length === 0) return
+    const asc = versions
+    setTo((cur) => cur ?? asc[asc.length - 1].version)
+    setFrom((cur) => cur ?? (asc.length >= 2 ? asc[asc.length - 2].version : asc[0].version))
+  }, [versions])
+
+  const run = async () => {
+    if (from == null || to == null) {
+      showToast('请选择对比版本', 'err')
+      return
+    }
+    if (from === to) {
+      showToast('请选择两个不同版本', 'err')
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    setResult(null)
+    try {
+      const r = await api.diffOntologyVersions(ontologyId, from, to)
+      setResult(r)
+    } catch (e: any) {
+      setErr(e?.message ?? '版本对比失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const exportMd = () => {
+    if (!result) return
+    const blob = new Blob([buildDiffMarkdown(result)], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `diff_${ontologyId}_v${result.from_version}_v${result.to_version}.md`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const versionOptions = (versions ?? []).map((v) => ({ value: v.version, label: `v${v.version} · ${v.created_at}` }))
+
+  return (
+    <>
+      <div className="onto-sec">
+        <span className="onto-sec-title">版本对比（REQ-95，三集合结构化 diff + 引用影响）</span>
+        <span className="hit-spacer" />
+        {result && (
+          <Button size="small" icon={<DownloadOutlined />} onClick={exportMd}>
+            导出 Markdown 报告
+          </Button>
+        )}
+      </div>
+
+      {vErr ? (
+        <Alert type="warning" showIcon message="版本列表获取失败" description={vErr} />
+      ) : (versions?.length ?? 0) < 2 ? (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          至少需要两个版本才能对比（每次保存 / 导入 / 灌装自动留快照）。
+        </Typography.Text>
+      ) : (
+        <>
+          <Space size={8} wrap>
+            <span className="cfg-label">从</span>
+            <Select size="small" style={{ width: 220 }} value={from} onChange={setFrom} options={versionOptions} loading={vLoading} />
+            <span className="onto-diff-arrow">→</span>
+            <span className="cfg-label">到</span>
+            <Select size="small" style={{ width: 220 }} value={to} onChange={setTo} options={versionOptions} loading={vLoading} />
+            <Button size="small" type="primary" loading={busy} onClick={run}>
+              对比
+            </Button>
+          </Space>
+
+          {err && <Alert type="error" showIcon style={{ marginTop: 10 }} message="版本对比失败" description={err} />}
+
+          {result && (
+            <div style={{ marginTop: 12 }}>
+              <Collapse
+                defaultActiveKey={['concepts', 'relations', 'instances']}
+                items={[
+                  {
+                    key: 'concepts',
+                    label: <DiffSectionLabel title="概念" c={normalizeCollection(result.concepts)} />,
+                    children: <DiffCollectionView collection={normalizeCollection(result.concepts)} />,
+                  },
+                  {
+                    key: 'relations',
+                    label: <DiffSectionLabel title="关系" c={normalizeCollection(result.relations)} />,
+                    children: <DiffCollectionView collection={normalizeCollection(result.relations)} />,
+                  },
+                  {
+                    key: 'instances',
+                    label: <DiffSectionLabel title="实例" c={normalizeCollection(result.instances)} />,
+                    children: <DiffCollectionView collection={normalizeCollection(result.instances)} />,
+                  },
+                ]}
+              />
+              <div className="onto-sec">
+                <span className="onto-sec-title">引用影响（变更元素被引用次数）</span>
+              </div>
+              {(result.impact ?? []).length === 0 ? (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  无引用影响记录
+                </Typography.Text>
+              ) : (
+                <Table<DiffImpact>
+                  rowKey="name"
+                  columns={IMPACT_COLUMNS}
+                  dataSource={[...(result.impact ?? [])].sort((a, b) => (b.referenced_by ?? 0) - (a.referenced_by ?? 0))}
+                  pagination={false}
+                  size="small"
+                  scroll={{ x: 'max-content' }}
+                />
+              )}
+            </div>
+          )}
         </>
       )}
     </>

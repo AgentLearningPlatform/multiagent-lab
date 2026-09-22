@@ -3,6 +3,8 @@ import {
   Alert,
   Button,
   Card,
+  Descriptions,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -15,18 +17,30 @@ import {
   Table,
   Tabs,
   Tag,
+  Timeline,
   Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { ExportOutlined, ReloadOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons'
+import {
+  BranchesOutlined,
+  ExportOutlined,
+  HistoryOutlined,
+  LinkOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
 import { api, ApiError } from '../api/client'
 import type {
   Ontology,
+  SemanticaCausalType,
+  SemanticaChainNode,
   SemanticaClaim,
   SemanticaDecision,
   SemanticaDecisionInput,
   SemanticaHealth,
   SemanticaIngestResult,
+  SemanticaProvNode,
 } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -199,7 +213,11 @@ export default function SemanticaPage() {
           items={[
             { key: 'home', label: '首页', children: <HomeTab /> },
             { key: 'graph', label: '知识图谱', children: <GraphTab onMutated={loadHealth} onGoOntology={() => setPage('ontology')} /> },
-            { key: 'audit', label: '决策审计', children: <AuditTab onMutated={loadHealth} /> },
+            {
+              key: 'audit',
+              label: '决策审计',
+              children: <AuditTab onMutated={loadHealth} workerDown={down} onGoOntology={() => setPage('ontology')} />,
+            },
           ]}
         />
 
@@ -541,23 +559,48 @@ function GraphTab({ onMutated, onGoOntology }: { onMutated: () => void; onGoOnto
 }
 
 // ---------------------------------------------------------------------------
-// 决策审计（轻量版，REQ-101 完整 PROV-O 链为 P2）
+// 决策审计（REQ-101 完整审计/溯源学习视图，§4.9.4）
 // ---------------------------------------------------------------------------
+
+/** 置信度 → 文本（防御式：worker 可能返回字符串 / null） */
+function confidenceText(v: unknown): string {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v !== '' ? Number(v) : NaN
+  return Number.isFinite(n) ? n.toFixed(2) : '—'
+}
+
+/** 任意值 → 可读文本（对象 JSON 化；PROV-O source/metadata 形状不定） */
+function fmtAny(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—'
+  if (typeof v === 'string') return v
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+/** 客户端下载文本（PROV-O Turtle 导出） */
+function downloadText(filename: string, text: string, mime: string) {
+  const blob = new Blob([text], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+const CAUSAL_OPTIONS: { value: SemanticaCausalType; label: string }[] = [
+  { value: 'CAUSED', label: 'CAUSED（导致）' },
+  { value: 'INFLUENCED', label: 'INFLUENCED（影响）' },
+  { value: 'PRECEDENT_FOR', label: 'PRECEDENT_FOR（先例）' },
+]
 
 const DECISION_COLUMNS: ColumnsType<SemanticaDecision> = [
   { title: '时间', dataIndex: 'ts', width: 175, render: (v) => v || '—' },
   { title: '类别', dataIndex: 'category', width: 130, render: (v) => v || '—' },
   { title: '情境', dataIndex: 'scenario', ellipsis: true, render: (v) => v || '—' },
   { title: '结论', dataIndex: 'outcome', ellipsis: true, render: (v) => v || '—' },
-  {
-    title: '置信度',
-    dataIndex: 'confidence',
-    width: 100,
-    render: (v) => {
-      const n = typeof v === 'number' ? v : typeof v === 'string' && v !== '' ? Number(v) : NaN
-      return Number.isFinite(n) ? n.toFixed(2) : '—'
-    },
-  },
+  { title: '置信度', dataIndex: 'confidence', width: 100, render: (v) => confidenceText(v) },
   {
     title: 'ID',
     dataIndex: 'id',
@@ -570,7 +613,15 @@ const DECISION_COLUMNS: ColumnsType<SemanticaDecision> = [
   },
 ]
 
-function AuditTab({ onMutated }: { onMutated: () => void }) {
+function AuditTab({
+  onMutated,
+  workerDown,
+  onGoOntology,
+}: {
+  onMutated: () => void
+  workerDown: boolean
+  onGoOntology: () => void
+}) {
   const { showToast } = useUI()
   const [form] = Form.useForm()
   const [busy, setBusy] = useState(false)
@@ -578,6 +629,10 @@ function AuditTab({ onMutated }: { onMutated: () => void }) {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [lastId, setLastId] = useState<string | null>(null)
+
+  // 审计抽屉：决策链 / PROV-O 溯源
+  const [chainTarget, setChainTarget] = useState<SemanticaDecision | null>(null)
+  const [lineageTarget, setLineageTarget] = useState<string | null>(null)
 
   const load = () => {
     setLoading(true)
@@ -634,8 +689,29 @@ function AuditTab({ onMutated }: { onMutated: () => void }) {
     }
   }
 
+  // 决策列表列：基础列 + 行内审计动作（决策链 / 溯源）
+  const columns: ColumnsType<SemanticaDecision> = [
+    ...DECISION_COLUMNS,
+    {
+      title: '操作',
+      width: 170,
+      render: (_, r) => (
+        <Space size={2}>
+          <Button type="link" size="small" icon={<BranchesOutlined />} disabled={!r.id} onClick={() => setChainTarget(r)}>
+            决策链
+          </Button>
+          <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => setLineageTarget(r.id || '')}>
+            溯源
+          </Button>
+        </Space>
+      ),
+    },
+  ]
+
   return (
     <div className="sema-home">
+      <TeachingStoryCard onGoOntology={onGoOntology} />
+
       <Card
         size="small"
         className="work-card sema-card"
@@ -695,7 +771,7 @@ function AuditTab({ onMutated }: { onMutated: () => void }) {
         {err && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message="决策列表获取失败" description={err} />}
         <Table<SemanticaDecision>
           rowKey={(r) => r.id || `${r.ts}-${r.category}-${r.outcome}`}
-          columns={DECISION_COLUMNS}
+          columns={columns}
           dataSource={sorted}
           loading={loading}
           pagination={false}
@@ -705,28 +781,463 @@ function AuditTab({ onMutated }: { onMutated: () => void }) {
         />
       </Card>
 
-      <Card
-        size="small"
-        className="work-card sema-card"
-        title={
-          <Space size={8}>
-            <span className="sema-card-no">3</span>
-            <span>PROV-O 审计链可视化（REQ-101 · P2）</span>
-          </Space>
-        }
-      >
+      <ExplorerCard workerDown={workerDown} />
+
+      {chainTarget && (
+        <DecisionChainDrawer
+          decision={chainTarget}
+          decisions={sorted}
+          onClose={() => setChainTarget(null)}
+          onChanged={() => {
+            load()
+            onMutated()
+          }}
+        />
+      )}
+      {lineageTarget !== null && <LineageDrawer initialEntityId={lineageTarget} onClose={() => setLineageTarget(null)} />}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 审计辅助组件：教学故事卡 / Explorer 嵌入 / 决策链抽屉 / PROV-O 溯源抽屉
+// ---------------------------------------------------------------------------
+
+/** 教学故事卡（§4.9.4）：推理可解释（REQ-94）与决策可审计（REQ-101）两段互链 */
+function TeachingStoryCard({ onGoOntology }: { onGoOntology: () => void }) {
+  return (
+    <Card
+      size="small"
+      className="work-card sema-card"
+      title={
+        <Space size={8}>
+          <span className="sema-card-no">0</span>
+          <span>教学故事 · 推理可解释 + 决策可审计（REQ-94 + REQ-101）</span>
+        </Space>
+      }
+    >
+      <div className="sema-compare">
+        <div className="sema-compare-col">
+          <div className="sema-compare-head">
+            <span className="sema-compare-title">推理可解释</span>
+            <Tag color="geekblue" style={{ margin: 0 }}>
+              REQ-94
+            </Tag>
+          </div>
+          <ul className="sema-compare-list">
+            <li>本体页 S5 运行方式 →「透视」页签：onto_* 每次翻译为 SPARQL 的调用留痕（原文 / 耗时 / 结果数）。</li>
+            <li>回答「引擎为何给出这个结果」。</li>
+          </ul>
+        </div>
+        <div className="sema-compare-col">
+          <div className="sema-compare-head">
+            <span className="sema-compare-title">决策可审计</span>
+            <Tag color="purple" style={{ margin: 0 }}>
+              REQ-101
+            </Tag>
+          </div>
+          <ul className="sema-compare-list">
+            <li>本页：record_decision 落决策记录 → 决策链（因果 / 先例）→ PROV-O 溯源（事实 → 来源 → 推理路径）。</li>
+            <li>回答「系统为何做出这个决策、依据哪些事实与来源」。</li>
+          </ul>
+        </div>
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <Button size="small" onClick={onGoOntology}>
+          前往本体页 · S5「透视」页签（推理对照）
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+/** Explorer 嵌入：semantica 原生 Explorer（React 19 + Sigma.js）经 /semantica/explorer/ 反代 iframe */
+function ExplorerCard({ workerDown }: { workerDown: boolean }) {
+  const [loading, setLoading] = useState(true)
+  return (
+    <Card
+      size="small"
+      className="work-card sema-card"
+      title={
+        <Space size={8}>
+          <span className="sema-card-no">3</span>
+          <span>Explorer 嵌入（semantica 原生图谱审计视图）</span>
+        </Space>
+      }
+      extra={
+        <Button size="small" type="link" icon={<LinkOutlined />} href="/semantica/explorer/" target="_blank" rel="noreferrer">
+          新窗口打开
+        </Button>
+      }
+    >
+      {workerDown ? (
         <Alert
-          type="info"
+          type="warning"
           showIcon
-          message="完整 PROV-O 链可视化属 P2，复用 semantica 自带 Explorer UI，本页不自研替代"
+          message="semantica worker 未启动，Explorer 不可用"
+          description="启动 worker（:8093）后此区域将嵌入 semantica 原生 Explorer；若未安装 semantica[explorer] 扩展，Explorer 会返回 503。"
+        />
+      ) : (
+        <div className="sema-explorer">
+          {loading && (
+            <div className="sema-explorer-skeleton">
+              <Spin size="small" />
+              <Typography.Text type="secondary">正在加载 Explorer（React 19 + Sigma.js）…</Typography.Text>
+            </div>
+          )}
+          <iframe
+            title="semantica-explorer"
+            src="/semantica/explorer/"
+            className="sema-explorer-iframe"
+            onLoad={() => setLoading(false)}
+          />
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/** 决策链抽屉：Timeline 渲染链节点 + 因果/先例关系写入（REQ-101） */
+function DecisionChainDrawer({
+  decision,
+  decisions,
+  onClose,
+  onChanged,
+}: {
+  decision: SemanticaDecision
+  decisions: SemanticaDecision[]
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const { showToast } = useUI()
+  const [chain, setChain] = useState<SemanticaChainNode[]>([])
+  const [warnings, setWarnings] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const [fromId, setFromId] = useState(decision.id)
+  const [toId, setToId] = useState<string | undefined>()
+  const [ctype, setCtype] = useState<SemanticaCausalType>('CAUSED')
+  const [adding, setAdding] = useState(false)
+
+  const load = () => {
+    setLoading(true)
+    setErr(null)
+    api
+      .semanticaDecisionChain(decision.id)
+      .then((r) => {
+        setChain(r.chain ?? [])
+        setWarnings(r.warnings ?? [])
+      })
+      .catch((e: any) => {
+        setChain([])
+        setWarnings([])
+        setErr(e?.message ?? '决策链获取失败')
+      })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decision.id])
+
+  const addCausal = async () => {
+    if (!fromId.trim() || !toId) {
+      showToast('请填写 from_id 并选择 to_id', 'err')
+      return
+    }
+    setAdding(true)
+    try {
+      await api.semanticaAddCausal(fromId.trim(), toId, ctype)
+      showToast('因果关系已写入')
+      setToId(undefined)
+      load()
+      onChanged()
+    } catch (e: any) {
+      showToast(e?.message ?? '写入失败', 'err')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const toOptions = decisions
+    .filter((d) => d.id && d.id !== fromId.trim())
+    .map((d) => ({ value: d.id, label: `${d.category || '决策'} · ${d.id}` }))
+
+  return (
+    <Drawer
+      open
+      width={640}
+      title={
+        <Space size={8}>
+          <BranchesOutlined />
+          <span>决策链 · {decision.category || decision.id || '（无 id）'}</span>
+        </Space>
+      }
+      onClose={onClose}
+      extra={
+        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>
+          刷新
+        </Button>
+      }
+    >
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        决策 id：<Typography.Text code style={{ fontSize: 12 }}>{decision.id || '（无 id）'}</Typography.Text>
+      </Typography.Text>
+
+      {err && <Alert type="error" showIcon style={{ marginTop: 10 }} message="决策链获取失败" description={err} />}
+      {warnings.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginTop: 10 }}
+          message="后端提示"
           description={
-            <>
-              P1 提供决策录入与列表（上方）；P2 将反代 / iframe 嵌入 semantica Explorer，按 <Typography.Text code>decision_id</Typography.Text> 展开
-              「事实 → 来源 → 推理路径」链路，并与 REQ-94 推理对照页互链，构成「推理可解释 + 决策可审计」教学闭环。
-            </>
+            <ul className="sema-warn-list">
+              {warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
           }
         />
-      </Card>
-    </div>
+      )}
+
+      <div className="sema-audit-chain">
+        {loading && chain.length === 0 ? (
+          <Spin size="small" />
+        ) : chain.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            style={{ margin: '16px 0' }}
+            description="暂无决策链（该决策尚无因果 / 溯源记录，可在下方添加）"
+          />
+        ) : (
+          <Timeline
+            items={chain.map((n, i) => ({
+              key: `${n.id}-${i}`,
+              color: i === 0 ? 'green' : 'blue',
+              title: (
+                <Space size={6} wrap>
+                  <Typography.Text code style={{ fontSize: 12 }}>
+                    {n.id || '（无 id）'}
+                  </Typography.Text>
+                  {n.relation && (
+                    <Tag color="purple" style={{ margin: 0 }}>
+                      {n.relation}
+                    </Tag>
+                  )}
+                  {i === 0 && (
+                    <Tag color="green" style={{ margin: 0 }}>
+                      起点
+                    </Tag>
+                  )}
+                </Space>
+              ),
+              content: (
+                <div className="sema-audit-node">
+                  {n.category && (
+                    <div>
+                      <span className="sema-audit-k">类别</span>
+                      {n.category}
+                    </div>
+                  )}
+                  {n.scenario && (
+                    <div>
+                      <span className="sema-audit-k">情境</span>
+                      {n.scenario}
+                    </div>
+                  )}
+                  {n.outcome && (
+                    <div>
+                      <span className="sema-audit-k">结论</span>
+                      {n.outcome}
+                    </div>
+                  )}
+                  <div>
+                    <span className="sema-audit-k">置信度</span>
+                    {confidenceText(n.confidence)}
+                  </div>
+                  {n.ts && (
+                    <div>
+                      <span className="sema-audit-k">时间</span>
+                      {n.ts}
+                    </div>
+                  )}
+                </div>
+              ),
+            }))}
+          />
+        )}
+      </div>
+
+      <div className="onto-sec">
+        <span className="onto-sec-title">添加因果关系（因果链 / 先例）</span>
+      </div>
+      <div className="sema-causal-form">
+        <div className="sema-causal-field">
+          <span className="cfg-label">from_id</span>
+          <Input value={fromId} onChange={(e) => setFromId(e.target.value)} placeholder="起点 id" />
+        </div>
+        <div className="sema-causal-field">
+          <span className="cfg-label">to_id</span>
+          <Select
+            style={{ width: '100%' }}
+            value={toId}
+            onChange={setToId}
+            placeholder="选择另一条决策"
+            options={toOptions}
+            showSearch
+            optionFilterProp="label"
+            notFoundContent="无其他决策"
+          />
+        </div>
+        <div className="sema-causal-field">
+          <span className="cfg-label">type</span>
+          <Select style={{ width: '100%' }} value={ctype} onChange={setCtype} options={CAUSAL_OPTIONS} />
+        </div>
+        <Button type="primary" icon={<SaveOutlined />} loading={adding} onClick={addCausal}>
+          添加因果关系
+        </Button>
+      </div>
+    </Drawer>
+  )
+}
+
+/** PROV-O 溯源抽屉：entity_id 查询 lineage（Descriptions 渲染）+ 导出 Turtle */
+function LineageDrawer({ initialEntityId, onClose }: { initialEntityId: string; onClose: () => void }) {
+  const { showToast } = useUI()
+  const [entityId, setEntityId] = useState(initialEntityId)
+  const [lineage, setLineage] = useState<SemanticaProvNode[]>([])
+  const [warnings, setWarnings] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+
+  const run = (id: string) => {
+    setLoading(true)
+    setErr(null)
+    api
+      .semanticaLineage(id)
+      .then((r) => {
+        setLineage(r.lineage ?? [])
+        setWarnings(r.warnings ?? [])
+      })
+      .catch((e: any) => {
+        setLineage([])
+        setWarnings([])
+        setErr(e?.message ?? '溯源查询失败')
+      })
+      .finally(() => setLoading(false))
+  }
+
+  const query = () => {
+    if (!entityId.trim()) {
+      showToast('请输入 entity_id', 'err')
+      return
+    }
+    run(entityId.trim())
+  }
+
+  // 打开时若带初始 id（行内「溯源」），自动查询
+  useEffect(() => {
+    if (initialEntityId.trim()) run(initialEntityId.trim())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const doExport = async () => {
+    setExporting(true)
+    try {
+      const text = await api.semanticaProvExport('turtle')
+      downloadText('audit.ttl', text, 'text/turtle;charset=utf-8')
+      showToast('已导出 PROV-O（audit.ttl）')
+    } catch (e: any) {
+      showToast(e?.message ?? '导出失败', 'err')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <Drawer
+      open
+      width={640}
+      title={
+        <Space size={8}>
+          <HistoryOutlined />
+          <span>PROV-O 溯源</span>
+        </Space>
+      }
+      onClose={onClose}
+      extra={
+        <Button size="small" icon={<ExportOutlined />} loading={exporting} onClick={doExport}>
+          导出 PROV-O (Turtle)
+        </Button>
+      }
+    >
+      <Space.Compact style={{ width: '100%' }}>
+        <Input
+          value={entityId}
+          onChange={(e) => setEntityId(e.target.value)}
+          onPressEnter={query}
+          placeholder="entity_id（决策 / 实体 id）"
+        />
+        <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={query}>
+          查询溯源
+        </Button>
+      </Space.Compact>
+      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+        输入决策 id 或实体 id，查看 PROV-O 溯源（事实 → 来源 → 推理路径）；导出为整图 PROV-O Turtle。
+      </Typography.Text>
+
+      {err && <Alert type="error" showIcon style={{ marginTop: 10 }} message="溯源查询失败" description={err} />}
+      {warnings.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginTop: 10 }}
+          message="后端提示"
+          description={
+            <ul className="sema-warn-list">
+              {warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          }
+        />
+      )}
+
+      <div className="sema-lineage">
+        {loading && lineage.length === 0 ? (
+          <Spin size="small" />
+        ) : lineage.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '16px 0' }} description="暂无溯源记录" />
+        ) : (
+          lineage.map((n, i) => (
+            <Descriptions
+              key={`${n.id}-${i}`}
+              className="sema-lineage-node"
+              bordered
+              size="small"
+              column={1}
+              title={
+                <Typography.Text code style={{ fontSize: 12 }}>
+                  {n.id || `节点 ${i + 1}`}
+                </Typography.Text>
+              }
+              items={[
+                { key: 'type', label: '类型', children: fmtAny(n.type) },
+                { key: 'source', label: '来源', children: fmtAny(n.source) },
+                {
+                  key: 'metadata',
+                  label: '元数据',
+                  children: <span className="sema-lineage-meta">{fmtAny(n.metadata)}</span>,
+                },
+              ]}
+            />
+          ))
+        )}
+      </div>
+    </Drawer>
   )
 }
