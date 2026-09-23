@@ -1,3 +1,11 @@
+---
+module: 技能
+req: [REQ-120, REQ-121]
+docs: ["01 §3.7"]
+decisions: [Q-19]
+synced: 2026-09-24
+---
+
 # 技能（Skill）
 
 ## 产品定位

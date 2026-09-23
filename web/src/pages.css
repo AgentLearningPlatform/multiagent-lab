@@ -627,3 +627,8 @@
 .ref-main .settings-head { flex: none; }
 .ref-body { flex: 1; overflow: auto; padding: 4px 8px 48px 2px; }
 .ref-body .antmd, .ref-body > * { max-width: 860px; }
+
+/* REQ-116 v2：源文档地图卡（frontmatter → 深入阅读） */
+.ref-sourcemap { margin-top: 24px; max-width: 860px; }
+.ref-sourcemap-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; flex-wrap: wrap; }
+.ref-sourcemap-label { flex: none; width: 64px; color: var(--ant-color-text-secondary, #888); font-size: 12px; }

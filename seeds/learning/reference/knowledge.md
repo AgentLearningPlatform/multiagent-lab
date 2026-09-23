@@ -1,3 +1,11 @@
+---
+module: 知识库
+req: [REQ-50~59, REQ-107]
+docs: ["11 全文", "12 全文"]
+decisions: [D-KB1, D-KB2, D-KB3, D-KB4]
+synced: 2026-09-24
+---
+
 # 知识库（Knowledge Base）
 
 ## 产品定位

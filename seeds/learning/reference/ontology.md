@@ -1,3 +1,11 @@
+---
+module: 本体
+req: [REQ-104, REQ-107, REQ-108, REQ-110]
+docs: ["03 全文", "04 §3/§4", "17 §2"]
+decisions: [D-O1, D-O5, D-O11, D-O14, D-O15, D-O16]
+synced: 2026-09-24
+---
+
 # 本体（Ontology）
 
 ## 产品定位
