@@ -265,6 +265,15 @@ export const api = {
       `/api/kg/${kbId}/quality`),
   kgMergeSuggestions: (kbId: string) =>
     req<{ suggestions: { keep: string; merge: string; reason: string }[] }>(`/api/kg/${kbId}/merge-suggestions`),
+  // M16 阶段二（REQ-130）：社区摘要与全局问答
+  kgCommunitiesRebuild: (kbId: string) =>
+    req<{ ok: boolean; communities: number }>(`/api/kg/${kbId}/communities/rebuild`, { method: 'POST' }),
+  kgCommunities: (kbId: string) =>
+    req<{ communities: { id: string; label: string; summary: string; method?: string; members: string[] }[] }>(
+      `/api/kg/${kbId}/communities`),
+  kgGlobalSearch: (kbId: string, query: string) =>
+    req<{ degraded: boolean; message?: string; hits: { label: string; summary: string; members: string[]; score: number }[] }>(
+      `/api/kb/${kbId}/global-search`, { method: 'POST', body: JSON.stringify({ query }) }),
 
   // ---- O13 由知识库构建本体（REQ-108；精确路由压过本体反代前缀） ----
   selectableKBsForBuild: () => req<OntoBuildSelectableKB[]>('/api/kbs/selectable-for-ontology-build'),
@@ -459,9 +468,10 @@ export const api = {
 export function runConversation(
   conversationId: string,
   input: string,
+  debugLevel: number,
   onEvent: (ev: { event: string; data: any }) => void,
 ): { abort: () => void; done: Promise<void> } {
-  return streamRun(`/api/conversations/${conversationId}/runs`, { input }, onEvent)
+  return streamRun(`/api/conversations/${conversationId}/runs`, { input, debug_level: debugLevel }, onEvent)
 }
 
 /**
@@ -470,9 +480,10 @@ export function runConversation(
 export function resumeConversation(
   conversationId: string,
   answer: string,
+  debugLevel: number,
   onEvent: (ev: { event: string; data: any }) => void,
 ): { abort: () => void; done: Promise<void> } {
-  return streamRun(`/api/conversations/${conversationId}/resume`, { input: answer }, onEvent)
+  return streamRun(`/api/conversations/${conversationId}/resume`, { input: answer, debug_level: debugLevel }, onEvent)
 }
 
 /** SSE over fetch 公共流（运行 / 恢复共用；POST JSON → 逐事件回调）。 */

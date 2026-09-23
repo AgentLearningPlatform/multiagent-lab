@@ -140,6 +140,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/kg/{kbID}/merge", s.kgMerge)
 	m.HandleFunc("GET /api/kg/{kbID}/quality", s.kgQuality)
 	m.HandleFunc("GET /api/kg/{kbID}/merge-suggestions", s.kgMergeSuggestions)
+	m.HandleFunc("POST /api/kg/{kbID}/communities/rebuild", s.kgCommunitiesRebuild) // M16/REQ-130：社区重建
+	m.HandleFunc("GET /api/kg/{kbID}/communities", s.kgCommunities)
+	m.HandleFunc("POST /api/kb/{id}/global-search", s.kgGlobalSearch) // REQ-130：全局问答
 	m.HandleFunc("GET /api/audit/decisions", s.listDecisions)
 	m.HandleFunc("POST /api/audit/decisions", s.createDecision)
 	m.HandleFunc("GET /api/audit/decisions/{id}/chain", s.decisionChain)

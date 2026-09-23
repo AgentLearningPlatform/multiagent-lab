@@ -27,7 +27,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import EmptyGuide from '../components/EmptyGuide'
-import KGGraphView, { KGGovernancePanel } from '../components/KGGraphView'
+import KGGraphView, { KGGovernancePanel, KGGlobalPanel } from '../components/KGGraphView'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -433,6 +433,7 @@ export default function KnowledgePage() {
               )}
               {modeOf(active) === 'graphrag' && <KGGraphView kbID={active.id} />}
               {modeOf(active) === 'graphrag' && <KGGovernancePanel kbID={active.id} />}
+              {modeOf(active) === 'graphrag' && <KGGlobalPanel kbID={active.id} />}
               <div className="stat-strip">
                 <StatTile k="文档" v={docs.length} />
                 <StatTile k="Chunks" v={docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0)} />

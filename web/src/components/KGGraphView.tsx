@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Input, Select, Space, Spin, Statistic, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Input, Select, Space, Spin, Statistic, Tag, Typography } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { Background, Controls, ReactFlow } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
@@ -373,6 +373,110 @@ export function KGGovernancePanel({ kbID }: { kbID: string }) {
       <Typography.Text type="secondary" style={{ fontSize: 11 }}>
         拒绝后的条目进入上方审核队列，可随时批准恢复。
       </Typography.Text>
+    </Card>
+  )
+}
+
+/**
+ * 社区摘要与全局问答（M16 阶段二 REQ-130）：社区列表（摘要 + 成员实体）+ 重建 +
+ * 全局问答输入（社区摘要 2-gram 评分检索；未建社区时降级引导）。
+ */
+export function KGGlobalPanel({ kbID }: { kbID: string }) {
+  const { showToast } = useUI()
+  const [comms, setComms] = useState<{ id: string; label: string; summary: string; method?: string; members: string[] }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [rebuilding, setRebuilding] = useState(false)
+  const [query, setQuery] = useState('')
+  const [hits, setHits] = useState<{ label: string; summary: string; members: string[]; score: number }[] | null>(null)
+  const [degraded, setDegraded] = useState(false)
+  const [degradedMsg, setDegradedMsg] = useState('')
+
+  const load = useCallback(() => {
+    setLoading(true)
+    api.kgCommunities(kbID)
+      .then((r) => setComms(r.communities ?? []))
+      .catch((e) => showToast(e.message, 'err'))
+      .finally(() => setLoading(false))
+  }, [kbID, showToast])
+  useEffect(load, [load])
+
+  const rebuild = async () => {
+    setRebuilding(true)
+    try {
+      const r = await api.kgCommunitiesRebuild(kbID)
+      showToast(`已重建 ${r.communities} 个社区摘要`)
+      load()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setRebuilding(false)
+    }
+  }
+
+  const ask = async () => {
+    const text = query.trim()
+    if (!text) return
+    try {
+      const r = await api.kgGlobalSearch(kbID, text)
+      setHits(r.hits ?? [])
+      setDegraded(!!r.degraded)
+      setDegradedMsg(r.message ?? '')
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
+  }
+
+  return (
+    <Card size="small" title="社区摘要与全局问答（REQ-130）" style={{ marginTop: 12 }}
+      extra={<Button size="small" loading={rebuilding} onClick={rebuild}>重建社区摘要</Button>}>
+      {loading ? (
+        <Spin size="small" />
+      ) : comms.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="尚未构建社区摘要；点击右上「重建社区摘要」（label propagation 检测 + LLM 摘要，无模型时回退骨架摘要）。" />
+      ) : (
+        <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+          {comms.map((c) => (
+            <li key={c.id} style={{ fontSize: 12, marginBottom: 6 }}>
+              <Typography.Text strong style={{ fontSize: 12 }}>「{c.label}」社区</Typography.Text>
+              {c.method && <Tag style={{ marginInlineStart: 6 }} color={c.method.startsWith('llm') ? 'blue' : 'orange'}>{c.method}</Tag>}
+              <div style={{ color: 'var(--c-ink-2)', margin: '2px 0' }}>{c.summary}</div>
+              <Space size={4} wrap>
+                {c.members.map((m) => <Tag key={m} style={{ margin: 1, fontSize: 10 }}>{m}</Tag>)}
+              </Space>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onPressEnter={ask}
+          placeholder="全局性问题，如「这个库整体在讲什么」…"
+          disabled={comms.length === 0}
+        />
+        <Button type="primary" onClick={ask} disabled={comms.length === 0}>全局问答</Button>
+      </div>
+      {degraded && (
+        <Alert type="warning" showIcon style={{ marginTop: 8 }} message={degradedMsg || '社区摘要未就绪'} />
+      )}
+      {hits && (
+        hits.length === 0 ? (
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>未命中社区摘要，请调整问题或先重建。</Typography.Text>
+        ) : (
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            {hits.map((h, i) => (
+              <li key={i} style={{ fontSize: 12, marginBottom: 6 }}>
+                <Tag color="purple" style={{ marginInlineEnd: 6 }}>「{h.label}」社区 · 分 {h.score}</Tag>
+                {h.summary}
+                <div><Typography.Text type="secondary" style={{ fontSize: 11 }}>成员：{h.members.join('、')}</Typography.Text></div>
+              </li>
+            ))}
+          </ul>
+        )
+      )}
     </Card>
   )
 }
