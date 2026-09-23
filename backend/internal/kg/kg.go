@@ -28,7 +28,7 @@ const (
 type Extractor struct {
 	Store  *store.Store
 	Box    *secrets.Box
-	ConnID string // 可选指定模型连接；空 = 默认 chat 连接（REQ-98 规则）
+	ConnID string // 兜底模型连接；空 = 默认 chat 连接（REQ-98 规则）
 }
 
 // Extractor 抽取输出（LLM JSON 契约；轻量回退同形构造）。
@@ -59,7 +59,8 @@ func (x *Extractor) ExtractForDoc(ctx context.Context, kbID, docID string, chunk
 	}
 	corpus, truncated := buildCorpus(chunks, maxKGChunks, maxKGChars)
 	warnings := []string{}
-	out, llmErr := x.llmExtract(ctx, kbID, corpus)
+	connID, promptOverride := x.kbConfig(kbID) // M16/REQ-129①：库级抽取配置
+	out, llmErr := x.llmExtract(ctx, kbID, corpus, connID, promptOverride)
 	method := "llm"
 	if llmErr != nil {
 		method = "lightweight"
@@ -84,13 +85,16 @@ func (x *Extractor) ExtractForDoc(ctx context.Context, kbID, docID string, chunk
 }
 
 // llmExtract REQ-98 能力代理抽取（解析失败/模型不可用返回 error，由上层回退）。
-func (x *Extractor) llmExtract(ctx context.Context, kbID, corpus string) (*kgOut, error) {
+func (x *Extractor) llmExtract(ctx context.Context, kbID, corpus, connID, promptOverride string) (*kgOut, error) {
 	prompt := "你是知识工程师。以下是知识库「" + kbID + "」的 chunk 语料。请通读后抽取知识图谱（KG）：\n" +
 		"1. entities：语料中的核心实体（领域概念、个体、事件、属性），name 用唯一中文短语，type 取 concept|individual|event|property 之一，description 一句话。\n" +
 		"2. relations：实体间有意义的关联，source/target 必须引用已有 entity name，type 用短语（层级用 IS_A，整体-部分/属性用「具有」，其余用动名词如「引发」「适用于」）。\n" +
 		"3. claims：每个关键实体 1~3 条事实陈述（紧贴原文的短句），subject 引用 entity name。\n" +
 		"只输出 JSON，不要输出其他内容。语料：\n" + corpus
-	res, err := chat.GenerateStructured(ctx, x.Store, x.Box, x.ConnID, prompt, kgSchema)
+	if promptOverride != "" { // M16/REQ-129①：库级提示词覆写（追加领域约束，JSON 契约与语料段保留）
+		prompt = promptOverride + "\n\n【输出 JSON 契约不变】" + prompt
+	}
+	res, err := chat.GenerateStructured(ctx, x.Store, x.Box, connID, prompt, kgSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +104,20 @@ func (x *Extractor) llmExtract(ctx context.Context, kbID, corpus string) (*kgOut
 	}
 	normalize(&out)
 	return &out, nil
+}
+
+// kbConfig 解析库级抽取配置（REQ-129①）：模型连接与提示词覆写（KB 配置优先，均空回退默认）。
+func (x *Extractor) kbConfig(kbID string) (connID, promptOverride string) {
+	connID = x.ConnID
+	if x.Store != nil {
+		if k, err := x.Store.GetKnowledgeBase(kbID); err == nil && k != nil {
+			if k.KGConnID != "" {
+				connID = k.KGConnID
+			}
+			promptOverride = strings.TrimSpace(k.KGPrompt)
+		}
+	}
+	return connID, promptOverride
 }
 
 // persist 落库（同 KB 跨 doc 同名实体归一由 ReplaceKGForDoc 事务保证；claims 反查 chunk 做溯源）。

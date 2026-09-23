@@ -255,6 +255,16 @@ export const api = {
     req<{ entities: any[]; relationships: any[]; claims: any[] }>(
       `/api/kg/${kbId}/neighborhood?entity=${encodeURIComponent(entity)}&hops=${hops}`,
     ),
+  // M16 阶段二（REQ-129）：抽取治理与人工反馈
+  kgReview: (kbId: string, kind: 'relationship' | 'claim', id: string, status: 'approved' | 'rejected') =>
+    req<any>(`/api/kg/${kbId}/review`, { method: 'POST', body: JSON.stringify({ kind, id, status }) }),
+  kgMerge: (kbId: string, keep: string, merge: string[]) =>
+    req<any>(`/api/kg/${kbId}/merge`, { method: 'POST', body: JSON.stringify({ keep, merge }) }),
+  kgQuality: (kbId: string) =>
+    req<{ method_dist: Record<string, number>; orphan_entity: number; top_rel_types: { type: string; count: number }[]; rejected_rels: number; rejected_claims: number; entities: number; relationships: number }>(
+      `/api/kg/${kbId}/quality`),
+  kgMergeSuggestions: (kbId: string) =>
+    req<{ suggestions: { keep: string; merge: string; reason: string }[] }>(`/api/kg/${kbId}/merge-suggestions`),
 
   // ---- O13 由知识库构建本体（REQ-108；精确路由压过本体反代前缀） ----
   selectableKBsForBuild: () => req<OntoBuildSelectableKB[]>('/api/kbs/selectable-for-ontology-build'),

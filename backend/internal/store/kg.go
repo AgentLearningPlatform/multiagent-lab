@@ -2,7 +2,9 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -30,6 +32,8 @@ type KGRelationship struct {
 	Source    string `json:"source"`
 	Target    string `json:"target"`
 	Type      string `json:"type,omitempty"`
+	// Status 审核状态（M16/REQ-129：approved|rejected；rejected 不参与检索）
+	Status    string `json:"status,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
@@ -41,6 +45,8 @@ type KGClaim struct {
 	ChunkID   string `json:"chunk_id,omitempty"`
 	Subject   string `json:"subject"`
 	Text      string `json:"text"`
+	// Status 审核状态（M16/REQ-129：approved|rejected；rejected 不参与检索）
+	Status    string `json:"status,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
@@ -57,8 +63,8 @@ type OntoDecision struct {
 }
 
 const kgEntityCols = `id,kb_id,doc_id,name,type,description,created_at`
-const kgRelCols = `id,kb_id,doc_id,source,target,rel_type,created_at`
-const kgClaimCols = `id,kb_id,doc_id,chunk_id,subject,text,created_at`
+const kgRelCols = `id,kb_id,doc_id,source,target,rel_type,status,created_at`
+const kgClaimCols = `id,kb_id,doc_id,chunk_id,subject,text,status,created_at`
 const decisionCols = `id,subject_kind,subject_id,title,rationale,derived_from,meta_json,created_at`
 
 func scanKGEntity(row interface{ Scan(...any) error }) (*KGEntity, error) {
@@ -71,7 +77,7 @@ func scanKGEntity(row interface{ Scan(...any) error }) (*KGEntity, error) {
 
 func scanKGRel(row interface{ Scan(...any) error }) (*KGRelationship, error) {
 	var r KGRelationship
-	if err := row.Scan(&r.ID, &r.KBID, &r.DocID, &r.Source, &r.Target, &r.Type, &r.CreatedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.KBID, &r.DocID, &r.Source, &r.Target, &r.Type, &r.Status, &r.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -79,7 +85,7 @@ func scanKGRel(row interface{ Scan(...any) error }) (*KGRelationship, error) {
 
 func scanKGClaim(row interface{ Scan(...any) error }) (*KGClaim, error) {
 	var c KGClaim
-	if err := row.Scan(&c.ID, &c.KBID, &c.DocID, &c.ChunkID, &c.Subject, &c.Text, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.KBID, &c.DocID, &c.ChunkID, &c.Subject, &c.Text, &c.Status, &c.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -134,23 +140,23 @@ func (s *Store) ReplaceKGForDoc(kbID, docID string, entities []*KGEntity, rels [
 			return err
 		}
 	}
-	ir, err := tx.Prepare(`INSERT INTO kg_relationship(` + kgRelCols + `) VALUES (?,?,?,?,?,?,?)`)
+	ir, err := tx.Prepare(`INSERT INTO kg_relationship(` + kgRelCols + `) VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer ir.Close()
 	for _, r := range rels {
-		if _, err := ir.Exec(r.ID, r.KBID, r.DocID, r.Source, r.Target, r.Type, now()); err != nil {
+		if _, err := ir.Exec(r.ID, r.KBID, r.DocID, r.Source, r.Target, r.Type, "approved", now()); err != nil {
 			return err
 		}
 	}
-	ic, err := tx.Prepare(`INSERT INTO kg_claim(` + kgClaimCols + `) VALUES (?,?,?,?,?,?,?)`)
+	ic, err := tx.Prepare(`INSERT INTO kg_claim(` + kgClaimCols + `) VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer ic.Close()
 	for _, c := range claims {
-		if _, err := ic.Exec(c.ID, c.KBID, c.DocID, c.ChunkID, c.Subject, c.Text, now()); err != nil {
+		if _, err := ic.Exec(c.ID, c.KBID, c.DocID, c.ChunkID, c.Subject, c.Text, "approved", now()); err != nil {
 			return err
 		}
 	}
@@ -216,7 +222,7 @@ func (s *Store) KGSubjectsByChunks(kbID string, chunkIDs []string) ([]string, er
 	if len(chunkIDs) == 0 {
 		return nil, nil
 	}
-	q := `SELECT DISTINCT subject FROM kg_claim WHERE kb_id = ? AND chunk_id IN (` +
+	q := `SELECT DISTINCT subject FROM kg_claim WHERE kb_id = ? AND status = 'approved' AND chunk_id IN (` +
 		strings.TrimRight(strings.Repeat("?,", len(chunkIDs)), ",") + `)`
 	args := make([]any, 0, len(chunkIDs)+1)
 	args = append(args, kbID)
@@ -244,7 +250,7 @@ func (s *Store) KGNeighbors(kbID string, subjects []string) ([]*KGRelationship, 
 	if len(subjects) == 0 {
 		return nil, nil
 	}
-	q := `SELECT ` + kgRelCols + ` FROM kg_relationship WHERE kb_id = ? AND (source IN (` +
+	q := `SELECT ` + kgRelCols + ` FROM kg_relationship WHERE kb_id = ? AND status = 'approved' AND (source IN (` +
 		strings.TrimRight(strings.Repeat("?,", len(subjects)), ",") + `) OR target IN (` +
 		strings.TrimRight(strings.Repeat("?,", len(subjects)), ",") + `)) ORDER BY source, target`
 	args := []any{kbID}
@@ -278,7 +284,7 @@ func (s *Store) KGClaimsForSubjects(kbID string, subjects []string, limit int) (
 	if limit <= 0 {
 		limit = 24
 	}
-	q := `SELECT ` + kgClaimCols + ` FROM kg_claim WHERE kb_id = ? AND subject IN (` +
+	q := `SELECT ` + kgClaimCols + ` FROM kg_claim WHERE kb_id = ? AND status = 'approved' AND subject IN (` +
 		strings.TrimRight(strings.Repeat("?,", len(subjects)), ",") + `) ORDER BY created_at LIMIT ?`
 	args := []any{kbID}
 	for _, n := range subjects {
@@ -432,10 +438,10 @@ func (s *Store) KGClaimsWithChunks(kbID string, subjects []string, limit int) ([
 	if limit <= 0 {
 		limit = 24
 	}
-	q := `SELECT c.id,c.kb_id,c.doc_id,c.chunk_id,c.subject,c.text,c.created_at, COALESCE(ch.doc_id,''), COALESCE(ch.seq,0)
+	q := `SELECT c.id,c.kb_id,c.doc_id,c.chunk_id,c.subject,c.text,c.status,c.created_at, COALESCE(ch.doc_id,''), COALESCE(ch.seq,0)
 		FROM kg_claim c
 		LEFT JOIN knowledge_chunk ch ON ch.id = c.chunk_id
-		WHERE c.kb_id = ? AND c.subject IN (` +
+		WHERE c.kb_id = ? AND c.status = 'approved' AND c.subject IN (` +
 		strings.TrimRight(strings.Repeat("?,", len(subjects)), ",") + `)
 		ORDER BY c.created_at LIMIT ?`
 	args := []any{kbID}
@@ -452,7 +458,7 @@ func (s *Store) KGClaimsWithChunks(kbID string, subjects []string, limit int) ([
 	for rows.Next() {
 		var t KGClaimTrace
 		var doc sql.NullString
-		if err := rows.Scan(&t.ID, &t.KBID, &t.DocID, &t.ChunkID, &t.Subject, &t.Text, &t.CreatedAt, &doc, &t.ChunkSeq); err != nil {
+		if err := rows.Scan(&t.ID, &t.KBID, &t.DocID, &t.ChunkID, &t.Subject, &t.Text, &t.Status, &t.CreatedAt, &doc, &t.ChunkSeq); err != nil {
 			return nil, err
 		}
 		if doc.Valid {
@@ -565,6 +571,205 @@ func (s *Store) DecisionChain(id string) ([]*OntoDecision, error) {
 		}
 		out = append(out, d)
 		cur = d.DerivedFrom
+	}
+	return out, nil
+}
+
+// ---- M16 阶段二（REQ-129）：抽取治理与人工反馈 ----
+
+// SetKGRelStatus 关系审核状态（approved|rejected；rejected 不参与检索）。
+func (s *Store) SetKGRelStatus(kbID, id, status string) error {
+	if status != "approved" && status != "rejected" {
+		return &HTTPError{Status: 400, Msg: "status must be approved|rejected"}
+	}
+	res, err := s.DB.Exec(`UPDATE kg_relationship SET status=? WHERE kb_id=? AND id=?`, status, kbID, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetKGClaimStatus claim 审核状态（approved|rejected）。
+func (s *Store) SetKGClaimStatus(kbID, id, status string) error {
+	if status != "approved" && status != "rejected" {
+		return &HTTPError{Status: 400, Msg: "status must be approved|rejected"}
+	}
+	res, err := s.DB.Exec(`UPDATE kg_claim SET status=? WHERE kb_id=? AND id=?`, status, kbID, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MergeKGEntities 实体消歧合并（REQ-129②，仅人工触发）：把 merge 实体的关系边与 claims
+// 迁移到 keep 实体（关系按 source+type+target 去重），随后删除 merge 实体行。
+func (s *Store) MergeKGEntities(kbID, keep string, merge []string) (movedRels, movedClaims int, err error) {
+	if keep == "" || len(merge) == 0 {
+		return 0, 0, &HTTPError{Status: 400, Msg: "keep 与 merge 均必填"}
+	}
+	for _, m := range merge {
+		if m == keep {
+			return 0, 0, &HTTPError{Status: 400, Msg: "merge 列表不能包含 keep 实体"}
+		}
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+	ph := strings.TrimRight(strings.Repeat("?,", len(merge)), ",")
+	base := append([]any{kbID}, toAny(merge)...)
+	// 关系迁移：source/target 指向 merge 实体的改指 keep
+	res, err := tx.Exec(`UPDATE kg_relationship SET source=? WHERE kb_id=? AND source IN (`+ph+`)`, append([]any{keep, kbID}, toAny(merge)...)...)
+	if err != nil {
+		return 0, 0, err
+	}
+	movedRels += mustCount(res)
+	res, err = tx.Exec(`UPDATE kg_relationship SET target=? WHERE kb_id=? AND target IN (`+ph+`)`, append([]any{keep, kbID}, toAny(merge)...)...)
+	if err != nil {
+		return 0, 0, err
+	}
+	movedRels += mustCount(res)
+	// 自环清理（merge 的两端都被改到 keep）
+	if _, err = tx.Exec(`DELETE FROM kg_relationship WHERE kb_id=? AND source=target`, kbID); err != nil {
+		return 0, 0, err
+	}
+	// claims 迁移（同 subject+text 去重由唯一业务语义粗判：仅迁移 subject 命中）
+	res, err = tx.Exec(`UPDATE kg_claim SET subject=? WHERE kb_id=? AND subject IN (`+ph+`)`, append([]any{keep, kbID}, toAny(merge)...)...)
+	if err != nil {
+		return 0, 0, err
+	}
+	movedClaims += mustCount(res)
+	// 删除 merge 实体
+	if _, err = tx.Exec(`DELETE FROM kg_entity WHERE kb_id=? AND name IN (`+ph+`)`, base...); err != nil {
+		return 0, 0, err
+	}
+	return movedRels, movedClaims, tx.Commit()
+}
+
+// mustCount 取 RowsAffected 的计数值（忽略 error——教学口径，删除/更新失败由上游 err 把守）。
+func mustCount(res sql.Result) int {
+	n, _ := res.RowsAffected()
+	return int(n)
+}
+
+func toAny(ss []string) []any {
+	out := make([]any, 0, len(ss))
+	for _, v := range ss {
+		out = append(out, v)
+	}
+	return out
+}
+
+// KGQuality 质量面板数据（REQ-129④）：method 分布（审计决策 meta_json）、孤儿实体数、
+// 高频关系类型 TopN、rejected 计数（关系/claims）。
+type KGQuality struct {
+	MethodDist   map[string]int   `json:"method_dist"`
+	OrphanEntity int              `json:"orphan_entity"`
+	TopRelTypes  []RelTypeCount   `json:"top_rel_types"`
+	RejectedRels int              `json:"rejected_rels"`
+	RejectedClms int              `json:"rejected_claims"`
+	Entities     int              `json:"entities"`
+	Relationships int             `json:"relationships"`
+}
+
+type RelTypeCount struct {
+	Type  string `json:"type"`
+	Count int    `json:"count"`
+}
+
+func (s *Store) KGQuality(kbID string) (*KGQuality, error) {
+	q := &KGQuality{MethodDist: map[string]int{}}
+	// method 分布：最近 kg 决策行 meta_json 的 method 字段
+	rows, err := s.DB.Query(`SELECT meta_json FROM onto_decision WHERE subject_kind='kg' AND subject_id=? ORDER BY created_at DESC LIMIT 50`, kbID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var meta string
+		if err := rows.Scan(&meta); err != nil {
+			return nil, err
+		}
+		var m struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal([]byte(meta), &m) == nil && m.Method != "" {
+			q.MethodDist[m.Method]++
+		}
+	}
+	rows.Err()
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_entity WHERE kb_id=?`, kbID).Scan(&q.Entities); err != nil {
+		return nil, err
+	}
+	// 孤儿实体：不出现在任何关系边的实体
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_entity e WHERE kb_id=? AND NOT EXISTS (
+		SELECT 1 FROM kg_relationship r WHERE r.kb_id=? AND (r.source=e.name OR r.target=e.name))`, kbID, kbID).Scan(&q.OrphanEntity); err != nil {
+		return nil, err
+	}
+	trows, err := s.DB.Query(`SELECT rel_type, COUNT(*) n FROM kg_relationship WHERE kb_id=? GROUP BY rel_type ORDER BY n DESC LIMIT 5`, kbID)
+	if err != nil {
+		return nil, err
+	}
+	defer trows.Close()
+	for trows.Next() {
+		var t string
+		var n int
+		if err := trows.Scan(&t, &n); err != nil {
+			return nil, err
+		}
+		q.TopRelTypes = append(q.TopRelTypes, RelTypeCount{Type: t, Count: n})
+	}
+	trows.Err()
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_relationship WHERE kb_id=? AND status='rejected'`, kbID).Scan(&q.RejectedRels); err != nil {
+		return nil, err
+	}
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_claim WHERE kb_id=? AND status='rejected'`, kbID).Scan(&q.RejectedClms); err != nil {
+		return nil, err
+	}
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_relationship WHERE kb_id=?`, kbID).Scan(&q.Relationships); err != nil {
+		return nil, err
+	}
+	return q, nil
+}
+
+// MergeSuggestion 系统合并建议（别名消歧粗规则：名称互相包含且类型相同 → 建议合并，仅提示不自动执行）。
+type MergeSuggestion struct {
+	Keep   string `json:"keep"`
+	Merge  string `json:"merge"`
+	Reason string `json:"reason"`
+}
+
+// KGMergeSuggestions 合并建议（教学口径：包含关系的同类型实体对，短名为 keep）。
+func (s *Store) KGMergeSuggestions(kbID string) ([]MergeSuggestion, error) {
+	ents, _, err := s.KGByKB(kbID)
+	if err != nil {
+		return nil, err
+	}
+	out := []MergeSuggestion{}
+	for i, a := range ents {
+		for _, b := range ents[i+1:] {
+			if a.Type != b.Type || a.Name == b.Name {
+				continue
+			}
+			long, short := a.Name, b.Name
+			if len([]rune(short)) > len([]rune(long)) {
+				long, short = short, long
+			}
+			if len([]rune(short)) >= 2 && strings.Contains(long, short) {
+				out = append(out, MergeSuggestion{Keep: short, Merge: long,
+					Reason: fmt.Sprintf("%q 是 %q 的子串且类型相同（%s）", short, long, a.Type)})
+			}
+			if len(out) >= 20 {
+				return out, nil
+			}
+		}
 	}
 	return out, nil
 }

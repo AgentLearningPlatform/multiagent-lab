@@ -27,7 +27,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import EmptyGuide from '../components/EmptyGuide'
-import KGGraphView from '../components/KGGraphView'
+import KGGraphView, { KGGovernancePanel } from '../components/KGGraphView'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -83,6 +83,9 @@ export default function KnowledgePage() {
   const [hits, setHits] = useState<KBHit[] | null>(null)
   const [searchMeta, setSearchMeta] = useState<{ mode?: string; degraded?: boolean; error?: string } | null>(null)
   const [savingCfg, setSavingCfg] = useState(false)
+  const [kgConnID, setKgConnID] = useState<string | null>(null)
+  const [kgPrompt, setKgPrompt] = useState<string | null>(null)
+  const [conns, setConns] = useState<{ id: string; name: string; model_name: string }[]>([])
 
   const active = useMemo(() => kbs.find((k) => k.id === activeId) ?? null, [kbs, activeId])
   const hasReady = docs.some((d) => d.status === 'success')
@@ -110,6 +113,10 @@ export default function KnowledgePage() {
   }
 
   useEffect(reloadKBs, [])
+  useEffect(() => {
+    api.listConnections().then((cs) => setConns(cs.filter((c) => c.conn_type === 'chat')))
+      .catch(() => setConns([]))
+  }, [])
 
   // M14 ⑤：双子页签切换 → 选中该模式下的第一个库（当前库不属该模式时）
   useEffect(() => {
@@ -133,6 +140,8 @@ export default function KnowledgePage() {
     const kb = kbs.find((k) => k.id === activeId)
     setTopK(kb?.top_k ?? 4)
     setMinScore(kb?.min_score ?? 0)
+    setKgConnID(kb?.kg_conn_id ?? '')
+    setKgPrompt(kb?.kg_prompt ?? '')
     reloadDocs(activeId)
     // 仅在选中库变化时执行；kbs 仅用于取当前库参数
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,8 +151,14 @@ export default function KnowledgePage() {
     if (!active) return
     setSavingCfg(true)
     try {
-      await api.updateKB(active.id, { ...active, top_k: topK ?? active.top_k, min_score: minScore ?? active.min_score })
-      showToast('检索参数已保存')
+      await api.updateKB(active.id, {
+        ...active,
+        top_k: topK ?? active.top_k,
+        min_score: minScore ?? active.min_score,
+        kg_conn_id: kgConnID ?? active.kg_conn_id ?? '',
+        kg_prompt: kgPrompt ?? active.kg_prompt ?? '',
+      })
+      showToast('配置已保存')
       bumpData()
       reloadKBs()
     } catch (e: any) {
@@ -417,6 +432,7 @@ export default function KnowledgePage() {
                 />
               )}
               {modeOf(active) === 'graphrag' && <KGGraphView kbID={active.id} />}
+              {modeOf(active) === 'graphrag' && <KGGovernancePanel kbID={active.id} />}
               <div className="stat-strip">
                 <StatTile k="文档" v={docs.length} />
                 <StatTile k="Chunks" v={docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0)} />
@@ -457,6 +473,27 @@ export default function KnowledgePage() {
                     保存
                   </Button>
                 </div>
+                {modeOf(active) === 'graphrag' && (
+                  <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      KG 抽取配置（REQ-129①）：抽取模型与提示词按库覆写；留空 = 跟随全局默认
+                    </Typography.Text>
+                    <Select
+                      value={kgConnID || undefined}
+                      onChange={(v) => setKgConnID(v || '')}
+                      allowClear
+                      placeholder="抽取模型连接（默认 chat 连接）"
+                      style={{ width: 320 }}
+                      options={conns.map((c) => ({ value: c.id, label: c.name + ' · ' + c.model_name }))}
+                    />
+                    <Input.TextArea
+                      value={kgPrompt ?? ''}
+                      onChange={(e) => setKgPrompt(e.target.value)}
+                      placeholder="提示词覆写（追加领域抽取约束，JSON 输出契约保留）"
+                      autoSize={{ minRows: 2, maxRows: 6 }}
+                    />
+                  </div>
+                )}
               </Card>
 
               <Card

@@ -41,6 +41,8 @@ interface KGRelLite {
 }
 
 interface KGClaimT {
+  id?: string
+  status?: string
   subject: string
   text: string
   chunk_id?: string
@@ -223,5 +225,154 @@ export default function KGGraphView({ kbID }: { kbID: string }) {
         )}
       </Card>
     </div>
+  )
+}
+
+/**
+ * 抽取治理面板（M16 阶段二 REQ-129）：质量统计（method 分布/孤儿实体/TopN 关系类型/rejected 计数）
+ * + 合并建议（别名消歧，人工确认执行）+ 审核队列（关系/claims approve/reject，rejected 不参与检索）。
+ */
+export function KGGovernancePanel({ kbID }: { kbID: string }) {
+  const { showToast } = useUI()
+  const [q, setQ] = useState<Awaited<ReturnType<typeof api.kgQuality>> | null>(null)
+  const [sugs, setSugs] = useState<{ keep: string; merge: string; reason: string }[]>([])
+  const [rejected, setRejected] = useState<{ rels: KGRelLite[]; claims: KGClaimT[] }>({ rels: [], claims: [] })
+  const [approved, setApproved] = useState<{ rels: KGRelLite[]; claims: KGClaimT[] }>({ rels: [], claims: [] })
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    Promise.all([api.kgQuality(kbID), api.kgMergeSuggestions(kbID), api.kgRead(kbID)])
+      .then(([quality, sugg, read]) => {
+        setQ(quality)
+        setSugs(sugg.suggestions ?? [])
+        // 审核队列：从全量子图中筛 rejected（kgRead 返回全量含 rejected）
+        const allRels = (read.relationships ?? []) as (KGRelLite & { status?: string; id: string })[]
+        const allClaims = (read.claims ?? []) as (KGClaimT & { status?: string; id: string })[]
+        setApproved({
+          rels: allRels.filter((r) => r.status !== 'rejected').slice(0, 20),
+          claims: allClaims.filter((c) => c.status !== 'rejected').slice(0, 20),
+        })
+        setRejected({
+          rels: (read.relationships ?? []).filter((r: any) => r.status === 'rejected'),
+          claims: (read.claims ?? []).filter((c: any) => c.status === 'rejected'),
+        })
+      })
+      .catch((e) => showToast(e.message, 'err'))
+      .finally(() => setLoading(false))
+  }, [kbID, showToast])
+  useEffect(load, [load])
+
+  const review = async (kind: 'relationship' | 'claim', id: string, status: 'approved' | 'rejected') => {
+    try {
+      await api.kgReview(kbID, kind, id, status)
+      showToast(status === 'approved' ? '已批准' : '已拒绝（不再参与检索）')
+      load()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
+  }
+  const merge = async (keep: string, m: string) => {
+    try {
+      const r = await api.kgMerge(kbID, keep, [m])
+      showToast(`已合并：关系 ${r.moved_relationships} 条、claims ${r.moved_claims} 条迁移至「${keep}」`)
+      load()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
+  }
+
+  return (
+    <Card size="small" title="抽取治理（REQ-129）" style={{ marginTop: 12 }}
+      extra={<Button size="small" loading={loading} onClick={load}>刷新</Button>}>
+      {q ? (
+        <Space size={18} wrap style={{ marginBottom: 8 }}>
+          <Statistic title="实体" value={q.entities} />
+          <Statistic title="关系" value={q.relationships} />
+          <Statistic title="孤儿实体" value={q.orphan_entity} />
+          <Statistic title="拒绝（关系）" value={q.rejected_rels} />
+          <Statistic title="拒绝（claims）" value={q.rejected_claims} />
+          <div>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>抽取方式分布</Typography.Text>
+            <div>
+              {Object.entries(q.method_dist || {}).map(([m, n]) => (
+                <Tag key={m} color={m === 'llm' ? 'blue' : 'orange'} style={{ margin: 2 }}>{m} × {n}</Tag>
+              ))}
+              {Object.keys(q.method_dist || {}).length === 0 && <Typography.Text type="secondary">—</Typography.Text>}
+            </div>
+          </div>
+          <div>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>高频关系类型 TopN</Typography.Text>
+            <div>
+              {(q.top_rel_types || []).map((t) => (
+                <Tag key={t.type} style={{ margin: 2 }}>{t.type || '未标注'} × {t.count}</Tag>
+              ))}
+            </div>
+          </div>
+        </Space>
+      ) : (
+        <Spin size="small" />
+      )}
+
+      <Typography.Text strong style={{ fontSize: 12 }}>合并建议（别名消歧，人工确认后执行）</Typography.Text>
+      {sugs.length === 0 ? (
+        <div style={{ margin: '4px 0 10px' }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>暂无建议</Typography.Text></div>
+      ) : (
+        <ul style={{ margin: '4px 0 10px', paddingLeft: 18 }}>
+          {sugs.map((sg, i) => (
+            <li key={i} style={{ fontSize: 12, marginBottom: 4 }}>
+              {sg.reason}
+              <Button size="small" type="link" onClick={() => merge(sg.keep, sg.merge)}>执行合并</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Typography.Text strong style={{ fontSize: 12 }}>审核队列（rejected 不参与检索）</Typography.Text>
+      {rejected.rels.length === 0 && rejected.claims.length === 0 ? (
+        <div style={{ margin: '4px 0' }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>暂无被拒绝的关系/claims（可在下方原始数据中拒绝新条目）</Typography.Text></div>
+      ) : (
+        <ul style={{ margin: '4px 0', paddingLeft: 18 }}>
+          {rejected.rels.map((r: any) => (
+            <li key={r.id} style={{ fontSize: 12, marginBottom: 4 }}>
+              <Tag color="red" style={{ marginInlineEnd: 6 }}>关系</Tag>
+              {r.source} —[{r.type}]→ {r.target}
+              <Button size="small" type="link" onClick={() => review('relationship', r.id, 'approved')}>批准恢复</Button>
+            </li>
+          ))}
+          {rejected.claims.map((c: any) => (
+            <li key={c.id} style={{ fontSize: 12, marginBottom: 4 }}>
+              <Tag color="red" style={{ marginInlineEnd: 6 }}>Claim</Tag>
+              [{c.subject}] {c.text}
+              <Button size="small" type="link" onClick={() => review('claim', c.id ?? '', 'approved')}>批准恢复</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Typography.Text strong style={{ fontSize: 12 }}>已批准（可拒绝，拒绝后不参与检索）</Typography.Text>
+      {approved.rels.length === 0 && approved.claims.length === 0 ? (
+        <div style={{ margin: '4px 0' }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>暂无已批准条目</Typography.Text></div>
+      ) : (
+        <ul style={{ margin: '4px 0', paddingLeft: 18 }}>
+          {approved.rels.map((r) => (
+            <li key={r.id} style={{ fontSize: 12, marginBottom: 4 }}>
+              <Tag color="green" style={{ marginInlineEnd: 6 }}>关系</Tag>
+              {r.source} —[{r.type}]→ {r.target}
+              <Button size="small" type="link" danger onClick={() => review('relationship', r.id, 'rejected')}>拒绝</Button>
+            </li>
+          ))}
+          {approved.claims.map((c) => (
+            <li key={c.id} style={{ fontSize: 12, marginBottom: 4 }}>
+              <Tag color="green" style={{ marginInlineEnd: 6 }}>Claim</Tag>
+              [{c.subject}] {c.text}
+              <Button size="small" type="link" danger onClick={() => review('claim', c.id ?? '', 'rejected')}>拒绝</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+        拒绝后的条目进入上方审核队列，可随时批准恢复。
+      </Typography.Text>
+    </Card>
   )
 }

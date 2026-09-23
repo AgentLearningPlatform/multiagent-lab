@@ -19,6 +19,9 @@ type KnowledgeBase struct {
 	Mode        string  `json:"mode"` // rag | graphrag（M14 D-KB4 双子模块；老数据 = 'rag'）
 	TopK        int     `json:"top_k"`
 	MinScore    float64 `json:"min_score"`
+	// KG 抽取治理配置（M16/REQ-129①）：库级抽取模型连接与提示词覆写（空 = 默认）
+	KGConnID    string  `json:"kg_conn_id,omitempty"`
+	KGPrompt    string  `json:"kg_prompt,omitempty"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -65,13 +68,13 @@ type KnowledgeChunk struct {
 	CreatedAt    string `json:"created_at"`
 }
 
-const kbCols = `id,name,description,mode,top_k,min_score,created_at,updated_at`
+const kbCols = `id,name,description,mode,top_k,min_score,kg_conn_id,kg_prompt,created_at,updated_at`
 const kdocCols = `id,kb_id,title,status,chunk_count,error,source,created_at,updated_at`
 const kchunkCols = `id,kb_id,doc_id,seq,content,vector,vector_ref,store_backend,created_at`
 
 func scanKB(row interface{ Scan(...any) error }) (*KnowledgeBase, error) {
 	var k KnowledgeBase
-	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.Mode, &k.TopK, &k.MinScore, &k.CreatedAt, &k.UpdatedAt); err != nil {
+	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.Mode, &k.TopK, &k.MinScore, &k.KGConnID, &k.KGPrompt, &k.CreatedAt, &k.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if k.Mode == "" {
@@ -137,8 +140,8 @@ func (s *Store) CreateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	if k.Mode != "graphrag" {
 		k.Mode = "rag"
 	}
-	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?,?)`,
-		k.ID, k.Name, k.Description, k.Mode, k.TopK, k.MinScore, now(), now())
+	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		k.ID, k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KGConnID, k.KGPrompt, now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -153,8 +156,8 @@ func (s *Store) UpdateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	if k.Mode != "graphrag" {
 		k.Mode = "rag"
 	}
-	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,mode=?,top_k=?,min_score=?,updated_at=? WHERE id=?`,
-		k.Name, k.Description, k.Mode, k.TopK, k.MinScore, now(), k.ID)
+	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,mode=?,top_k=?,min_score=?,kg_conn_id=?,kg_prompt=?,updated_at=? WHERE id=?`,
+		k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KGConnID, k.KGPrompt, now(), k.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict

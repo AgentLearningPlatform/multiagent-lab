@@ -135,6 +135,11 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/kg/{kbID}/stats", s.kgStats)
 	m.HandleFunc("GET /api/kg/{kbID}/entities", s.kgEntitySearch)
 	m.HandleFunc("GET /api/kg/{kbID}/neighborhood", s.kgNeighborhood)
+	// M16 阶段二（REQ-129）：抽取治理与人工反馈
+	m.HandleFunc("POST /api/kg/{kbID}/review", s.kgReview)
+	m.HandleFunc("POST /api/kg/{kbID}/merge", s.kgMerge)
+	m.HandleFunc("GET /api/kg/{kbID}/quality", s.kgQuality)
+	m.HandleFunc("GET /api/kg/{kbID}/merge-suggestions", s.kgMergeSuggestions)
 	m.HandleFunc("GET /api/audit/decisions", s.listDecisions)
 	m.HandleFunc("POST /api/audit/decisions", s.createDecision)
 	m.HandleFunc("GET /api/audit/decisions/{id}/chain", s.decisionChain)

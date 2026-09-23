@@ -223,6 +223,9 @@ export interface KnowledgeBase {
   store_backend?: 'qdrant' | 'sqlite'
   top_k: number
   min_score: number
+  /** M16/REQ-129①：库级 KG 抽取模型连接（空 = 默认 chat）与提示词覆写 */
+  kg_conn_id?: string
+  kg_prompt?: string
   doc_count?: number
   chunk_count?: number
   created_at: string
