@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/fsutil"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
@@ -99,7 +99,7 @@ func (s *Server) downloadProjectFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
-	full, err := safeJoin(s.projectRoot(proj), pf.Path)
+	full, err := fsutil.SafeJoin(s.projectRoot(proj), pf.Path)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "路径越界"})
 		return
@@ -109,67 +109,31 @@ func (s *Server) downloadProjectFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, full)
 }
 
+// normalizeProjectLocalDir 保存前归一化 local_dir（~ 展开 / Windows 盘符归一）。
+// 非空且归一化后仍非绝对路径 → 写 400 并返回 false（防止 ~ / 相对路径原样入库，
+// 导致文件视图与对话工具按错误路径寻址——REQ-101 修复：检测接口展开校验，入库必须同规则）。
+func normalizeProjectLocalDir(w http.ResponseWriter, p *store.Project) bool {
+	p.LocalDir = fsutil.NormalizeDir(p.LocalDir)
+	if p.LocalDir != "" && !filepath.IsAbs(p.LocalDir) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local_dir 必须是绝对路径（以 / 开头，Windows 用 C:\\ 开头，或以 ~ 开头，保存时自动展开 ~）；收到: " + p.LocalDir})
+		return false
+	}
+	return true
+}
+
 // projectRoot 项目文件作用根：绑定 local_dir 优先，否则回退 FilesRoot/{id}（REQ-101 v0.17）。
+// local_dir 经归一化（~ 展开 / Windows 盘符）后使用，兼容历史未展开数据（v0.17 前入库的 ~/...）。
 func (s *Server) projectRoot(p *store.Project) string {
 	if p != nil && p.LocalDir != "" {
-		return p.LocalDir
+		if d := fsutil.NormalizeDir(p.LocalDir); filepath.IsAbs(d) {
+			return d
+		}
 	}
 	id := ""
 	if p != nil {
 		id = p.ID
 	}
 	return filepath.Join(s.FilesRoot, id)
-}
-
-// errPathOutside 路径越界（目录穿越 / 符号链接逃逸）。
-var errPathOutside = errors.New("path outside root")
-
-// within 判断 p 是否等于 root 或位于 root 之内（词法层面）。
-func within(root, p string) bool {
-	root = filepath.Clean(root)
-	p = filepath.Clean(p)
-	if root == string(os.PathSeparator) {
-		return strings.HasPrefix(p, string(os.PathSeparator))
-	}
-	return p == root || strings.HasPrefix(p, root+string(os.PathSeparator))
-}
-
-// safeJoin 将相对路径 rel 安全拼接到 root：拒绝绝对路径与 ..，并做符号链接逃逸校验。
-func safeJoin(root, rel string) (string, error) {
-	root = filepath.Clean(root)
-	if rel == "" || rel == "." {
-		return root, nil
-	}
-	if filepath.IsAbs(rel) {
-		return "", errPathOutside
-	}
-	cleanRel := filepath.Clean(rel)
-	if cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(os.PathSeparator)) {
-		return "", errPathOutside
-	}
-	full := filepath.Join(root, cleanRel)
-	if !within(root, full) {
-		return "", errPathOutside
-	}
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", err
-	}
-	if realFull, err := filepath.EvalSymlinks(full); err == nil {
-		if !within(realRoot, realFull) {
-			return "", errPathOutside
-		}
-	} else {
-		// 目标不存在：校验父目录实路径 + basename，防经符号链接父目录逃逸
-		realParent, perr := filepath.EvalSymlinks(filepath.Dir(full))
-		if perr != nil {
-			return "", errPathOutside
-		}
-		if !within(realRoot, filepath.Join(realParent, filepath.Base(full))) {
-			return "", errPathOutside
-		}
-	}
-	return full, nil
 }
 
 // ---- REQ-101 项目绑定本地目录 ----
@@ -185,16 +149,6 @@ type validateDirResp struct {
 }
 
 // validateProjectDir POST /api/projects/validate-dir：校验本地目录与 git 状态（REQ-101）。
-// isWindowsPath 识别 Windows 盘符路径形态（C:/ 或 C:\，大小写盘符均可）。
-// 用于跨平台场景：Linux 运行时接受 Windows 客户端提交的本地目录（如挂载盘）。
-func isWindowsPath(p string) bool {
-	if len(p) < 3 {
-		return false
-	}
-	c := p[0]
-	return (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') && p[1] == ':' && (p[2] == '\\' || p[2] == '/')
-}
-
 func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Dir string `json:"dir"`
@@ -203,21 +157,10 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	dir := strings.TrimSpace(req.Dir)
-	if dir == "" {
+	dir := fsutil.NormalizeDir(req.Dir)
+	if dir == "" || dir == "." {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必填"})
 		return
-	}
-	// ~ 前缀展开（macOS/Linux 输入习惯；Windows 盘符形态不受影响）
-	if dir == "~" || strings.HasPrefix(dir, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(dir, "~"), "/"))
-		}
-	}
-	// Windows 路径支持：filepath.IsAbs 在 Linux 运行时对 `C:\...` 返回 false，
-	// 显式识别盘符形态（C:/ 或 C:\，含正斜杠变体），归一为运行时格式后校验。
-	if isWindowsPath(dir) {
-		dir = filepath.FromSlash(dir)
 	}
 	if !filepath.IsAbs(dir) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必须是绝对路径（以 / 开头，Windows 用 C:\\ 开头，或以 ~ 开头）；收到: " + req.Dir})
@@ -301,7 +244,7 @@ func (s *Server) listDirFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sub := strings.TrimSpace(r.URL.Query().Get("path"))
-	full, err := safeJoin(proj.LocalDir, sub)
+	full, err := fsutil.SafeJoin(fsutil.NormalizeDir(proj.LocalDir), sub)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "路径越界"})
 		return
@@ -359,7 +302,7 @@ func (s *Server) getDirFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path 必填"})
 		return
 	}
-	full, err := safeJoin(proj.LocalDir, rel)
+	full, err := fsutil.SafeJoin(fsutil.NormalizeDir(proj.LocalDir), rel)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "路径越界"})
 		return

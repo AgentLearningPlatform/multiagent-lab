@@ -6,6 +6,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -14,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/fsutil"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/skill"
@@ -225,7 +227,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 		src[s.Name] = fmt.Sprintf("agent:%s", s.ID) // AgentTool 的 function name = 成员名
 	}
 
-	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstruction(coord), coord.MaxIteration, cm, tools)
+	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstructionWithScope(coord, sc), coord.MaxIteration, cm, tools)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +253,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	allWarns := append(append([]string{}, tbc.Warnings...), warns...)
 	loaded := appendLoadedSkills(nil, tbc.LoadedSkills)
 
-	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstruction(coord), coord.MaxIteration, cm, tbc.Tools)
+	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstructionWithScope(coord, sc), coord.MaxIteration, cm, tbc.Tools)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +296,7 @@ func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent, sc assembleSc
 		return nil, err
 	}
 	// M8 §6.10-3：guide 注入——装配时取运行方案指引拼进 Agent 指引（失败并入降级）
-	instruction := a.composeInstruction(ag)
+	instruction := a.composeInstructionWithScope(ag, sc)
 	if sc.Mount != "" && a.Ontology != nil {
 		guide, gerr := a.Ontology.FetchGuide(ctx, sc.Mount, "")
 		if gerr != nil {
@@ -425,8 +427,8 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 		}
 	}
 
-	// 5) save_file 产物工具（M11 §6.13：项目会话且文件根目录已配置时启用；
-	// 写盘成功由 runner 依 tool.result 发 artifact.saved 事件）
+	// 5) save_file 产物工具 + list_files/read_file 目录浏览读取（M11 §6.13 / REQ-102：
+	// 项目会话且文件根目录已配置时启用；写盘成功由 runner 依 tool.result 发 artifact.saved 事件）
 	if sc.ProjectID != "" && a.FilesRoot != "" && a.Store != nil {
 		if sf, serr := tool.NewSaveFileTool(tool.SaveFileDeps{
 			Store: a.Store, ProjectID: sc.ProjectID, ConversationID: sc.ConversationID, Root: a.FilesRoot,
@@ -435,6 +437,19 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 		} else if _, dup := tb.SourceOf["save_file"]; !dup {
 			tb.Tools = append(tb.Tools, sf)
 			tb.SourceOf["save_file"] = "builtin"
+		}
+		pd := tool.ProjectDirDeps{Store: a.Store, ProjectID: sc.ProjectID, FilesRoot: a.FilesRoot}
+		if bt, berr := tool.NewListFilesTool(pd); berr != nil {
+			tb.Warnings = append(tb.Warnings, "list_files 工具实例化失败: "+berr.Error())
+		} else if _, dup := tb.SourceOf["list_files"]; !dup {
+			tb.Tools = append(tb.Tools, bt)
+			tb.SourceOf["list_files"] = "builtin"
+		}
+		if bt, berr := tool.NewReadFileTool(pd); berr != nil {
+			tb.Warnings = append(tb.Warnings, "read_file 工具实例化失败: "+berr.Error())
+		} else if _, dup := tb.SourceOf["read_file"]; !dup {
+			tb.Tools = append(tb.Tools, bt)
+			tb.SourceOf["read_file"] = "builtin"
 		}
 	}
 	return tb, nil
@@ -446,6 +461,30 @@ func (a *Assembler) composeInstruction(ag *store.Agent) string {
 		return ag.Instruction
 	}
 	return a.Composer.ComposeInstruction(ag)
+}
+
+// composeInstructionWithScope 技能注入 + 项目本地目录说明（REQ-101/102）。
+// 项目会话且绑定 local_dir 时，告知模型可通过 list_files/read_file/save_file 访问目录内文件，
+// 并给出绑定目录的绝对路径（与工具根解析同一归一化规则）。
+func (a *Assembler) composeInstructionWithScope(ag *store.Agent, sc assembleScope) string {
+	inst := a.composeInstruction(ag)
+	if sc.ProjectID == "" || a.FilesRoot == "" || a.Store == nil {
+		return inst
+	}
+	p, err := a.Store.GetProject(sc.ProjectID)
+	if err != nil || p == nil || p.LocalDir == "" {
+		return inst
+	}
+	dir := fsutil.NormalizeDir(p.LocalDir)
+	if !filepath.IsAbs(dir) {
+		return inst
+	}
+	return inst + "\n\n# 项目本地目录\n" +
+		"本项目已绑定本地目录：" + dir + "\n" +
+		"- list_files：列出目录（或子目录）下的文件与子目录；\n" +
+		"- read_file：读取目录内文本文件内容（≤1MB）；\n" +
+		"- save_file：把生成内容保存为目录内文件。\n" +
+		"所有路径均为该目录下的相对路径，不要访问该目录之外的文件。"
 }
 
 // appendLoadedSkills 合并去重（多 Agent 协作时 skill.loaded 汇总）。

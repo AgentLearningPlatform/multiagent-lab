@@ -132,6 +132,9 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	if p.WorkflowMode == "" {
 		p.WorkflowMode = "free"
 	}
+	if !normalizeProjectLocalDir(w, &p) {
+		return
+	}
 	created, err := s.Store.CreateProject(&p)
 	if err != nil {
 		writeErr(w, err)
@@ -156,6 +159,9 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.ID = r.PathValue("id")
+	if !normalizeProjectLocalDir(w, &p) {
+		return
+	}
 	updated, err := s.Store.UpdateProject(&p)
 	if err != nil {
 		writeErr(w, err)

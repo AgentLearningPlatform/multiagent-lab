@@ -16,6 +16,7 @@ import (
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/fsutil"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
@@ -46,10 +47,13 @@ func NewSaveFileTool(deps SaveFileDeps) (einotool.BaseTool, error) {
 	if deps.Store == nil || deps.ProjectID == "" || deps.Root == "" {
 		return nil, fmt.Errorf("save_file: store/project/root required")
 	}
-	// REQ-101 v0.17：项目绑定本地目录时，产物根切换为 local_dir，否则回退 FilesRoot/{projectID}
+	// REQ-101 v0.17：项目绑定本地目录时，产物根切换为 local_dir，否则回退 FilesRoot/{projectID}。
+	// local_dir 归一化（~ 展开）后使用，兼容历史未展开入库的 ~/... 数据。
 	root := filepath.Join(deps.Root, deps.ProjectID)
 	if p, perr := deps.Store.GetProject(deps.ProjectID); perr == nil && p != nil && p.LocalDir != "" {
-		root = p.LocalDir
+		if d := fsutil.NormalizeDir(p.LocalDir); filepath.IsAbs(d) {
+			root = d
+		}
 	}
 	bt, err := utils.InferTool("save_file",
 		"把生成的文本内容保存为项目文件（如报告、清单、代码、数据）。保存成功后文件出现在项目文件面板。",
