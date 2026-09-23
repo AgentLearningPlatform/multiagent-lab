@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { toast } from '../lib/antd'
 
-export type PageKey = 'agents' | 'projects' | 'ontology' | 'knowledge' | 'skills' | 'settings'
+export type PageKey = 'agents' | 'projects' | 'ontology' | 'knowledge' | 'skills' | 'reference' | 'settings'
 
 /** PageKey ↔ URL path 双向映射（刷新/前进后退保持当前页面） */
 const PAGE_PATHS: Record<PageKey, string> = {
@@ -10,6 +10,7 @@ const PAGE_PATHS: Record<PageKey, string> = {
   ontology: '/ontology',
   knowledge: '/knowledge',
   skills: '/skills',
+  reference: '/reference',
   settings: '/settings',
 }
 function pageFromPath(pathname: string): PageKey {

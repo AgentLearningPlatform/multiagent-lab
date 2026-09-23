@@ -5,6 +5,7 @@ import ProjectsPage from './pages/ProjectsPage'
 import SettingsPage from './pages/SettingsPage'
 import KnowledgePage from './pages/KnowledgePage'
 import SkillsPage from './pages/SkillsPage'
+import ReferencePage from './pages/ReferencePage'
 import OntologyPage from './pages/OntologyPage'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
         {page === 'ontology' && <OntologyPage />}
         {page === 'knowledge' && <KnowledgePage />}
         {page === 'skills' && <SkillsPage />}
+        {page === 'reference' && <ReferencePage />}
         {page === 'settings' && <SettingsPage />}
       </div>
     </div>

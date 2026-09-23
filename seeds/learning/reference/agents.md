@@ -1,0 +1,20 @@
+# 智能体（Agent）
+
+## 产品定位
+
+智能体是平台的核心可复用配置实体：名称、描述、系统提示词、模型与采样参数、工具/技能/MCP 挂载、执行后端的组合。既可以**单独直聊**（一个 Agent 名下挂多个对话，折叠树管理），也可以作为成员被项目引用组成多 Agent 团队。
+
+## 设计原理
+
+- **ReAct 循环**：每个 Agent 运行时装配为 Eino ADK 的 ChatModelAgent——模型思考 → 调用工具 → 观察结果 → 再思考，直到给出答案或到达最大迭代次数（防死循环）。
+- **描述即路由语义**：多 Agent 协作时，子 Agent 的 description 是主 Agent 判断"何时委派给谁"的关键依据，所以创建时值得认真写。
+- **工具合并管线**（装配期按序合并、先到先得）：①勾选的内置工具（current_time 等）→ ②技能携带的工具白名单 → ③Agent 级配置的 MCP server 工具（`{server}__{tool}` 前缀防撞）→ ④本体挂载时的 onto_* 工具 → ⑤项目会话的文件工具（list_files / read_file / save_file）。
+- **推理后端可插拔**：默认 `eino-adk`（进程内完整能力）；也可选外部 CLI 后端（Claude Code / OpenCode / Aider），按 PATH 探测、协议桥接，技能/MCP 降级为提示词注入。
+- **记忆还原**：每轮运行把历史消息还原为多轮上下文，历史对话重开即完整续聊。
+
+## 相关资料
+
+- `docs/01` §3.3 —— Agent 配置表单字段级需求
+- `docs/02` §6.2 / §6.16 —— 单 Agent 装配与推理后端契约
+- [Eino ADK 文档](https://www.cloudwego.io/zh/docs/eino/core_modules/eino_adk/) —— ChatModelAgent / Runner / 中断恢复
+- 设置页「推理后端」面板 —— 查看本机已探测到的后端与能力矩阵

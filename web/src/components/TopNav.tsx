@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { RobotOutlined, ProjectOutlined, ApartmentOutlined, DatabaseOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons'
+import { RobotOutlined, ProjectOutlined, ApartmentOutlined, DatabaseOutlined, ThunderboltOutlined, BookOutlined, SettingOutlined } from '@ant-design/icons'
 import { useUI, type PageKey } from '../store/ui'
 
 const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
@@ -8,6 +8,7 @@ const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
   { key: 'ontology', label: '本体', icon: <ApartmentOutlined /> },
   { key: 'knowledge', label: '知识库', icon: <DatabaseOutlined /> },
   { key: 'skills', label: '技能', icon: <ThunderboltOutlined /> },
+  { key: 'reference', label: '参考资料', icon: <BookOutlined /> },
 ]
 
 /**

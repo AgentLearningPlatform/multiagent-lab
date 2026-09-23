@@ -617,3 +617,13 @@
 
 /* CodeMirror 只读容器（源码视图） */
 .onto-cm-wrap { border: 1px solid var(--c-line); border-radius: 10px; overflow: hidden; }
+
+/* M11 收尾：中断恢复答复卡（ask_human 挂起） */
+.chat-interrupt { padding: 0 16px 8px; }
+.chat-interrupt .chat-interrupt-body { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+/* REQ-116 参考资料中心：左模块分类 + 右定位/原理/资料正文 */
+.ref-main { display: flex; flex-direction: column; height: 100%; padding: 16px 28px 0; overflow: hidden; }
+.ref-main .settings-head { flex: none; }
+.ref-body { flex: 1; overflow: auto; padding: 4px 8px 48px 2px; }
+.ref-body .antmd, .ref-body > * { max-width: 860px; }

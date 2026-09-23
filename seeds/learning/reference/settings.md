@@ -1,0 +1,20 @@
+# 设置（模型连接与推理后端）
+
+## 产品定位
+
+设置是全平台"用哪个模型"的唯一配置入口：维护模型连接（对话 chat / 向量 embedding）、设默认、看使用统计、查推理后端。所有模块（智能体对话、知识库向量化、本体 AI 创建、KG 抽取）都引用这里配置的连接，不自带密钥。
+
+## 设计原理
+
+- **OpenAI 兼容统一协议**：任一厂商只要提供 OpenAI 兼容端点即可接入；连接 = 名称 + 类型 + BaseURL + 模型名 + API Key。
+- **厂商预设 + 自动发现**：添加提供商时从预设（DeepSeek/百炼/千帆/智谱/Kimi/硅基流动/MiniMax/星火）一键填充协议与 BaseURL，补 Key 即可；保存后自动挂"自动获取模型"面板，从接入点拉取可用模型批量建连（Key 归提供商共享）。
+- **默认连接机制**：chat / embedding 各至多一条默认；智能体"跟随全局默认"即引用它。首次启动预置 DeepSeek 对话连接与百度千帆 embeddings-v1 向量候选（填 Key 启用即默认）。
+- **Key 安全**：AES-256-GCM 加密存储，界面仅掩码回显，密钥文件与数据库都不进仓库；引用保护——被引用的连接删除/停用有明确提示。
+- **使用统计**：按模型/供应商/智能体/项目聚合调用次数与 token 消耗（数据来自运行事件的 usage）。
+- **推理后端探测**：eino-adk 恒可用（默认），外部 CLI 后端按 PATH 探测（缓存 10 分钟），能力矩阵如实标注。
+
+## 相关资料
+
+- `docs/01` §3.4 —— 模型连接需求（REQ-40~49/104~106）
+- `docs/02` §6.16 —— 推理后端契约与能力降级
+- 常用厂商控制台：[DeepSeek](https://platform.deepseek.com) · [阿里百炼](https://bailian.console.aliyun.com) · [百度千帆](https://console.bce.baidu.com/qianfan) · [智谱](https://open.bigmodel.cn) · [Kimi](https://platform.moonshot.cn) · [硅基流动](https://cloud.siliconflow.cn) · [MiniMax](https://platform.minimaxi.com) · [讯飞星火](https://console.xfyun.cn)

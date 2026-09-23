@@ -1,0 +1,18 @@
+# 技能（Skill）
+
+## 产品定位
+
+技能 = 可复用的能力包：**一段领域指令 + 一组可选工具**，创建一次、多个 Agent 复用。让"怎么做某类事"的知识与配置解耦于具体 Agent。
+
+## 设计原理
+
+- **结构化技能包**（对齐 Claude Skills 思路）：`{name, description, instruction, tools[], resources?}`——instruction 在装配期追加进 Agent 系统提示词，tools 并入 Agent 工具集（与勾选工具先到先得合并）。
+- **两级开关**：Agent 配置里勾选挂载哪些技能（挂载级）；对话输入框的「技能」chip 控制本次会话是否注入（会话级 `enable_skills`，默认开）。
+- **不做技能运行时**：技能是配置级能力包，不是代码执行环境——不沙箱、不解释执行；"让 Agent 用得对"靠 description 与 instruction 写清楚。
+- **过程可见**：运行事件标注技能注入（skill.loaded），对话里能看到本 Agent 本次启用了哪些技能。
+
+## 相关资料
+
+- `docs/01` §3.7 —— 技能模块需求（REQ-120/121）
+- [Claude Skills（SKILL.md）](https://docs.claude.com/en/docs/agents-and-tools/agent-skills) —— 结构化能力包的开源参照
+- 内置示例技能 —— 技能页可直接查看"结构化输出约束""K8s 排障指引"的注入预览
