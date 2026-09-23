@@ -133,6 +133,8 @@ export interface Conversation {
   ontology_enabled: boolean
   /** 会话级技能开关（后端列待跟进；前端按 `?? true` 兼容默认开） */
   enable_skills?: boolean
+  /** 中断挂起信息 JSON（M11 收尾：ask_human 等待答复；空 = 无挂起） */
+  interrupt_state?: string | null
   top_k: number
   min_score: number
   created_at: string

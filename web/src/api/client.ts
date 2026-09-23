@@ -428,12 +428,32 @@ export function runConversation(
   input: string,
   onEvent: (ev: { event: string; data: any }) => void,
 ): { abort: () => void; done: Promise<void> } {
+  return streamRun(`/api/conversations/${conversationId}/runs`, { input }, onEvent)
+}
+
+/**
+ * 恢复挂起的中断（M11 收尾 · ask_human 中断恢复）：以用户答复定向续跑，SSE 事件流与运行同构。
+ */
+export function resumeConversation(
+  conversationId: string,
+  answer: string,
+  onEvent: (ev: { event: string; data: any }) => void,
+): { abort: () => void; done: Promise<void> } {
+  return streamRun(`/api/conversations/${conversationId}/resume`, { input: answer }, onEvent)
+}
+
+/** SSE over fetch 公共流（运行 / 恢复共用；POST JSON → 逐事件回调）。 */
+function streamRun(
+  url: string,
+  body: Record<string, unknown>,
+  onEvent: (ev: { event: string; data: any }) => void,
+): { abort: () => void; done: Promise<void> } {
   const ctrl = new AbortController()
   const done = (async () => {
-    const res = await fetch(`/api/conversations/${conversationId}/runs`, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify(body),
       signal: ctrl.signal,
     })
     if (!res.ok || !res.body) {

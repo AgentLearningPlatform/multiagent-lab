@@ -84,6 +84,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/conversations/{id}/events", s.listEvents)
 	m.HandleFunc("POST /api/conversations/{id}/runs", s.runConversation)
 	m.HandleFunc("POST /api/conversations/{id}/stop", s.stopConversation)
+	// M11 收尾：中断恢复（ask_human 答复定向续跑）
+	m.HandleFunc("POST /api/conversations/{id}/resume", s.resumeConversation)
 
 	// Model connections
 	m.HandleFunc("GET /api/model-connections", s.listConnections)

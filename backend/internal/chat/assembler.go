@@ -34,6 +34,7 @@ type Assembler struct {
 	Composer  *skill.Composer   // M9：技能注入（nil 时技能不生效）
 	Ontology  *ontology.Service // M8：本体对接（nil 时本体不生效）
 	FilesRoot string            // M11：项目文件根目录（空=save_file 不启用），如 ./data/projects
+	CheckPoints CheckPoints     // M11 收尾：中断检查点存储（nil=中断不持久化、无法恢复）
 }
 
 // BuildResult 装配产物。
@@ -108,7 +109,7 @@ func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent, sc asse
 	if err != nil {
 		return nil, err
 	}
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: b.Inst, EnableStreaming: true})
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: b.Inst, EnableStreaming: true, CheckPointStore: a.CheckPoints})
 	return &BuildResult{
 		Runner:          runner,
 		AgentName:       ag.Name,
@@ -231,7 +232,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 	if err != nil {
 		return nil, err
 	}
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: inst, EnableStreaming: true})
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: inst, EnableStreaming: true, CheckPointStore: a.CheckPoints})
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
 		ModelLabel: label, ConnID: connID,
@@ -276,7 +277,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	if err != nil {
 		return nil, fmt.Errorf("set sub agents: %w", err)
 	}
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: root, EnableStreaming: true})
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: root, EnableStreaming: true, CheckPointStore: a.CheckPoints})
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
 		ModelLabel: label, ConnID: connID,

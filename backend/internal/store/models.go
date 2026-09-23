@@ -68,6 +68,8 @@ type Conversation struct {
 	OntologyEnabled  bool    `json:"ontology_enabled"`
 	// EnableSkills 会话级技能开关（nil=未指定：创建默认开、更新保留原值）
 	EnableSkills *bool   `json:"enable_skills,omitempty"`
+	// InterruptState 中断挂起信息 JSON（ask_human 等 HIL 中断；空=无。M11 收尾）
+	InterruptState string  `json:"interrupt_state,omitempty"`
 	TopK         int     `json:"top_k"`
 	MinScore     float64 `json:"min_score"`
 	CreatedAt    string  `json:"created_at"`

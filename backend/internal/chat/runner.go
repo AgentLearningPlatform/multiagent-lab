@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
@@ -168,51 +169,190 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	// 知识库召回（M6，§11/§6.9：提问先检索 → retrieval 事件 → 上下文注入；失败降级不阻断）
 	histMsgs = s.recallKB(runCtx, conv, runID, input, histMsgs, emit)
 
-	var (
-		buf        []byte
-		stopped    bool
-		runErr     string
-		lastUsage  *schema.TokenUsage           // 最后一片的 token 用量（流式 usage 在尾片）
-		lastFinish string                       // 最后一次 finish_reason
-		toolAgg    = map[int]*pendingToolCall{} // 流式 tool_calls 增量聚合（按 Index）
-		lastAgent  string                       // M4：subagent.enter/exit 检测
-	)
-	rootAgent := rt.AgentName
+	// 中断恢复（M11 收尾）：新消息运行会放弃既有挂起中断（checkpoint 清理 + 状态清除）
+	if conv.InterruptState != "" {
+		s.abandonInterrupt(runCtx, conv, runID, emit)
+	}
 
-	// subagentLeave 发出子 Agent 退出事件
-	subagentLeave := func(name string) {
-		if name != "" && name != rootAgent {
-			s.emitAndRecord(runCtx, conv, runID, newEvent("subagent.exit", runID, map[string]any{"agent": name}), emit)
+	rc := newRunConsumer(s, runCtx, conv, runID, rt, emit, start)
+	// WithCheckPointID（M11 收尾）：中断时 ADK 自动存 checkpoint，供 Resume 定向恢复
+	rc.consume(rt.Runner.Run(runCtx, histMsgs, adk.WithCheckPointID(checkPointIDOf(runID))))
+	rc.subagentLeave(rc.lastAgent)
+
+	// 4) 持久化助手消息
+	if len(rc.buf) > 0 {
+		asg := &store.Message{ConversationID: conv.ID, Role: "assistant", Content: string(rc.buf)}
+		if m, err := s.Store.InsertMessage(asg); err == nil {
+			res.AssistantMessageID = m.ID
+		} else {
+			log.Printf("[chat] save assistant message: %v", err)
 		}
 	}
-	// trackAgent AgentName 变化 → enter/exit 事件（AgentTool 内部事件 / transfer 转移）
-	trackAgent := func(name string) {
-		if name == "" || name == lastAgent {
+
+	// 5) 终态事件（附带耗时 / token 用量 / finish_reason，供前端执行细节展示）
+	finishData := func(reason string) map[string]any {
+		data := map[string]any{"reason": reason, "elapsed_ms": time.Since(start).Milliseconds()}
+		if rc.lastUsage != nil {
+			data["usage"] = map[string]any{
+				"prompt_tokens":     rc.lastUsage.PromptTokens,
+				"completion_tokens": rc.lastUsage.CompletionTokens,
+				"total_tokens":      rc.lastUsage.TotalTokens,
+			}
+		}
+		if rc.lastFinish != "" {
+			data["finish_reason"] = rc.lastFinish
+		}
+		return data
+	}
+	switch {
+	case rc.stopped:
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("stopped")), emit)
+		res.Stopped = true
+	case rc.runErr != "":
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, map[string]any{
+			"code": "run_failed", "message": rc.runErr, "elapsed_ms": time.Since(start).Milliseconds(),
+		}), emit)
+		res.Error = rc.runErr
+	case rc.interrupted:
+		// M11 收尾：挂起等待答复（区别于 completed / stopped）
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("interrupted")), emit)
+	default:
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
+	}
+	return res, nil
+}
+
+// checkPointIDOf 运行 → 中断检查点 ID（Run 传入 WithCheckPointID 与中断落库共用）。
+func checkPointIDOf(runID string) string { return "ckpt_" + runID }
+
+// interruptState 会话中断挂起信息（conversation.interrupt_state JSON）。
+// TargetID 为中断点地址串（InterruptCtx.ID），恢复时作为 ResumeParams.Targets 的键定向投递答复。
+type interruptState struct {
+	CheckpointID string   `json:"checkpoint_id"`
+	TargetID     string   `json:"target_id"`
+	Question     string   `json:"question"`
+	Choices      []string `json:"choices,omitempty"`
+	RunID        string   `json:"run_id"`
+}
+
+// handleInterrupted 捕获运行中断（ask_human 等）：提取根因中断点的问题信息，
+// 挂起状态落 conversation.interrupt_state，发 run.interrupted 事件（前端渲染答复卡）。
+func (s *Service) handleInterrupted(ctx context.Context, conv *store.Conversation, runID string, ii *adk.InterruptInfo, emit EmitFn) {
+	st := interruptState{CheckpointID: checkPointIDOf(runID), RunID: runID}
+	if ii != nil {
+		var chosen *adk.InterruptCtx
+		for _, c := range ii.InterruptContexts {
+			if c == nil {
+				continue
+			}
+			if chosen == nil || (c.IsRootCause && !chosen.IsRootCause) {
+				chosen = c
+			}
+			if c.IsRootCause {
+				break
+			}
+		}
+		if chosen != nil {
+			st.TargetID = chosen.ID
+			if b, err := json.Marshal(chosen.Info); err == nil {
+				var hi struct {
+					Question string   `json:"question"`
+					Choices  []string `json:"choices"`
+				}
+				if json.Unmarshal(b, &hi) == nil && hi.Question != "" {
+					st.Question, st.Choices = hi.Question, hi.Choices
+				}
+			}
+		}
+	}
+	if b, err := json.Marshal(st); err == nil {
+		_ = s.Store.SetConversationInterruptState(conv.ID, string(b))
+	}
+	s.emitAndRecord(ctx, conv, runID, newEvent("run.interrupted", runID, map[string]any{
+		"checkpoint_id": st.CheckpointID, "target_id": st.TargetID,
+		"question": st.Question, "choices": st.Choices,
+	}), emit)
+}
+
+// abandonInterrupt 新消息运行时放弃挂起中断（清 checkpoint + 挂起状态，发警告事件）。
+func (s *Service) abandonInterrupt(ctx context.Context, conv *store.Conversation, runID string, emit EmitFn) {
+	var st interruptState
+	if json.Unmarshal([]byte(conv.InterruptState), &st) == nil && st.CheckpointID != "" && s.Assembler.CheckPoints != nil {
+		_ = s.Assembler.CheckPoints.Delete(ctx, st.CheckpointID)
+	}
+	_ = s.Store.SetConversationInterruptState(conv.ID, "")
+	s.emitAndRecord(ctx, conv, runID, newEvent("run.warning", runID, map[string]any{
+		"message": "已有挂起的提问未答复，本次新消息按新问题运行（原提问已放弃）",
+	}), emit)
+}
+
+// runConsumer 单次运行的事件消费状态（Run 与 Resume 共用同一事件翻译管线）。
+type runConsumer struct {
+	s     *Service
+	ctx   context.Context
+	conv  *store.Conversation
+	runID string
+	rt    *BuildResult
+	emit  EmitFn
+	start time.Time
+
+	rootAgent     string
+	subagentLeave func(string)
+	trackAgent    func(string)
+	emitReasoning func(string)
+	recordDelta   func(string)
+
+	buf         []byte
+	stopped     bool
+	runErr      string
+	interrupted bool
+	lastUsage   *schema.TokenUsage
+	lastFinish  string
+	toolAgg     map[int]*pendingToolCall
+	lastAgent   string
+}
+
+// newRunConsumer 构造事件消费者（Run 与 Resume 共用；闭包绑定自身状态）。
+func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, runID string, rt *BuildResult, emit EmitFn, start time.Time) *runConsumer {
+	rc := &runConsumer{
+		s: s, ctx: ctx, conv: conv, runID: runID, rt: rt, emit: emit, start: start,
+		rootAgent: rt.AgentName,
+		toolAgg:   map[int]*pendingToolCall{},
+	}
+	rc.subagentLeave = func(name string) {
+		if name != "" && name != rc.rootAgent {
+			s.emitAndRecord(rc.ctx, conv, runID, newEvent("subagent.exit", runID, map[string]any{"agent": name}), emit)
+		}
+	}
+	rc.trackAgent = func(name string) {
+		if name == "" || name == rc.lastAgent {
 			return
 		}
-		if lastAgent != "" {
-			subagentLeave(lastAgent)
+		if rc.lastAgent != "" {
+			rc.subagentLeave(rc.lastAgent)
 		}
-		if name != rootAgent {
-			s.emitAndRecord(runCtx, conv, runID, newEvent("subagent.enter", runID, map[string]any{"agent": name}), emit)
+		if name != rc.rootAgent {
+			s.emitAndRecord(rc.ctx, conv, runID, newEvent("subagent.enter", runID, map[string]any{"agent": name}), emit)
 		}
-		lastAgent = name
+		rc.lastAgent = name
 	}
-
-	// 深度思考内容（reasoner 类模型）独立事件流，不进正文
-	emitReasoning := func(delta string) {
+	rc.emitReasoning = func(delta string) {
 		if delta != "" {
-			s.emitAndRecord(runCtx, conv, runID, newEvent("reasoning.delta", runID, map[string]any{"delta": delta}), emit)
+			s.emitAndRecord(rc.ctx, conv, runID, newEvent("reasoning.delta", runID, map[string]any{"delta": delta}), emit)
 		}
 	}
-	recordDelta := func(delta string) {
-		buf = append(buf, delta...)
+	rc.recordDelta = func(delta string) {
+		rc.buf = append(rc.buf, delta...)
 		if len(delta) > 0 {
 			emit(newEvent("message.delta", runID, map[string]any{"delta": delta}))
 		}
 	}
+	return rc
+}
 
-	iter := rt.Runner.Run(runCtx, histMsgs)
+// consume 消费 ADK 事件流并翻译为平台事件（方案 §7）；中断事件在此捕获。
+func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
+	s, runCtx, conv, runID, rt, emit := rc.s, rc.ctx, rc.conv, rc.runID, rc.rt, rc.emit
 	for {
 		ev, ok := iter.Next()
 		if !ok {
@@ -220,13 +360,19 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		}
 		if ev.Err != nil {
 			if errors.Is(ev.Err, context.Canceled) {
-				stopped = true
+				rc.stopped = true
 			} else {
-				runErr = ev.Err.Error()
+				rc.runErr = ev.Err.Error()
 			}
 			break
 		}
-		trackAgent(ev.AgentName)
+		rc.trackAgent(ev.AgentName)
+		// 中断恢复（M11 收尾）：挂起运行等待用户答复（Output 通常为空，须在 Output 判空前处理）
+		if ev.Action != nil && ev.Action.Interrupted != nil {
+			rc.interrupted = true
+			s.handleInterrupted(runCtx, conv, runID, ev.Action.Interrupted, emit)
+			continue
+		}
 		// transfer 模式：动作级转移提示
 		if ev.Action != nil && ev.Action.TransferToAgent != nil {
 			dest := ev.Action.TransferToAgent.DestAgentName
@@ -250,9 +396,9 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 				}
 				if err != nil {
 					if errors.Is(err, context.Canceled) {
-						stopped = true
+						rc.stopped = true
 					} else {
-						runErr = err.Error()
+						rc.runErr = err.Error()
 					}
 					break
 				}
@@ -260,25 +406,25 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 					continue
 				}
 				if chunk.ReasoningContent != "" {
-					emitReasoning(chunk.ReasoningContent)
+					rc.emitReasoning(chunk.ReasoningContent)
 				}
 				if chunk.Content != "" {
-					recordDelta(chunk.Content)
+					rc.recordDelta(chunk.Content)
 				}
-				mergeToolCallChunk(toolAgg, chunk.ToolCalls)
+				mergeToolCallChunk(rc.toolAgg, chunk.ToolCalls)
 				if chunk.ResponseMeta != nil {
 					if chunk.ResponseMeta.Usage != nil {
-						lastUsage = chunk.ResponseMeta.Usage
+						rc.lastUsage = chunk.ResponseMeta.Usage
 					}
 					if chunk.ResponseMeta.FinishReason != "" {
-						lastFinish = chunk.ResponseMeta.FinishReason
+						rc.lastFinish = chunk.ResponseMeta.FinishReason
 					}
 				}
 			}
 			// 流结束：输出聚合完成的 tool.call（含入参 JSON 与 source）
-			flushToolCalls(s, runCtx, conv, runID, rt, toolAgg, emit)
-			for k := range toolAgg {
-				delete(toolAgg, k)
+			flushToolCalls(s, runCtx, conv, runID, rt, rc.toolAgg, emit)
+			for k := range rc.toolAgg {
+				delete(rc.toolAgg, k)
 			}
 		case mo.Message != nil && mo.Role == schema.Tool:
 			// 工具执行结果（对应发起见 tool.call 事件）
@@ -301,61 +447,104 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		case mo.Message != nil && mo.Role == schema.Assistant && !mo.IsStreaming:
 			// 非流式完整输出（兜底）
 			if mo.Message.ReasoningContent != "" {
-				emitReasoning(mo.Message.ReasoningContent)
+				rc.emitReasoning(mo.Message.ReasoningContent)
 			}
 			if mo.Message.Content != "" {
-				recordDelta(mo.Message.Content)
+				rc.recordDelta(mo.Message.Content)
 			}
 			for _, tc := range mo.Message.ToolCalls {
 				emitToolCall(s, runCtx, conv, runID, rt, tc, emit)
 			}
 			if mo.Message.ResponseMeta != nil {
 				if mo.Message.ResponseMeta.Usage != nil {
-					lastUsage = mo.Message.ResponseMeta.Usage
+					rc.lastUsage = mo.Message.ResponseMeta.Usage
 				}
 				if mo.Message.ResponseMeta.FinishReason != "" {
-					lastFinish = mo.Message.ResponseMeta.FinishReason
+					rc.lastFinish = mo.Message.ResponseMeta.FinishReason
 				}
 			}
 		}
 	}
-	// 流收尾：仍在子 Agent 中 → 发 exit
-	subagentLeave(lastAgent)
+}
 
-	// 4) 持久化助手消息
-	if len(buf) > 0 {
-		asg := &store.Message{ConversationID: conv.ID, Role: "assistant", Content: string(buf)}
+// Resume 恢复挂起的中断（M11 收尾）：以用户答复按 InterruptCtx.ID 定向恢复 ask_human 中断点，
+// 复用 Run 的事件翻译管线；恢复过程若再次中断（如连环提问），照常落新的挂起状态。
+func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, answer string, emit EmitFn) (*RunResult, error) {
+	if emit == nil {
+		emit = func(*Event) {}
+	}
+	var st interruptState
+	if conv.InterruptState == "" || json.Unmarshal([]byte(conv.InterruptState), &st) != nil || st.CheckpointID == "" || st.TargetID == "" {
+		return nil, errors.New("该会话没有挂起的中断提问")
+	}
+	rt, err := s.Assembler.Assemble(ctx, agent, conv)
+	if err != nil {
+		return nil, err
+	}
+	res := &RunResult{}
+	runCtx, cancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.cancels[conv.ID] = cancel
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.cancels, conv.ID)
+		s.mu.Unlock()
+		cancel()
+	}()
+
+	start := time.Now()
+	s.emitAndRecord(runCtx, conv, runID, newEvent("run.started", runID, map[string]any{
+		"conversation_id": conv.ID, "agent_name": rt.AgentName, "model": rt.ModelLabel,
+		"backend": "inprocess", "resumed": true,
+	}), emit)
+	// 先清挂起状态：恢复过程中若再次中断，handleInterrupted 会写入新状态
+	_ = s.Store.SetConversationInterruptState(conv.ID, "")
+
+	iter, err := rt.Runner.ResumeWithParams(runCtx, st.CheckpointID, &adk.ResumeParams{
+		Targets: map[string]any{st.TargetID: answer},
+	})
+	if err != nil {
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, map[string]any{
+			"code": "resume_failed", "message": err.Error(), "elapsed_ms": time.Since(start).Milliseconds(),
+		}), emit)
+		return nil, err
+	}
+
+	rc := newRunConsumer(s, runCtx, conv, runID, rt, emit, start)
+	rc.consume(iter)
+	rc.subagentLeave(rc.lastAgent)
+
+	if len(rc.buf) > 0 {
+		asg := &store.Message{ConversationID: conv.ID, Role: "assistant", Content: string(rc.buf)}
 		if m, err := s.Store.InsertMessage(asg); err == nil {
 			res.AssistantMessageID = m.ID
 		} else {
 			log.Printf("[chat] save assistant message: %v", err)
 		}
 	}
-
-	// 5) 终态事件（附带耗时 / token 用量 / finish_reason，供前端执行细节展示）
 	finishData := func(reason string) map[string]any {
 		data := map[string]any{"reason": reason, "elapsed_ms": time.Since(start).Milliseconds()}
-		if lastUsage != nil {
+		if rc.lastUsage != nil {
 			data["usage"] = map[string]any{
-				"prompt_tokens":     lastUsage.PromptTokens,
-				"completion_tokens": lastUsage.CompletionTokens,
-				"total_tokens":      lastUsage.TotalTokens,
+				"prompt_tokens":     rc.lastUsage.PromptTokens,
+				"completion_tokens": rc.lastUsage.CompletionTokens,
+				"total_tokens":      rc.lastUsage.TotalTokens,
 			}
-		}
-		if lastFinish != "" {
-			data["finish_reason"] = lastFinish
 		}
 		return data
 	}
 	switch {
-	case stopped:
+	case rc.stopped:
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("stopped")), emit)
 		res.Stopped = true
-	case runErr != "":
+	case rc.runErr != "":
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, map[string]any{
-			"code": "run_failed", "message": runErr, "elapsed_ms": time.Since(start).Milliseconds(),
+			"code": "run_failed", "message": rc.runErr, "elapsed_ms": time.Since(start).Milliseconds(),
 		}), emit)
-		res.Error = runErr
+		res.Error = rc.runErr
+	case rc.interrupted:
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("interrupted")), emit)
 	default:
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
 	}

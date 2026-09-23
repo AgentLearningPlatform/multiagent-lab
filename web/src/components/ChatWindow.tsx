@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Avatar, Button, Collapse, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Avatar, Alert, Button, Collapse, Input, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
-import { api, runConversation } from '../api/client'
+import { api, resumeConversation, runConversation } from '../api/client'
 import type {
   Agent,
   Conversation,
@@ -45,7 +45,10 @@ function describeEvent(type: string, d: any): { text: string; err?: boolean; war
     case 'run.started':
       return { text: `▶ 运行开始 · ${d?.agent_name ?? ''} · ${d?.model ?? ''}`.replace(/ ·\s*$/, '') }
     case 'run.finished':
-      return d?.reason === 'stopped' ? { text: '⏹ 已停止' } : { text: finishSummary(d) }
+      return d?.reason === 'stopped' ? { text: '⏹ 已停止' } : d?.reason === 'interrupted' ? { text: '⏸ 已挂起 · 等待答复' } : { text: finishSummary(d) }
+    // M11 收尾：中断恢复（ask_human 等待用户答复）
+    case 'run.interrupted':
+      return { text: `⏸ 等待答复 · ${d?.question ?? ''}` }
     case 'run.warning':
       return { text: `⚠ 运行警告 · ${d?.message ?? ''}`.replace(/ ·\s*$/, ''), warn: true }
     case 'run.error':
@@ -499,6 +502,128 @@ export default function ChatWindow({
     [items, showRaw, reasoningOpen],
   )
 
+  // 中断恢复（M11 收尾）：会话挂起的 ask_human 提问（随会话数据同步）
+  const [interrupt, setInterrupt] = useState<{ question: string; choices: string[] } | null>(null)
+  const [answer, setAnswer] = useState('')
+  useEffect(() => {
+    try {
+      const st = conversation.interrupt_state ? JSON.parse(conversation.interrupt_state) : null
+      setInterrupt(st && st.question ? { question: st.question, choices: Array.isArray(st.choices) ? st.choices : [] } : null)
+    } catch {
+      setInterrupt(null)
+    }
+  }, [conversation.id, conversation.interrupt_state])
+
+  // 运行/恢复共用的事件翻译（send 与 resume 的 SSE 处理一致）
+  const handleRunEvent = ({ event, data }: { event: string; data: any }) => {
+    const payload = data?.data ?? {}
+    switch (event) {
+      case 'run.started':
+      case 'run.finished': {
+        const desc = describeEvent(event, payload)
+        setItems((prev) => {
+          const next = [...prev]
+          if (event === 'run.finished') {
+            const last = next[next.length - 1]
+            if (last && last.kind === 'msg' && last.streaming) {
+              last.streaming = false
+              if (!last.content) {
+                last.content =
+                  payload.reason === 'stopped' ? '（已停止生成）' : payload.reason === 'interrupted' ? '（已暂停，等待你的答复）' : ''
+              }
+            }
+          }
+          const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
+          next.splice(next.length - 1, 0, ev)
+          return next
+        })
+        break
+      }
+      case 'run.interrupted': {
+        const desc = describeEvent(event, payload)
+        setInterrupt({
+          question: payload.question ?? '',
+          choices: Array.isArray(payload.choices) ? payload.choices : [],
+        })
+        setItems((prev) => {
+          const next = [...prev]
+          const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
+          next.splice(next.length - 1, 0, ev)
+          return next
+        })
+        break
+      }
+      case 'reasoning.delta':
+        setItems((prev) => {
+          const next = [...prev]
+          for (let i = next.length - 1; i >= 0; i--) {
+            if (next[i].evType === 'reasoning' && next[i].streamKey === runKeyRef.current) {
+              next[i] = { ...next[i], reasoning: (next[i].reasoning ?? '') + (payload.delta ?? '') }
+              return next
+            }
+          }
+          const card: ChatItem = { kind: 'event', evType: 'reasoning', reasoning: payload.delta ?? '', streamKey: runKeyRef.current, evKey: runKeyRef.current }
+          next.splice(Math.max(next.length - 1, 0), 0, card)
+          return next
+        })
+        break
+      case 'message.delta':
+        setItems((prev) => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          if (last && last.kind === 'msg' && last.streaming) last.content += payload.delta ?? ''
+          return next
+        })
+        break
+      case 'run.error': {
+        const msg = payload.message ?? '运行失败'
+        setItems((prev) => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          if (last && last.kind === 'msg' && last.streaming && !last.content) next.pop()
+          const ev: ChatItem = { kind: 'event', evType: 'run.error', eventErr: true, eventText: `⚠ ${msg}`, evData: payload }
+          return [...next, ev]
+        })
+        break
+      }
+      default:
+        // 过程类事件（工具/技能/子智能体/知识召回/本体）：统一插到流式助手消息之前
+        if (
+          event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded' ||
+          event === 'subagent.enter' || event === 'subagent.exit' ||
+          event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable' ||
+          event === 'run.warning'
+        ) {
+          const desc = describeEvent(event, payload)
+          setItems((prev) => {
+            const next = [...prev]
+            const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, eventErr: desc.err, eventWarn: desc.warn, evData: payload }
+            next.splice(next.length - 1, 0, ev) // 流式助手消息存在时插到其前
+            return next
+          })
+        }
+    }
+  }
+
+  // streamStart 运行/恢复公共段：追加流式助手消息 → 消费 SSE → 收尾刷新
+  const streamStart = async (
+    start: (handler: (ev: { event: string; data: any }) => void) => { abort: () => void; done: Promise<void> },
+  ) => {
+    setItems((prev) => [...prev, { kind: 'msg', role: 'assistant', content: '', streaming: true }])
+    setRunning(true)
+    const aborter = start(handleRunEvent)
+    runRef.current = aborter
+    try {
+      await aborter.done
+    } catch { /* 用户中断 */ }
+    // 运行结束：reasoning 卡收起（保留内容，可手动展开）
+    setItems((prev) => prev.map((it) => (it.streamKey ? { ...it, streamKey: undefined } : it)))
+    setRunning(false)
+    runRef.current = null
+    bumpData()
+    onConversationUpdated()
+  }
+
   const send = async () => {
     const text = input.trim()
     if (!text || running) return
@@ -510,92 +635,18 @@ export default function ChatWindow({
     setInput('')
     runKeyRef.current = `run-${Date.now()}`
     setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
+    await streamStart((handler) => runConversation(conversation.id, text, handler))
+  }
 
-    // 追加流式助手消息
-    setItems((prev) => [...prev, { kind: 'msg', role: 'assistant', content: '', streaming: true }])
-    setRunning(true)
-    const aborter = runConversation(conversation.id, text, ({ event, data }) => {
-      const payload = data?.data ?? {}
-      switch (event) {
-        case 'run.started':
-        case 'run.finished': {
-          const desc = describeEvent(event, payload)
-          setItems((prev) => {
-            const next = [...prev]
-            if (event === 'run.finished') {
-              const last = next[next.length - 1]
-              if (last && last.kind === 'msg' && last.streaming) {
-                last.streaming = false
-                if (!last.content) last.content = payload.reason === 'stopped' ? '（已停止生成）' : ''
-              }
-            }
-            const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
-            next.splice(next.length - 1, 0, ev)
-            return next
-          })
-          break
-        }
-        case 'reasoning.delta':
-          setItems((prev) => {
-            const next = [...prev]
-            for (let i = next.length - 1; i >= 0; i--) {
-              if (next[i].evType === 'reasoning' && next[i].streamKey === runKeyRef.current) {
-                next[i] = { ...next[i], reasoning: (next[i].reasoning ?? '') + (payload.delta ?? '') }
-                return next
-              }
-            }
-            const card: ChatItem = { kind: 'event', evType: 'reasoning', reasoning: payload.delta ?? '', streamKey: runKeyRef.current, evKey: runKeyRef.current }
-            next.splice(Math.max(next.length - 1, 0), 0, card)
-            return next
-          })
-          break
-        case 'message.delta':
-          setItems((prev) => {
-            const next = [...prev]
-            const last = next[next.length - 1]
-            if (last && last.kind === 'msg' && last.streaming) last.content += payload.delta ?? ''
-            return next
-          })
-          break
-        case 'run.error': {
-          const msg = payload.message ?? '运行失败'
-          setItems((prev) => {
-            const next = [...prev]
-            const last = next[next.length - 1]
-            if (last && last.kind === 'msg' && last.streaming && !last.content) next.pop()
-            const ev: ChatItem = { kind: 'event', evType: 'run.error', eventErr: true, eventText: `⚠ ${msg}`, evData: payload }
-            return [...next, ev]
-          })
-          break
-        }
-        default:
-          // 过程类事件（工具/技能/子智能体/知识召回/本体）：统一插到流式助手消息之前
-          if (
-            event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded' ||
-            event === 'subagent.enter' || event === 'subagent.exit' ||
-            event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable' ||
-            event === 'run.warning'
-          ) {
-            const desc = describeEvent(event, payload)
-            setItems((prev) => {
-              const next = [...prev]
-              const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, eventErr: desc.err, eventWarn: desc.warn, evData: payload }
-              next.splice(next.length - 1, 0, ev) // 流式助手消息存在时插到其前
-              return next
-            })
-          }
-      }
-    })
-    runRef.current = aborter
-    try {
-      await aborter.done
-    } catch { /* 用户中断 */ }
-    // 运行结束：reasoning 卡收起（保留内容，可手动展开）
-    setItems((prev) => prev.map((it) => (it.streamKey ? { ...it, streamKey: undefined } : it)))
-    setRunning(false)
-    runRef.current = null
-    bumpData()
-    onConversationUpdated()
+  // resume 答复挂起的 ask_human 提问（M11 收尾）：答复作为用户气泡展示，事件流与运行同构
+  const resume = async () => {
+    const text = answer.trim()
+    if (!text || running || !interrupt) return
+    setAnswer('')
+    setInterrupt(null)
+    runKeyRef.current = `resume-${Date.now()}`
+    setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
+    await streamStart((handler) => resumeConversation(conversation.id, text, handler))
   }
 
   const stop = () => {
@@ -689,6 +740,41 @@ export default function ChatWindow({
           </div>
         )}
       </div>
+
+      {/* 中断恢复（M11 收尾）：ask_human 挂起时展示问题答复卡（choices 快选 + 自由输入） */}
+      {interrupt && !running && (
+        <div className="composer chat-interrupt">
+          <Alert
+            type="warning"
+            showIcon
+            message={`智能体需要你的输入：${interrupt.question}`}
+            description={
+              <div className="chat-interrupt-body">
+                {interrupt.choices.length > 0 && (
+                  <Space size={6} wrap>
+                    {interrupt.choices.map((c) => (
+                      <Button key={c} size="small" onClick={() => setAnswer(c)}>{c}</Button>
+                    ))}
+                  </Space>
+                )}
+                <Space.Compact style={{ width: '100%' }}>
+                  <Input
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    placeholder="输入你的答复…"
+                    onPressEnter={() => resume()}
+                    autoFocus
+                  />
+                  <Button type="primary" onClick={() => resume()} disabled={!answer.trim()}>答复并继续</Button>
+                </Space.Compact>
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                  也可直接发送新消息（将放弃本次提问，按新问题运行）。
+                </Typography.Text>
+              </div>
+            }
+          />
+        </div>
+      )}
 
       <div className="composer">
         <div className="composer-inner">

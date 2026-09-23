@@ -9,7 +9,7 @@ func scanConversation(row interface{ Scan(...any) error }) (*Conversation, error
 	var c Conversation
 	var agentID, projectID, kbID, profileID sql.NullString
 	var enableKB, ontoEnabled, enableSkills int
-	err := row.Scan(&c.ID, &c.Scope, &agentID, &projectID, &c.Title, &kbID, &enableKB, &profileID, &ontoEnabled, &c.TopK, &c.MinScore, &c.CreatedAt, &c.UpdatedAt, &enableSkills)
+	err := row.Scan(&c.ID, &c.Scope, &agentID, &projectID, &c.Title, &kbID, &enableKB, &profileID, &ontoEnabled, &c.TopK, &c.MinScore, &c.CreatedAt, &c.UpdatedAt, &enableSkills, &c.InterruptState)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func scanConversation(row interface{ Scan(...any) error }) (*Conversation, error
 	return &c, nil
 }
 
-const convCols = `id,scope,agent_id,project_id,title,kb_id,enable_kb,runtime_profile_id,ontology_enabled,top_k,min_score,created_at,updated_at,enable_skills`
+const convCols = `id,scope,agent_id,project_id,title,kb_id,enable_kb,runtime_profile_id,ontology_enabled,top_k,min_score,created_at,updated_at,enable_skills,interrupt_state`
 
 // ConversationFilter 会话列表过滤。
 type ConversationFilter struct {
@@ -109,8 +109,8 @@ func (s *Store) CreateConversation(c *Conversation) (*Conversation, error) {
 	if c.EnableSkills != nil {
 		enableSkills = *c.EnableSkills
 	}
-	_, err := s.DB.Exec(`INSERT INTO conversation (`+convCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		c.ID, c.Scope, c.AgentID, c.ProjectID, c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), now(), boolInt(enableSkills))
+	_, err := s.DB.Exec(`INSERT INTO conversation (`+convCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.ID, c.Scope, c.AgentID, c.ProjectID, c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), now(), boolInt(enableSkills), c.InterruptState)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +138,18 @@ func (s *Store) UpdateConversation(c *Conversation) (*Conversation, error) {
 // DeleteConversation 删除对话（级联消息与事件）。
 func (s *Store) DeleteConversation(id string) error {
 	res, err := s.DB.Exec(`DELETE FROM conversation WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetConversationInterruptState 更新会话中断挂起状态（"" = 清除；M11 收尾中断恢复）。
+func (s *Store) SetConversationInterruptState(id, stateJSON string) error {
+	res, err := s.DB.Exec(`UPDATE conversation SET interrupt_state=?,updated_at=? WHERE id=?`, stateJSON, now(), id)
 	if err != nil {
 		return err
 	}

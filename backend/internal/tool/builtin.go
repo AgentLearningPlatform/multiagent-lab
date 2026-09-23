@@ -37,7 +37,7 @@ func currentTimeFn(_ context.Context, in currentTimeIn) (*currentTimeOut, error)
 	}, nil
 }
 
-// RegisterBuiltin 注册全部内置工具。后续内置工具（如 save_file，P3）在此追加。
+// RegisterBuiltin 注册全部内置工具。后续内置工具在此追加。
 func RegisterBuiltin(r *Registry) error {
 	bt, err := utils.InferTool("current_time",
 		"获取当前日期时间与星期。当用户询问现在的时间/日期，或任务需要时间上下文时调用。",
@@ -45,12 +45,27 @@ func RegisterBuiltin(r *Registry) error {
 	if err != nil {
 		return fmt.Errorf("infer current_time tool: %w", err)
 	}
-	return r.Register(&Entry{
+	if err := r.Register(&Entry{
 		ID:          "current_time",
 		Description: "获取当前日期时间与星期（内置）",
 		Source:      SourceBuiltin,
 		New: func(ctx context.Context) (einotool.BaseTool, error) {
 			return bt, nil
+		},
+	}); err != nil {
+		return err
+	}
+	// M11 收尾：ask_human 人机协作中断恢复（勾选后 Agent 可挂起运行等待用户答复）
+	ah, err := NewAskHumanTool()
+	if err != nil {
+		return fmt.Errorf("infer ask_human tool: %w", err)
+	}
+	return r.Register(&Entry{
+		ID:          "ask_human",
+		Description: "向用户提问并等待答复（中断恢复，内置）",
+		Source:      SourceBuiltin,
+		New: func(ctx context.Context) (einotool.BaseTool, error) {
+			return ah, nil
 		},
 	})
 }
