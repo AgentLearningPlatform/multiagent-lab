@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Avatar, Alert, Button, Collapse, Input, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Avatar, Alert, Button, Collapse, Dropdown, Input, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
@@ -685,6 +685,21 @@ export default function ChatWindow({
     api.stopConversation(conversation.id).catch(() => {})
   }
 
+  // REQ-113①：导出对话为 Markdown 下载（events=含过程事件附录）
+  const exportMarkdown = async (withEvents: boolean) => {
+    try {
+      const md = await api.exportConversation(conversation.id, withEvents)
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${(conversation.title || '对话').replace(/[\\/:*?"<>|]/g, '_')}.md`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e: any) {
+      showToast(e?.message ?? '导出失败', 'err')
+    }
+  }
+
   const subjectName = isProjectScope ? project?.name : agent?.name
   const canSend = isProjectScope ? !!project : !!agent
   const placeholder = canSend
@@ -713,6 +728,19 @@ export default function ChatWindow({
         )}
         <span className="spacer" />
         <Space size={4} className="chat-ops">
+          {/* REQ-113①：对话导出 Markdown（仅消息 / 含过程事件附录） */}
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'msg', label: '导出 Markdown（仅消息）' },
+                { key: 'full', label: '导出 Markdown（含过程事件）' },
+              ],
+              onClick: ({ key }) => exportMarkdown(key === 'full'),
+            }}
+            disabled={!conversation.id}
+          >
+            <Button size="small">导出</Button>
+          </Dropdown>
           <BugOutlined style={{ color: showRaw ? 'var(--ant-color-primary, #4f46e5)' : undefined }} />
           <span style={{ fontSize: 12 }}>调试</span>
           <Switch size="small" checked={showRaw} onChange={setShowRaw} />

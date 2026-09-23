@@ -281,7 +281,7 @@ export default function SettingsPage() {
               { key: 'inference', label: '推理后端' },
               { key: 'stats', label: '使用统计' },
               { key: 'global', label: <Space size={6}>全局参数<Tag style={{ margin: 0 }}>P1 预留</Tag></Space>, disabled: true },
-              { key: 'security', label: <Space size={6}>数据与安全<Tag style={{ margin: 0 }}>P2 预留</Tag></Space>, disabled: true },
+              { key: 'security', label: '数据与安全' },
             ]}
           />
           <div className="settings-note">
@@ -294,6 +294,8 @@ export default function SettingsPage() {
         <div className="settings-main">
           {category === 'inference' ? (
             <InferencePanel />
+          ) : category === 'security' ? (
+            <SecurityPanel />
           ) : category === 'stats' ? (
             <>
               <div className="settings-head">
@@ -1075,5 +1077,138 @@ function InferencePanel() {
         <span className="hint">外部 CLI 后端按 PATH 探测（结果缓存 10 分钟）；eino-adk 为平台自研默认（完整能力），外部后端能力降级（技能/MCP 注入为提示，不支持多 Agent 编排）</span>
       </div>
     </div>
+  )
+}
+
+/**
+ * 数据与安全（REQ-113② 最小版）：
+ * - 数据量概览：DB 文件体积 + 各表行数（SQLite 单文件，学习尺度全表 COUNT）；
+ * - 会话/项目管理：列表附级联规模（消息数 / 会话数），删除 Popconfirm 明示级联范围——
+ *   删除对话级联其消息与过程事件；删除项目级联其全部对话（含消息与事件）。
+ */
+function SecurityPanel() {
+  const { showToast } = useUI()
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.storageOverview>> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api
+      .storageOverview()
+      .then((r) => alive && setData(r))
+      .catch((e) => alive && showToast(e.message, 'err'))
+      .finally(() => alive && setLoading(false))
+    return () => {
+      alive = false
+    }
+  }, [tick, showToast])
+
+  const delConv = async (c: { id: string; title: string; messages: number }) => {
+    try {
+      await api.deleteConversation(c.id)
+      showToast(`已删除对话「${c.title}」及其 ${c.messages} 条消息与过程事件`)
+      setTick((t) => t + 1)
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
+  }
+  const delProject = async (p: { id: string; name: string; conversations: number }) => {
+    try {
+      await api.deleteProject(p.id)
+      showToast(`已删除项目「${p.name}」及其 ${p.conversations} 个对话（含消息与事件）`)
+      setTick((t) => t + 1)
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
+  }
+
+  const fmtBytes = (n: number) => (n >= 1 << 20 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${(n / 1024).toFixed(1)} KB`)
+  const s = data?.stats
+
+  return (
+    <>
+      <div className="settings-head">
+        <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>数据与安全</Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          全部数据存于本机 SQLite 单文件（密钥 AES-256-GCM 加密）；删除对话/项目会级联删除其下数据，操作前请确认级联范围。API Key 只能整库管理，无单独导出。
+        </Typography.Paragraph>
+      </div>
+      <div className="usage-summary" style={{ marginTop: 12 }}>
+        {[
+          { label: 'DB 体积', value: data ? fmtBytes(data.db_bytes) : '—' },
+          { label: '会话', value: s?.conversations },
+          { label: '消息', value: s?.messages },
+          { label: '过程事件', value: s?.run_events },
+          { label: '智能体', value: s?.agents },
+          { label: '项目', value: s?.projects },
+          { label: '技能', value: s?.skills },
+          { label: '知识库', value: s?.knowledge_bases },
+          { label: '模型连接', value: s?.model_conns },
+        ].map((it) => (
+          <div key={it.label} className="usage-stat">
+            <div className="usage-stat-label">{it.label}</div>
+            <div className="usage-stat-value">{typeof it.value === 'number' ? fmtNum(it.value) : (it.value ?? '—')}</div>
+          </div>
+        ))}
+      </div>
+
+      <Typography.Title level={5} style={{ marginTop: 20, marginBottom: 8 }}>项目管理（删除级联其全部对话）</Typography.Title>
+      <Table
+        rowKey="id"
+        size="small"
+        loading={loading}
+        pagination={false}
+        dataSource={data?.projects ?? []}
+        columns={[
+          { title: '项目', dataIndex: 'name' },
+          { title: '会话数', dataIndex: 'conversations', width: 100, render: (v: number) => fmtNum(v) },
+          {
+            title: '操作', width: 100,
+            render: (_: unknown, p) => (
+              <Popconfirm
+                title={`删除项目「${p.name}」？`}
+                description={`将级联删除其下全部 ${p.conversations} 个对话（含消息与过程事件），不可恢复。`}
+                okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
+                onConfirm={() => delProject(p)}
+              >
+                <Button size="small" danger>删除</Button>
+              </Popconfirm>
+            ),
+          },
+        ]}
+        locale={{ emptyText: '暂无项目' }}
+      />
+
+      <Typography.Title level={5} style={{ marginTop: 20, marginBottom: 8 }}>会话管理（删除级联其消息与事件）</Typography.Title>
+      <Table
+        rowKey="id"
+        size="small"
+        loading={loading}
+        pagination={{ pageSize: 10 }}
+        dataSource={data?.conversations ?? []}
+        columns={[
+          { title: '标题', dataIndex: 'title', ellipsis: true },
+          { title: '归属', dataIndex: 'scope', width: 90, render: (v: string) => (v === 'agent' ? <Tag color="blue" style={{ margin: 0 }}>智能体</Tag> : <Tag color="purple" style={{ margin: 0 }}>项目</Tag>) },
+          { title: '消息数', dataIndex: 'messages', width: 90, render: (v: number) => fmtNum(v) },
+          { title: '更新时间', dataIndex: 'updated_at', width: 180, render: (v: string) => (v || '').replace('T', ' ').slice(0, 16) },
+          {
+            title: '操作', width: 100,
+            render: (_: unknown, c) => (
+              <Popconfirm
+                title={`删除对话「${c.title}」？`}
+                description={`将级联删除其 ${c.messages} 条消息与全部过程事件，不可恢复。`}
+                okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
+                onConfirm={() => delConv(c)}
+              >
+                <Button size="small" danger>删除</Button>
+              </Popconfirm>
+            ),
+          },
+        ]}
+        locale={{ emptyText: '暂无会话' }}
+      />
+    </>
   )
 }

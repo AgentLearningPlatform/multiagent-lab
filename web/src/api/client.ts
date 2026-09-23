@@ -184,6 +184,9 @@ export const api = {
   updateConversation: (id: string, c: Partial<Conversation>) => req<Conversation>(`/api/conversations/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
   deleteConversation: (id: string) => req<{ deleted: string }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   listMessages: (id: string) => req<Message[]>(`/api/conversations/${id}/messages`),
+  /** REQ-113①：对话导出 Markdown（events=1 附过程事件附录） */
+  exportConversation: (id: string, events = false) =>
+    reqText(`/api/conversations/${id}/export${events ? '?events=1' : ''}`),
   listEvents: (id: string) => req<RunEventDTO[]>(`/api/conversations/${id}/events`),
   stopConversation: (id: string) => req<{ stopped: boolean }>(`/api/conversations/${id}/stop`, { method: 'POST' }),
 
@@ -216,6 +219,15 @@ export const api = {
     if (range?.to) params.set('to', range.to)
     return req<UsageStats>(`/api/stats/usage?${params.toString()}`)
   },
+
+  /** REQ-113②：数据量概览（各表行数 + DB 体积 + 对话/项目级联规模） */
+  storageOverview: () =>
+    req<{
+      db_bytes: number
+      stats: { conversations: number; messages: number; run_events: number; agents: number; projects: number; skills: number; knowledge_bases: number; project_files: number; model_conns: number }
+      conversations: { id: string; title: string; scope: string; messages: number; updated_at: string }[]
+      projects: { id: string; name: string; conversations: number }[]
+    }>('/api/stats/storage'),
 
   // ---- M6 知识库（§8：/api/kb 系列） ----
   listKBs: () => req<KnowledgeBase[]>('/api/kb'),

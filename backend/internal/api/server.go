@@ -27,12 +27,13 @@ type Server struct {
 	Ontology  *ontology.Service  // M8：本体对接（反代/facade 探测）
 	OntoBuild *ontobuild.Service // O13：由知识库构建本体（KB→spec 编排）
 	FilesRoot string             // M11：项目文件根目录（上传/下载落盘）
+	DBPath   string             // REQ-113：SQLite 文件路径（数据与安全概览展示 DB 体积）
 	Mux       *http.ServeMux
 }
 
 // NewServer 构造并注册全部路由。
-func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service) *Server {
-	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), Mux: http.NewServeMux()}
+func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service, dbPath string) *Server {
+	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -84,6 +85,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/conversations/{id}/events", s.listEvents)
 	m.HandleFunc("POST /api/conversations/{id}/runs", s.runConversation)
 	m.HandleFunc("POST /api/conversations/{id}/stop", s.stopConversation)
+	m.HandleFunc("GET /api/conversations/{id}/export", s.exportConversation) // REQ-113①：对话导出 Markdown
 	// M11 收尾：中断恢复（ask_human 答复定向续跑）
 	m.HandleFunc("POST /api/conversations/{id}/resume", s.resumeConversation)
 
@@ -101,6 +103,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/inference-backends/reprobe", s.reprobeInferenceBackends)
 
 	// 使用统计（按 model|agent|project 聚合 run_event）
+	m.HandleFunc("GET /api/stats/storage", s.storageOverview) // REQ-113②：数据量概览
 	m.HandleFunc("GET /api/stats/usage", s.usageStats)
 
 	// 工具注册表（REQ-24 工具勾选）
