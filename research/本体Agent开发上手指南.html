@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本体 × Agent 开发上手指南 — 从概念到最小可跑 Demo</title>
+<style>
+  :root{
+    --bg:#08111F; --panel:#0E1A2D; --panel2:#0B1526; --code-bg:#0A1422;
+    --green:#62F6A8; --blue:#7AB7FF; --text:#E6EDF7; --sub:#8EA0B8;
+    --border:#1D2B44; --yellow:#F6C862; --pink:#F67AB7; --orange:#F6A262;
+    --mono:"JetBrains Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    --sans:Inter,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.75;font-size:15px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--green);outline-offset:2px;border-radius:4px}
+  a[target="_blank"]::after{content:" ↗";font-size:.8em;color:var(--sub)}
+
+  /* layout */
+  .layout{display:grid;grid-template-columns:264px minmax(0,1fr);max-width:1280px;margin:0 auto}
+  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:28px 18px 40px 28px;border-right:1px solid var(--border)}
+  nav.toc .brand{font-family:var(--mono);font-size:13px;color:var(--green);font-weight:700;margin-bottom:4px}
+  nav.toc .brand-sub{font-size:12px;color:var(--sub);margin-bottom:22px;line-height:1.5}
+  nav.toc ol{list-style:none}
+  nav.toc > ol > li{margin:2px 0}
+  nav.toc a{display:block;color:var(--sub);font-size:13.5px;padding:5px 10px;border-radius:6px;border-left:2px solid transparent;line-height:1.45}
+  nav.toc a:hover{color:var(--text);text-decoration:none;background:var(--panel)}
+  nav.toc a.active{color:var(--green);border-left-color:var(--green);background:var(--panel)}
+  nav.toc .toc-sub{padding-left:14px}
+  nav.toc .toc-sub a{font-size:12.5px;padding:3px 10px}
+
+  main{padding:40px 48px 100px;min-width:0}
+  section{margin-bottom:56px;scroll-margin-top:24px}
+  h1{font-size:30px;line-height:1.3;margin-bottom:10px;letter-spacing:-.5px}
+  h2{font-size:23px;margin:0 0 18px;padding-top:8px;letter-spacing:-.3px}
+  h2 .num{font-family:var(--mono);color:var(--green);font-size:15px;margin-right:10px;font-weight:600}
+  h3{font-size:17px;margin:26px 0 10px;color:var(--text)}
+  h4{font-size:15px;margin:18px 0 8px;color:var(--blue)}
+  p{margin:10px 0;color:#C8D4E4}
+  ul,ol{margin:10px 0 10px 22px;color:#C8D4E4}
+  li{margin:5px 0}
+  strong{color:var(--text)}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:1px 6px;color:var(--green)}
+
+  /* hero */
+  .hero{background:linear-gradient(135deg,#0E1A2D 0%,#10203A 60%,#0C1830 100%);border:1px solid var(--border);border-radius:14px;padding:30px 32px;margin-bottom:44px}
+  .hero .tag{font-family:var(--mono);font-size:12px;color:var(--green);letter-spacing:1px;margin-bottom:12px}
+  .hero p{font-size:15.5px;color:var(--sub)}
+  .hero .tldr{margin-top:16px;padding:14px 16px;background:var(--code-bg);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:14px}
+  .hero .tldr b{color:var(--green)}
+
+  /* code blocks */
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow-x:auto;margin:14px 0;position:relative}
+  pre code{background:none;border:none;padding:0;font-size:13px;line-height:1.7;color:#D5E2F2;display:block;white-space:pre}
+  .code-label{font-family:var(--mono);font-size:11px;color:var(--sub);margin:18px 0 -6px;letter-spacing:.5px}
+  .code-label b{color:var(--blue);font-weight:600}
+  .tok-kw{color:var(--pink)} .tok-str{color:var(--green)} .tok-com{color:#5C6F8A;font-style:italic}
+  .tok-fn{color:var(--blue)} .tok-num{color:var(--orange)} .tok-cls{color:var(--yellow)}
+
+  /* tables */
+  .table-wrap{overflow-x:auto;margin:16px 0;border:1px solid var(--border);border-radius:10px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+  th{background:var(--panel);text-align:left;padding:10px 14px;color:var(--blue);font-weight:600;font-size:13px;border-bottom:1px solid var(--border);white-space:nowrap}
+  td{padding:10px 14px;border-bottom:1px solid var(--border);color:#C8D4E4;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td code{font-size:12px}
+
+  /* callouts */
+  .callout{border:1px solid var(--border);border-left-width:3px;border-radius:0 10px 10px 0;padding:14px 18px;margin:16px 0;background:var(--panel2);font-size:14px}
+  .callout .ct{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.5px;display:block;margin-bottom:6px}
+  .callout p{margin:4px 0}
+  .callout.key{border-left-color:var(--green)} .callout.key .ct{color:var(--green)}
+  .callout.warn{border-left-color:var(--yellow)} .callout.warn .ct{color:var(--yellow)}
+  .callout.trap{border-left-color:var(--pink)} .callout.trap .ct{color:var(--pink)}
+
+  /* mode cards */
+  .mode{border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin:16px 0;background:var(--panel)}
+  .mode-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .mode-id{font-family:var(--mono);font-size:12px;color:var(--bg);background:var(--green);border-radius:5px;padding:2px 8px;font-weight:700}
+  .mode h3{margin:0;font-size:16.5px}
+  .mode .fit{font-family:var(--mono);font-size:12px;color:var(--sub)}
+  .flow{font-family:var(--mono);font-size:12.5px;color:var(--blue);background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin:10px 0;overflow-x:auto;white-space:nowrap}
+
+  /* steps */
+  .step{display:grid;grid-template-columns:44px 1fr;gap:16px;margin:18px 0}
+  .step-num{width:34px;height:34px;border-radius:50%;background:var(--panel);border:1.5px solid var(--green);color:var(--green);font-family:var(--mono);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .step-body h3{margin:4px 0 6px;font-size:16px}
+  .step-body{min-width:0}
+
+  .ref-list{list-style:none;margin-left:0}
+  .ref-list li{padding:8px 0;border-bottom:1px dashed var(--border);font-size:14px}
+  .ref-list li:last-child{border-bottom:none}
+  .ref-list .src{font-family:var(--mono);font-size:12px;color:var(--sub);display:block;margin-top:2px}
+
+  footer{border-top:1px solid var(--border);margin-top:40px;padding-top:20px;color:var(--sub);font-size:12.5px}
+
+  @media (max-width:900px){
+    .layout{grid-template-columns:1fr}
+    nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--border);padding:20px}
+    nav.toc ol{display:flex;flex-wrap:wrap;gap:4px}
+    nav.toc .toc-sub{display:none}
+    main{padding:28px 20px 80px}
+    h1{font-size:24px}
+  }
+  @media print{
+    body{background:#fff;color:#111}
+    nav.toc{display:none}
+    .layout{grid-template-columns:1fr;max-width:none}
+    main{padding:0}
+    pre,.callout,.mode,.hero,.table-wrap{break-inside:avoid;border-color:#999}
+    pre{background:#f5f7fa}
+    pre code{color:#111}
+    a{color:#0645AD}
+    a[target="_blank"]::after{content:""}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc" aria-label="目录">
+  <div class="brand">ontology × agent</div>
+  <div class="brand-sub">开发者上手指南<br>从 0 概念到最小可跑 Demo</div>
+  <ol>
+    <li><a href="#s0">30 秒结论</a></li>
+    <li><a href="#s1">1 · 本体是什么</a>
+      <ol class="toc-sub">
+        <li><a href="#s1-1">一句话定义</a></li>
+        <li><a href="#s1-2">本体 vs 你已知的东西</a></li>
+        <li><a href="#s1-3">TBox / ABox / 开放世界</a></li>
+      </ol>
+    </li>
+    <li><a href="#s2">2 · 核心技术栈</a></li>
+    <li><a href="#s3">3 · 如何构建本体</a>
+      <ol class="toc-sub">
+        <li><a href="#s3-1">七步建模法</a></li>
+        <li><a href="#s3-2">建模工具</a></li>
+      </ol>
+    </li>
+    <li><a href="#s4">4 · 本体 × Agent 四种模式</a></li>
+    <li><a href="#s5">5 · 最小 Demo 路径</a></li>
+    <li><a href="#s6">6 · 工具与开源清单</a></li>
+    <li><a href="#s7">7 · 学习路线与避坑</a></li>
+    <li><a href="#s8">参考资料</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header class="hero" id="s0">
+  <div class="tag">// GUIDE FOR DEVELOPERS · 2026</div>
+  <h1>本体（Ontology）× Agent 开发上手指南</h1>
+  <p>写给「完全没接触过本体、但要动手做本体 + Agent 项目」的开发者。不讲哲学史，只讲你写代码时需要知道的概念、工具和最短落地路径。</p>
+  <div class="tldr">
+    <b>30 秒结论：</b>本体就是<b>一份机器可读的、带逻辑约束的领域数据字典</b>（有哪些类、类之间什么关系、什么字段合法）。它在 Agent 项目里的核心价值是：<b>给 LLM 的知识抽取和检索立规矩</b>——不让模型自己发明 <code>part_of</code> / <code>PartOf</code> / <code>part-of</code> 三种关系，让多跳推理和结果溯源成为可能。最短落地路径：<b>Protégé 学概念 → rdflib 写本体 → SPARQL 查询 → 把查询包成 tool 给 LLM 调用</b>，一个周末可跑通。
+  </div>
+</header>
+
+<!-- ============ 第 1 章 ============ -->
+<section id="s1">
+  <h2><span class="num">01</span>本体是什么</h2>
+
+  <h3 id="s1-1">一句话定义</h3>
+  <p>本体（Ontology）源于哲学，在计算机科学里的工程定义是：<strong>对一个领域中有哪些类型的东西、它们有什么属性、彼此之间允许什么关系的形式化、显式、机器可读的规范</strong>。</p>
+  <p>用开发者最熟悉的类比：</p>
+  <ul>
+    <li>它像 <strong>数据库 schema + 一套更严格的业务规则</strong>，但用图（三元组）而不是表来组织；</li>
+    <li>它像 <strong>TypeScript 的类型定义</strong>，但类型之间可以声明逻辑关系（传递、对称、互斥、等价…），机器能据此<strong>自动推理</strong>出新事实；</li>
+    <li>它像 <strong>一份带 URI 全局唯一 ID 的数据字典</strong>，任何系统引用同一个 URI 就指同一个概念，天然支持跨系统互操作。</li>
+  </ul>
+
+  <div class="code-label"><b>turtle</b> · 一个最小本体长这样（以生信数据集领域为例）</div>
+<pre><code><span class="tok-com"># bio_ontology.ttl —— 本体文件就是文本，Turtle 是最常用的人类可读格式</span>
+<span class="tok-kw">@prefix</span> bio:  &lt;http://example.org/bio#&gt; .
+<span class="tok-kw">@prefix</span> rdf:  &lt;http://www.w3.org/1999/02/22-rdf-syntax-ns#&gt; .
+<span class="tok-kw">@prefix</span> rdfs: &lt;http://www.w3.org/2000/01/rdf-schema#&gt; .
+<span class="tok-kw">@prefix</span> owl:  &lt;http://www.w3.org/2002/07/owl#&gt; .
+<span class="tok-kw">@prefix</span> xsd:  &lt;http://www.w3.org/2001/XMLSchema#&gt; .
+
+<span class="tok-com"># —— TBox：概念层（"类型定义"）——</span>
+bio:Dataset <span class="tok-kw">a</span> owl:Class ; rdfs:label <span class="tok-str">"数据集"</span> .
+bio:Sample  <span class="tok-kw">a</span> owl:Class ; rdfs:label <span class="tok-str">"生物样本"</span> .
+bio:SequencingFile <span class="tok-kw">a</span> owl:Class ; rdfs:label <span class="tok-str">"测序文件"</span> .
+
+<span class="tok-com"># 对象属性：类与类之间的关系</span>
+bio:hasSample <span class="tok-kw">a</span> owl:ObjectProperty ;
+    rdfs:domain bio:Dataset ; rdfs:range bio:Sample .
+
+<span class="tok-com"># 传递属性：A derivedFrom B, B derivedFrom C ⇒ A 也 derivedFrom C（推理机自动得出）</span>
+bio:derivedFrom <span class="tok-kw">a</span> owl:ObjectProperty , owl:TransitiveProperty ;
+    rdfs:domain bio:SequencingFile ; rdfs:range bio:Sample .
+
+<span class="tok-com"># 数据属性：类到字面值的字段</span>
+bio:fileFormat <span class="tok-kw">a</span> owl:DatatypeProperty ;
+    rdfs:domain bio:SequencingFile ; rdfs:range xsd:string .
+
+<span class="tok-com"># —— ABox：实例层（"数据行"）——</span>
+bio:ds001 <span class="tok-kw">a</span> bio:Dataset ; rdfs:label <span class="tok-str">"肝癌队列2026"</span> ;
+          bio:hasSample bio:s01 .
+bio:f01  <span class="tok-kw">a</span> bio:SequencingFile ;
+         bio:derivedFrom bio:s01 ; bio:fileFormat <span class="tok-str">"FASTQ"</span> .</code></pre>
+
+  <h3 id="s1-2">本体 vs 你已知的东西</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">概念</th><th scope="col">回答的问题</th><th scope="col">和本体的关系</th></tr></thead>
+      <tbody>
+        <tr><td><strong>分类法 Taxonomy</strong></td><td>谁是谁的子类？（is-a 树）</td><td>本体的一个子集。只有层级树，没有属性和逻辑约束</td></tr>
+        <tr><td><strong>数据库 Schema</strong></td><td>表、列、外键长什么样？</td><td>本体 ≈ schema 的"图逻辑增强版"：支持多值、多继承、推理、开放世界，且每个术语有全局 URI</td></tr>
+        <tr><td><strong>知识图谱 KG</strong></td><td>具体实体和关系的数据是什么？</td><td><strong>本体是 KG 的 schema</strong>（TBox），KG 里按本体填充的实例数据是 ABox。先有本体再建图，图才不会长歪</td></tr>
+        <tr><td><strong>JSON Schema / SHACL</strong></td><td>数据合不合法？</td><td>SHACL 是 RDF 世界的校验约束语言，相当于"针对图数据的 JSON Schema"，用来验收 LLM 抽取结果</td></tr>
+        <tr><td><strong>向量库 RAG</strong></td><td>哪些文本块语义相似？</td><td>本体/图谱回答"关系和结构"，向量回答"相似性"。生产中常混合使用，不是二选一</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="s1-3">三个必须建立的思维模型</h3>
+  <ul>
+    <li><strong>三元组（Triple）</strong>：一切知识都是 <code>主 — 谓 — 宾</code>。<code>(bio:f01, bio:fileFormat, "FASTQ")</code> 就是一行知识。谓语（属性）本身也有 URI，也是一等公民。</li>
+    <li><strong>TBox vs ABox</strong>：TBox 是术语层（类、属性、规则 = 类型定义），ABox 是断言层（具体个体 = 数据）。<strong>TBox 要稳、要少改；ABox 天天增</strong>。</li>
+    <li><strong>开放世界假设（OWA）</strong>：数据库默认"没写进表里的就是不存在"（封闭世界）；本体默认"没说的不等于没有，只是还不知道"。这意味着 <strong>约束的写法和 SQL 思维不同</strong>——你要显式声明不相交、基数限制，而不是靠"查不到"来判断。</li>
+  </ul>
+  <div class="callout key">
+    <span class="ct">WHY IT MATTERS FOR AGENTS</span>
+    <p>Agent 场景里本体最实际的三个作用：① <strong>约束 LLM 抽取</strong>——实体和关系只能用本体里定义的词汇，输出可校验；② <strong>支撑多跳/传递推理</strong>——向量 RAG 第一跳就断链的问题，图遍历天然解决；③ <strong>三级溯源</strong>——每个答案都能定位到具体三元组，幻觉可度量。参考 ontorag 的同题基准：向量 RAG 在传递推理题上断链，而图方案可做到三元组级引用（<a href="https://github.com/nuri428/ontorag" target="_blank" rel="noopener noreferrer">ontorag</a>）。</p>
+  </div>
+</section>
+
+<!-- ============ 第 2 章 ============ -->
+<section id="s2">
+  <h2><span class="num">02</span>核心技术栈：W3C 语义网全家桶</h2>
+  <p>不用全学，先知道每样东西<strong>在链路里干什么</strong>，用到再查：</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">技术</th><th scope="col">角色（类比）</th><th scope="col">你需要知道的</th></tr></thead>
+      <tbody>
+        <tr><td><code>RDF</code></td><td>数据模型（JSON）</td><td>主谓宾三元组，一切的基础。一切皆 URI</td></tr>
+        <tr><td><code>RDFS</code></td><td>基础类型系统</td><td>定义类层次 <code>subClassOf</code>、属性的 <code>domain/range</code></td></tr>
+        <tr><td><code>OWL / OWL 2</code></td><td>强类型 + 逻辑</td><td>等价类、互斥类、基数限制、传递/对称/函数属性等，<strong>推理机靠它推出新事实</strong>。三个性能档位：OWL2 EL（大规模术语）、QL（查询重写）、RL（规则）</td></tr>
+        <tr><td><code>SPARQL</code></td><td>查询语言（SQL）</td><td>图上的 SQL，模式匹配三元组。Agent 最常自动生成/执行的就是它</td></tr>
+        <tr><td><code>SHACL</code></td><td>数据校验（JSON Schema）</td><td>定义"形状"约束，校验 RDF 数据合不合法——<strong>验收 LLM 抽取结果的关键</strong></td></tr>
+        <tr><td><code>SWRL</code></td><td>业务规则</td><td>"如果…那么…"式规则，配合推理机使用（如：基金经理有处罚记录 ⇒ 基金标高风险）</td></tr>
+        <tr><td><code>Turtle (.ttl)</code></td><td>序列化格式</td><td>最常用的人类可读格式，本体文件基本都长这样；另有 RDF/XML、JSON-LD</td></tr>
+        <tr><td><strong>推理机 Reasoner</strong></td><td>逻辑执行引擎</td><td>HermiT、Pellet（全功能 OWL DL）、ELK（EL 档位，快）。Protégé 和 Owlready2 都可挂载</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout warn">
+    <span class="ct">PRAGMATIC NOTE</span>
+    <p>做 Agent 项目 <strong>90% 的情况用 RDFS + 少量 OWL（传递属性、定义域值域）+ SPARQL + SHACL 就够了</strong>。复杂 OWL 限制和 SWRL 主要出现在医疗、金融合规等强监管场景。别一上来啃完整 OWL 规范。</p>
+  </div>
+</section>
+
+<!-- ============ 第 3 章 ============ -->
+<section id="s3">
+  <h2><span class="num">03</span>如何构建一个本体</h2>
+  <p>本体工程（Ontology Engineering）有成熟方法论，斯坦福 Protégé 团队的短课把它浓缩为标准流程（<a href="https://protege.stanford.edu/shortcourse/" target="_blank" rel="noopener noreferrer">Protégé Short Course</a>）。开发者视角整理为七步：</p>
+
+  <h3 id="s3-1">七步建模法</h3>
+  <div class="step"><div class="step-num">1</div><div class="step-body">
+    <h3>定领域与范围</h3>
+    <p>写清这个本体<strong>覆盖什么、不覆盖什么</strong>。例：「覆盖测序数据集、样本、文件、物种；不覆盖分析流程和临床诊疗」。范围控制是本体项目成败第一要素。</p>
+  </div></div>
+  <div class="step"><div class="step-num">2</div><div class="step-body">
+    <h3>写"能力问题"（Competency Questions）</h3>
+    <p>用自然语言列出这个本体<strong>必须能回答的问题</strong>，它们既是需求也是验收测试：</p>
+    <ul>
+      <li>「这个数据集里有哪些 FASTQ 文件？」</li>
+      <li>「某样本最终产出了哪些下游文件？」（需要传递属性）</li>
+      <li>「哪些数据集用了人类样本但没签伦理协议？」（需要约束推理）</li>
+    </ul>
+    <p>答不上来的问题，说明类或属性缺了——回头补。</p>
+  </div></div>
+  <div class="step"><div class="step-num">3</div><div class="step-body">
+    <h3>枚举领域术语</h3>
+    <p>从文档、数据库表、和领域专家聊天中收集名词（类候选）和动词（关系候选），先不纠结结构，能列多少列多少。</p>
+  </div></div>
+  <div class="step"><div class="step-num">4</div><div class="step-body">
+    <h3>定义类与类层次</h3>
+    <p>把名词组织成 is-a 树。原则：<strong>子类是父类的严格子集</strong>（"样本"是"材料"的子类 ✓；"数据集"是"项目"的子类 ✗，那是整体-部分关系，要用对象属性表达）。</p>
+  </div></div>
+  <div class="step"><div class="step-num">5</div><div class="step-body">
+    <h3>定义属性</h3>
+    <p>对象属性连两个类（<code>Dataset —hasSample→ Sample</code>），数据属性连字面值（<code>fileFormat → string</code>）。给每个属性写清 domain/range，并标注传递、对称、函数型等特性。</p>
+  </div></div>
+  <div class="step"><div class="step-num">6</div><div class="step-body">
+    <h3>加约束（Cardinality / 限制）</h3>
+    <p>如「每个 Dataset 至少有 1 个 Sample」（存在限制 ∃）、「文件格式只能是 FASTQ/BAM/VCF 之一」（枚举）。需要数据级校验时同步写 SHACL 形状。</p>
+  </div></div>
+  <div class="step"><div class="step-num">7</div><div class="step-body">
+    <h3>填实例 + 跑推理机 + 用能力问题验收</h3>
+    <p>灌几条真实数据，启动推理机（HermiT/Pellet）看它推出的隐含关系对不对，逐条回答第 2 步的能力问题。<strong>推理结果不符合预期 = 建模错了</strong>，这是本体独有的"编译期查错"。</p>
+  </div></div>
+
+  <div class="callout key">
+    <span class="ct">REUSE FIRST</span>
+    <p><strong>先复用，再自建。</strong>通用概念有成熟本体可直接 import：Schema.org（通用实体）、FOAF（人/组织）、SKOS（词表/分类）、Dublin Core（元数据）；生信领域有 EDAM（数据类型/格式/工具）、SIO、OBI、SO（序列本体）。复用能省掉一半建模工作，还自带互操作性。</p>
+  </div>
+
+  <h3 id="s3-2">建模工具</h3>
+  <ul>
+    <li><strong>Protégé</strong>（斯坦福，免费桌面端）：本体界的 IDE，可视化建类、属性、限制，一键挂推理机看推理结果。<strong>入门必装</strong>，跟着经典 Pizza 教程走一遍（<a href="https://github.com/yasenstar/protege_pizza/" target="_blank" rel="noopener noreferrer">Pizza 教程仓库</a>、<a href="https://github.com/tud-cor/OntologyTutorial" target="_blank" rel="noopener noreferrer">从零建本体 Hands-On</a>），2~3 小时即可建立完整直觉。官网：<a href="https://protege.stanford.edu/" target="_blank" rel="noopener noreferrer">protege.stanford.edu</a>。</li>
+    <li><strong>纯代码流</strong>：熟悉概念后，工程里用 <code>rdflib</code>（Python 基础库）或 <code>Owlready2</code>（面向对象风格操作 OWL，内置 HermiT 推理）直接写 .ttl，可 Git 版本管理、可 CI 校验。</li>
+    <li><strong>LLM 辅助建模</strong>：2025 年起出现多 agent 本体工程流水线（如 OntoGenix：schema 生成 → OWL/Turtle 代码 → rdflib 自校验修复 → 知识图谱物化，<a href="https://mikelval82.github.io/Portfolio/blog-ontogenix.html" target="_blank" rel="noopener noreferrer">OntoGenix</a>；CoA-Text2OWL 用多 agent 分块从文档抽取本体，<a href="https://hal.science/hal-05304062v1/file/CoA.pdf" target="_blank" rel="noopener noreferrer">论文</a>）。可以用，但 <strong>LLM 产出的本体必须过推理机和 SHACL 校验</strong>，不能直接上线。</p></li>
+  </ul>
+</section>
+
+<!-- ============ 第 4 章 ============ -->
+<section id="s4">
+  <h2><span class="num">04</span>本体 × Agent 的四种结合模式</h2>
+  <p>这是本指南的核心。目前业界"本体 + Agent"的玩法收敛为四种模式，按落地难度递增：</p>
+
+  <div class="mode">
+    <div class="mode-head"><span class="mode-id">模式 A</span><h3>本体当 Schema 的 GraphRAG</h3><span class="fit">// 最主流，先做这个</span></div>
+    <p>本体作为知识抽取和图谱构建的<strong>顶层约束</strong>：LLM 按本体定义的类/属性把文档抽成 RDF 三元组 → 存图数据库 → 检索时向量+图遍历混合召回 → 喂给 LLM 生成答案。</p>
+    <div class="flow">文档 → LLM 抽取(受本体约束) → SHACL 校验 → 知识图谱 → 向量召回 + 多跳图遍历 → LLM 生成(带三元组溯源)</div>
+    <p><strong>适合：</strong>企业知识库、科研文献、运维手册这类需要跨文档综合回答的场景。关键工程要点：<strong>抽取前先有本体</strong>，否则 LLM 会在五篇文档里发明三种写法的同义关系，图直接报废（<a href="https://www.decodingai.com/p/agentic-graphrag" target="_blank" rel="noopener noreferrer">Decoding AI · Agentic GraphRAG</a>）。</p>
+  </div>
+
+  <div class="mode">
+    <div class="mode-head"><span class="mode-id">模式 B</span><h3>Agent 直接查图（Ontology-as-Tools / MCP）</h3><span class="fit">// 开发者最易实现</span></div>
+    <p>不把图内容塞进 prompt，而是把<strong>图操作包成工具</strong>给 LLM function calling：<code>get_schema()</code> 看本体词汇、<code>find_entities()</code> 找实体、<code>sparql_query()</code> 执行查询、<code>traverse()</code> 多跳遍历。Agent 自己决定查什么、怎么查，返回结构化 JSON。</p>
+    <div class="flow">用户提问 → LLM → 调用本体工具(get_schema / sparql_query / traverse) → Fuseki/rdflib → 结构化结果 → LLM 作答</div>
+    <p><strong>适合：</strong>需要精确查询、可审计答案的场景。参考实现 <a href="https://github.com/nuri428/ontorag" target="_blank" rel="noopener noreferrer">ontorag</a>（Apache Jena Fuseki 后端，实测图遍历只增加约 1.5% 延迟，瓶颈在 LLM）；工程上推荐把工具挂成 <strong>MCP server</strong>，search_memory / write_memory 两类工具让 Agent 既能查也能写，形成持续记忆（<a href="https://www.moderndata101.com/blogs/agentic-graphrag-building-unified-memory-for-ai-agents-with-knowledge-graphs" target="_blank" rel="noopener noreferrer">Modern Data 101 · Agentic GraphRAG 统一记忆层</a>）。</p>
+  </div>
+
+  <div class="mode">
+    <div class="mode-head"><span class="mode-id">模式 C</span><h3>符号推理机兜底（Hybrid Reasoning）</h3><span class="fit">// 高可信/合规场景</span></div>
+    <p>LLM 负责理解自然语言、把问题转成查询意图；<strong>确定性推理交给推理机</strong>（HermiT/Pellet/GraphDB 执行 OWL/SWRL 规则），LLM 不参与事实判断。例如"基金经理有处罚记录 ⇒ 产品自动标记高风险"这类规则，推理机给出的结论 100% 可复现、可解释。</p>
+    <div class="flow">自然语言 → LLM(意图解析) → SPARQL/规则 → 推理机(OWL/SWRL 确定性推理) → 合规过滤 → LLM(组织语言)</div>
+    <p><strong>适合：</strong>金融合规、医疗、制造故障诊断等"错了要担责"的领域。架构参考：<a href="https://blog.csdn.net/sinat_28694519/article/details/151899890" target="_blank" rel="noopener noreferrer">基于图谱的 Agent 思路（CSDN）</a>。</p>
+  </div>
+
+  <div class="mode">
+    <div class="mode-head"><span class="mode-id">模式 D</span><h3>用本体描述 Agent 自身（Agent 即知识）</h3><span class="fit">// 前沿方向，了解即可</span></div>
+    <p>把 Agent、任务、目标、工具、工作流模式本身建模成本体（如 ESWC 2025 的 <strong>AgentO</strong>：用 OWL/RDF 标准化描述 agentic 模式，已验证可把 AutoGen/CrewAI/LangGraph 的工作流双向编译——代码转 KG、KG 再生成可执行代码，实现跨框架互作，<a href="https://github.com/nauraranantya/agentic-generator" target="_blank" rel="noopener noreferrer">AgentO 项目</a>）。类似的还有 <strong>AJAN</strong>：Agent 的行为树用 RDF/SPARQL 定义，可热更新、可语义查询（<a href="https://arxiv.org/html/2510.06911v1" target="_blank" rel="noopener noreferrer">AJAN 论文</a>）。</p>
+    <p><strong>适合：</strong>做多 Agent 平台、需要 agent 资产跨框架复用/审计时研究。新手不用从这里起步。</p>
+  </div>
+
+  <h3>怎么选</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">你的情况</th><th scope="col">推荐模式</th></tr></thead>
+      <tbody>
+        <tr><td>第一次做，想周末跑通</td><td><strong>模式 B</strong>：rdflib + 3 个查询工具，最短路径</td></tr>
+        <tr><td>有大量文档要问答、要溯源</td><td><strong>模式 A</strong>：本体约束抽取 + GraphRAG</td></tr>
+        <tr><td>金融/医疗/合规，答案不能错</td><td><strong>模式 C</strong>：推理机承载确定性规则</td></tr>
+        <tr><td>做 agent 平台/跨框架编排</td><td>模式 D，关注 AgentO / AJAN 演进</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 第 5 章 ============ -->
+<section id="s5">
+  <h2><span class="num">05</span>最小可跑 Demo：周末五步法</h2>
+  <p>目标：一个能回答「数据集里有哪些文件、什么格式、来自哪个样本」的本体 Agent。技术栈：<strong>Python + rdflib + 任意 LLM function calling</strong>，零外部服务依赖。</p>
+
+  <div class="step"><div class="step-num">1</div><div class="step-body">
+    <h3>建立概念（2~3 小时）</h3>
+    <p>装 <a href="https://protege.stanford.edu/" target="_blank" rel="noopener noreferrer">Protégé</a>，跟完 <a href="https://github.com/yasenstar/protege_pizza/" target="_blank" rel="noopener noreferrer">Pizza 教程</a>：建类、建属性、加存在限制、启动 HermiT 推理机看类被自动重分类。做完你就理解了本体 80% 的概念。</p>
+  </div></div>
+
+  <div class="step"><div class="step-num">2</div><div class="step-body">
+    <h3>用代码写你自己的小本体</h3>
+    <p>pip 安装 <code>rdflib</code>，把第 1 章那份 <code>bio_ontology.ttl</code> 存盘（或直接用代码建），写入几条实例：</p>
+    <div class="code-label"><b>python</b> · 建图 + 写实例</div>
+<pre><code><span class="tok-kw">from</span> rdflib <span class="tok-kw">import</span> Graph, Namespace, RDF, RDFS, Literal
+
+BIO = Namespace(<span class="tok-str">"http://example.org/bio#"</span>)
+g = Graph()
+g.parse(<span class="tok-str">"bio_ontology.ttl"</span>)          <span class="tok-com"># 加载 TBox</span>
+
+<span class="tok-com"># 写 ABox 实例（等价于 insert）</span>
+g.add((BIO.ds001, RDF.type, BIO.Dataset))
+g.add((BIO.ds001, RDFS.label, Literal(<span class="tok-str">"肝癌队列2026"</span>)))
+g.add((BIO.ds001, BIO.hasSample, BIO.s01))
+g.add((BIO.f01, RDF.type, BIO.SequencingFile))
+g.add((BIO.f01, BIO.derivedFrom, BIO.s01))
+g.add((BIO.f01, BIO.fileFormat, Literal(<span class="tok-str">"FASTQ"</span>)))</code></pre>
+  </div></div>
+
+  <div class="step"><div class="step-num">3</div><div class="step-body">
+    <h3>跑通 SPARQL 查询</h3>
+    <div class="code-label"><b>python</b> · SPARQL = Agent 未来的"取数接口"</div>
+<pre><code>q = <span class="tok-str">"""
+PREFIX bio:  &lt;http://example.org/bio#&gt;
+PREFIX rdfs: &lt;http://www.w3.org/2000/01/rdf-schema#&gt;
+SELECT ?dataset ?file ?format WHERE {
+  ?dataset a bio:Dataset ;
+           rdfs:label ?dlabel ;
+           bio:hasSample ?sample .
+  ?file bio:derivedFrom ?sample ;
+        bio:fileFormat ?format .
+}"""</span>
+<span class="tok-kw">for</span> row <span class="tok-kw">in</span> g.query(q):
+    print(row.dataset, row.file, row.format)</code></pre>
+    <p>数据量上来后把 .ttl 换成 <strong>Apache Jena Fuseki</strong>（起个 SPARQL HTTP 服务）或 Neo4j + neosemantics，代码逻辑不变。</p>
+  </div></div>
+
+  <div class="step"><div class="step-num">4</div><div class="step-body">
+    <h3>把图包成工具给 LLM（核心一步）</h3>
+    <p>这就是模式 B。只暴露两个工具，Agent 就能自主查图：</p>
+    <div class="code-label"><b>python</b> · function calling 工具定义</div>
+<pre><code>TOOLS = [
+  {
+    <span class="tok-str">"name"</span>: <span class="tok-str">"get_ontology_schema"</span>,
+    <span class="tok-str">"description"</span>: <span class="tok-str">"获取本体的类、属性和层次结构。查图前必须先调用，用这里的词汇构造查询。"</span>,
+    <span class="tok-str">"parameters"</span>: {<span class="tok-str">"type"</span>: <span class="tok-str">"object"</span>, <span class="tok-str">"properties"</span>: {}}
+  },
+  {
+    <span class="tok-str">"name"</span>: <span class="tok-str">"sparql_query"</span>,
+    <span class="tok-str">"description"</span>: <span class="tok-str">"对知识图谱执行只读 SPARQL SELECT，返回结构化结果。"</span>,
+    <span class="tok-str">"parameters"</span>: {
+      <span class="tok-str">"type"</span>: <span class="tok-str">"object"</span>,
+      <span class="tok-str">"properties"</span>: {<span class="tok-str">"query"</span>: {<span class="tok-str">"type"</span>: <span class="tok-str">"string"</span>,
+                   <span class="tok-str">"description"</span>: <span class="tok-str">"SPARQL SELECT 语句"</span>}},
+      <span class="tok-str">"required"</span>: [<span class="tok-str">"query"</span>]
+    }
+  }
+]
+
+<span class="tok-kw">def</span> <span class="tok-fn">execute_tool</span>(name, args):
+    <span class="tok-kw">if</span> name == <span class="tok-str">"get_ontology_schema"</span>:
+        <span class="tok-kw">return</span> <span class="tok-fn">schema_summary</span>(g)   <span class="tok-com"># 返回类树 + 每个属性的 domain/range</span>
+    <span class="tok-kw">if</span> name == <span class="tok-str">"sparql_query"</span>:
+        <span class="tok-kw">return</span> [str(r) <span class="tok-kw">for</span> r <span class="tok-kw">in</span> g.query(args[<span class="tok-str">"query"</span>])]</code></pre>
+    <p>系统提示词里告诉模型：<em>「回答前先 get_ontology_schema 了解可用词汇，需要事实数据时写 SPARQL 查询，只能使用本体中存在的类和属性」</em>。一个查图 Agent 就成型了。</p>
+  </div></div>
+
+  <div class="step"><div class="step-num">5</div><div class="step-body">
+    <h3>加抽取管道，让图自己长大</h3>
+    <p>再给 Agent 一个 <code>ingest_text</code> 工具：LLM 按本体把文档/对话抽成三元组 → SHACL 校验通过才写入。至此闭环完成：<strong>本体立规矩 → LLM 抽数据 → 校验入库 → Agent 查图作答 → 新对话再回流</strong>。这正是 MCP 统一记忆层的思路。</p>
+  </div></div>
+
+  <div class="callout trap">
+    <span class="ct">SECURITY</span>
+    <p><code>sparql_query</code> 工具上线前：<strong>只允许 SELECT</strong>（禁 INSERT/DELETE/LOAD）、加查询超时、限制返回行数。LLM 生成的 SPARQL 永远当不可信输入处理。</p>
+  </div>
+</section>
+
+<!-- ============ 第 6 章 ============ -->
+<section id="s6">
+  <h2><span class="num">06</span>工具与开源项目清单</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">工具 / 项目</th><th scope="col">形态</th><th scope="col">干什么</th><th scope="col">什么时候用</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://protege.stanford.edu/" target="_blank" rel="noopener noreferrer">Protégé</a></td><td>桌面 GUI</td><td>本体建模 IDE，挂推理机</td><td>学习 + 手工建模，必装</td></tr>
+        <tr><td><code>rdflib</code></td><td>Python 库</td><td>RDF 读写、SPARQL 查询</td><td>代码里操作本体的基础库</td></tr>
+        <tr><td><code>Owlready2</code></td><td>Python 库</td><td>面向对象风格操作 OWL，内置 HermiT</td><td>需要推理机的 Python 项目</td></tr>
+        <tr><td><a href="https://github.com/nuri428/ontorag" target="_blank" rel="noopener noreferrer">ontorag</a></td><td>Python 参考实现</td><td>Ontology-as-Tools 的 RAG 框架，Fuseki/Neo4j/FalkorDB 后端</td><td>模式 B 的现成范本</td></tr>
+        <tr><td>Apache Jena + Fuseki</td><td>Java / 服务</td><td>RDF 框架 + 生产级 SPARQL 服务器</td><td>数据上量后的图服务端</td></tr>
+        <tr><td>GraphDB / Stardog</td><td>商业 RDF 数据库</td><td>自带推理、虚拟图、企业级支持</td><td>企业生产环境（有免费版/学术版）</td></tr>
+        <tr><td>Neo4j + neosemantics</td><td>图数据库</td><td>属性图为主，n10s 插件支持 RDF 互操作</td><td>团队已有 Neo4j 经验</td></tr>
+        <tr><td>Morph-KGC</td><td>Python</td><td>按 RML 映射把 CSV/关系库批量转 RDF</td><td>结构化数据入图</td></tr>
+        <tr><td>Ontop</td><td>虚拟图引擎</td><td>OBDA：SPARQL 实时翻译成 SQL，不搬数据</td><td>数据留在关系库、只想加语义层</td></tr>
+        <tr><td>Graphiti</td><td>Python</td><td>时序动态知识图谱，为 agent 记忆设计</td><td>需要随时间演化的 agent 记忆</td></tr>
+        <tr><td><a href="https://github.com/nauraranantya/agentic-generator" target="_blank" rel="noopener noreferrer">AgentO</a></td><td>本体 + 编译器</td><td>用 OWL 描述 agent/任务/工具/工作流，跨框架双向编译</td><td>模式 D，多 agent 互操作</td></tr>
+        <tr><td><a href="https://arxiv.org/html/2510.06911v1" target="_blank" rel="noopener noreferrer">AJAN</a></td><td>RDF 原生 agent 框架</td><td>行为树用 SPARQL/RDF 定义，可热更新、可调试</td><td>模式 D，语义网派 agent 研究</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>更全的开源项目梳理（含 Graphiti、Ontop 等 12 个项目的定位说明）见 <a href="https://developer.aliyun.com/article/1756988" target="_blank" rel="noopener noreferrer">阿里云开发者社区 · 从 Ontology 到 Knowledge Graph 再到 AI Agent</a>。</p>
+</section>
+
+<!-- ============ 第 7 章 ============ -->
+<section id="s7">
+  <h2><span class="num">07</span>三周学习路线 + 避坑清单</h2>
+
+  <h3>建议节奏</h3>
+  <ul>
+    <li><strong>第 1 周 · 建立建模直觉</strong>：Protégé + Pizza 教程；自己动手为你的业务领域画类层次和属性；写 10 条能力问题。</li>
+    <li><strong>第 2 周 · 代码化</strong>：rdflib 读写 .ttl、写 SPARQL；试 Owlready2 跑一次推理机看隐含三元组；用 pyshacl 写一个 SHACL 形状校验数据。</li>
+    <li><strong>第 3 周 · 接 Agent</strong>：按第 5 章做模式 B 的查图 Agent；跑通后加 <code>ingest_text</code> 抽取管道；最后评估要不要上图数据库。</li>
+  </ul>
+
+  <h3>新手高频坑</h3>
+  <div class="callout trap">
+    <span class="ct">坑 1 · 一上来建"宇宙本体"</span>
+    <p>第一个本体控制在 <strong>15~25 个类</strong>，用能力问题驱动。本体是迭代出来的，不是设计出来的。</p>
+  </div>
+  <div class="callout trap">
+    <span class="ct">坑 2 · 用 is-a 表达一切</span>
+    <p>"数据集包含样本"是整体-部分，<strong>不是</strong>子类关系，要用对象属性 <code>hasPart</code>。子类关系必须通过"is-a"测试（A 是一种 B 吗？）。</p>
+  </div>
+  <div class="callout trap">
+    <span class="ct">坑 3 · 让 LLM 自由抽取不校验</span>
+    <p>没有本体约束时，LLM 会为同一关系生成 <code>part_of</code> / <code>Part Of</code> / <code>part-of</code> 多个变体，图直接不可用。<strong>本体约束 + SHACL 验收</strong>是抽取管道的必备环节。</p>
+  </div>
+  <div class="callout trap">
+    <span class="ct">坑 4 · 拿向量 RAG 的思维硬套</span>
+    <p>单实体事实查找，向量 RAG 又快又好；<strong>多跳关系、传递推理、需要逐条溯源</strong>才是图的主场。成熟做法是混合检索：向量找入口实体，图遍历补关系（<a href="https://github.com/VinaySampath14/agentic-graph-rag" target="_blank" rel="noopener noreferrer">混合检索 + 查询改写实验</a>显示模式感知的改写能把覆盖率从 27.5% 拉到 81.2%）。</p>
+  </div>
+  <div class="callout trap">
+    <span class="ct">坑 5 · 忽视开放世界假设</span>
+    <p>"查不到三元组"不代表事实不存在。需要"必须有/只能有"的语义时，显式写基数限制和不相交声明，或在应用层做封闭世界处理。</p>
+  </div>
+  <div class="callout trap">
+    <span class="ct">坑 6 · TBox 频繁变动</span>
+    <p>TBox 一改，历史数据和抽取 prompt 全要跟着动。前期多花时间在能力问题和复用标准本体上，让 TBox 尽快稳定。</p>
+  </div>
+</section>
+
+<!-- ============ 参考资料 ============ -->
+<section id="s8">
+  <h2><span class="num">08</span>参考资料</h2>
+  <ul class="ref-list">
+    <li><strong>Protégé 官方</strong>——本体编辑器下载与文档<a class="src" href="https://protege.stanford.edu/" target="_blank" rel="noopener noreferrer">https://protege.stanford.edu/</a></li>
+    <li><strong>Protégé Short Course</strong>——斯坦福官方建模方法论短课大纲（含能力问题、OWL 2 Profiles）<a class="src" href="https://protege.stanford.edu/shortcourse/" target="_blank" rel="noopener noreferrer">https://protege.stanford.edu/shortcourse/</a></li>
+    <li><strong>Mastering Ontology Engineering with Protégé and Pizza</strong>——经典 Pizza 教程的现代化维护版（含 SWRL/SPARQL/SHACL 章节）<a class="src" href="https://github.com/yasenstar/protege_pizza/" target="_blank" rel="noopener noreferrer">https://github.com/yasenstar/protege_pizza/</a></li>
+    <li><strong>Ontology-Hands-On (TU Dresden)</strong>——从零建本体 + SWRL 规则实操<a class="src" href="https://github.com/tud-cor/OntologyTutorial" target="_blank" rel="noopener noreferrer">https://github.com/tud-cor/OntologyTutorial</a></li>
+    <li><strong>ontorag</strong>——以 RDF/OWL 为事实源的 ontology-aware RAG 框架（模式 B 参考实现，含基准对比）<a class="src" href="https://github.com/nuri428/ontorag" target="_blank" rel="noopener noreferrer">https://github.com/nuri428/ontorag</a></li>
+    <li><strong>Agentic GraphRAG: Building Unified Memory for AI Agents</strong>——本体先行 + MCP 记忆层架构（Modern Data 101）<a class="src" href="https://www.moderndata101.com/blogs/agentic-graphrag-building-unified-memory-for-ai-agents-with-knowledge-graphs" target="_blank" rel="noopener noreferrer">https://www.moderndata101.com/blogs/agentic-graphrag-building-unified-memory-for-ai-agents-with-knowledge-graphs</a></li>
+    <li><strong>Building Agentic GraphRAG Systems</strong>——ontology-first 设计与三种抽取模式（Decoding AI）<a class="src" href="https://www.decodingai.com/p/agentic-graphrag" target="_blank" rel="noopener noreferrer">https://www.decodingai.com/p/agentic-graphrag</a></li>
+    <li><strong>AgentO: An Ontology for Modeling Agentic AI Systems</strong>（ESWC 2025）——用 OWL/RDF 建模 agent 系统并跨框架编译（模式 D）<a class="src" href="https://github.com/nauraranantya/agentic-generator" target="_blank" rel="noopener noreferrer">https://github.com/nauraranantya/agentic-generator</a></li>
+    <li><strong>LLM-Assisted Modeling of Semantic Web-Enabled Multi-Agent Systems with AJAN</strong>（arXiv 2025）——RDF 原生 agent 框架 + LLM 辅助建模<a class="src" href="https://arxiv.org/html/2510.06911v1" target="_blank" rel="noopener noreferrer">https://arxiv.org/html/2510.06911v1</a></li>
+    <li><strong>从 Ontology 到 Knowledge Graph 再到 AI Agent</strong>——12 个本体相关开源项目梳理（阿里云开发者社区）<a class="src" href="https://developer.aliyun.com/article/1756988" target="_blank" rel="noopener noreferrer">https://developer.aliyun.com/article/1756988</a></li>
+    <li><strong>基于图谱的 Agent 思路</strong>——金融合规场景 OWL+SWRL 混合推理架构（CSDN）<a class="src" href="https://blog.csdn.net/sinat_28694519/article/details/151899890" target="_blank" rel="noopener noreferrer">https://blog.csdn.net/sinat_28694519/article/details/151899890</a></li>
+    <li><strong>OntoGenix</strong>——多 Agent 自愈式本体工程流水线（Schema 生成 → Turtle → 校验 → 物化）<a class="src" href="https://mikelval82.github.io/Portfolio/blog-ontogenix.html" target="_blank" rel="noopener noreferrer">https://mikelval82.github.io/Portfolio/blog-ontogenix.html</a></li>
+    <li><strong>CoA-Text2OWL</strong>——Chain-of-Agents 多智能体从文档生成本体（论文 PDF）<a class="src" href="https://hal.science/hal-05304062v1/file/CoA.pdf" target="_blank" rel="noopener noreferrer">https://hal.science/hal-05304062v1/file/CoA.pdf</a></li>
+    <li><strong>Agentic Graph RAG (arXiv papers)</strong>——向量/图+OWL 扩展/社区发现三路由 + 查询改写自愈实验<a class="src" href="https://github.com/VinaySampath14/agentic-graph-rag" target="_blank" rel="noopener noreferrer">https://github.com/VinaySampath14/agentic-graph-rag</a></li>
+  </ul>
+
+  <footer>
+    本体 × Agent 开发上手指南 · 为「本体学习」项目整理 · 2026-09 · 代码示例以生信数据集领域为例，可直接替换为你的业务领域
+  </footer>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var links = document.querySelectorAll('nav.toc a[href^="#"]');
+  links.forEach(function(a){
+    a.addEventListener('click', function(e){
+      var id = a.getAttribute('href').slice(1);
+      var t = document.getElementById(id);
+      if(t){ e.preventDefault(); t.scrollIntoView({behavior:'smooth', block:'start'}); }
+    });
+  });
+  var sections = document.querySelectorAll('main section[id], main header[id]');
+  var navMap = {};
+  links.forEach(function(a){ navMap[a.getAttribute('href').slice(1)] = a; });
+  var obs = new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(en.isIntersecting){
+        links.forEach(function(l){ l.classList.remove('active'); });
+        var link = navMap[en.target.id];
+        if(link){ link.classList.add('active'); }
+      }
+    });
+  }, {rootMargin:'-15% 0px -70% 0px'});
+  sections.forEach(function(s){ obs.observe(s); });
+})();
+</script>
+</body>
+</html>
