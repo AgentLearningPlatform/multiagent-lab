@@ -204,6 +204,12 @@
 .onto-flow-handle { width: 6px; height: 6px; background: #b9c0d6; border: 1px solid #fff; }
 .onto-flow-edge-rel .react-flow__edge-path { stroke: #9aa1bd; stroke-width: 1.4; }
 .onto-flow-edge-parent .react-flow__edge-path { stroke: #c3c7d6; stroke-width: 1.2; }
+/* REQ-71 v1.5：实例节点（紫色系）与归属/实例关系边（图形编辑 Tab） */
+.onto-flow-node-inst { background: #f3f0ff; border-color: #b7a8f5; }
+.onto-flow-node-inst:hover, .onto-flow-node-inst.selected { background: #e9e3ff; border-color: #7c5cf0; box-shadow: 0 0 0 2px rgba(124, 92, 240, .16); }
+.onto-flow-node-badge.inst { position: static; margin-left: 6px; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #7c5cf0; font-weight: 500; vertical-align: middle; display: inline-block; }
+.onto-flow-edge-belongs .react-flow__edge-path { stroke: #b7a8f5; stroke-width: 1.1; }
+.onto-flow-edge-instrel .react-flow__edge-path { stroke: #9d84f2; stroke-width: 1.1; }
 .react-flow__edge-text { font-size: 10.5px; fill: var(--c-ink-3); }
 .react-flow__attribution { background: transparent; }
 .react-flow__attribution a { color: #b9c0d6; }

@@ -11,6 +11,7 @@ import {
   Select,
   Space,
   Splitter,
+  Switch,
   Tag,
   Typography,
 } from 'antd'
@@ -29,15 +30,16 @@ import {
 import type { Connection, Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { api } from '../../../api/client'
-import type { Spec, SpecConcept, SpecRelation } from '../../../api/types'
+import type { Spec, SpecConcept, SpecInstance, SpecRelation } from '../../../api/types'
 import { useUI } from '../../../store/ui'
 
 // ---------------------------------------------------------------------------
-// REQ-71 图形化编辑器 v1：React Flow 画布上直接编辑概念/关系/继承，
+// REQ-71 图形化编辑器：React Flow 画布上直接编辑概念/关系/继承/实例，
 // 保存时写回 spec_json 走既有 PUT 保存通道（校验门控、递增 version）。
 // 与只读「可视化」Tab（SpecGraph）双形态并存；布局坐标仅会话内有效，
 // 不做坐标持久化（04 决策 O-3：维持 localStorage 方案，整体排 O8）。
-// v1 边界：概念/关系/继承的结构编辑；实例仅在详情面板展示，增删走 Spec 编辑或 CSV 灌装。
+// v1.5：实例节点入画布（归属概念/实例间关系/增删与属性编辑，可开关显示）；
+//       实例改名仍不进画布（name 是引用键，改名=级联重建，引导走 Spec 编辑）。
 // ---------------------------------------------------------------------------
 
 const NODE_W = 168
@@ -70,12 +72,16 @@ interface EditorNodeData extends Record<string, unknown> {
   name: string
   count: number
   definition?: string
-  isNew?: boolean
+  kind: 'concept' | 'instance'
+  conceptName?: string
 }
-type EditorFlowNode = Node<EditorNodeData, 'concept'>
+type EditorFlowNode = Node<EditorNodeData, 'concept' | 'instance'>
 
-/** Spec + 上一轮节点坐标 → 画布节点（保留已拖拽位置，新节点走分层布局） */
-function deriveNodes(spec: Spec, prev: EditorFlowNode[]): EditorFlowNode[] {
+const INST_ID = (name: string) => `inst:${name}`
+const instNameOf = (id: string) => id.slice('inst:'.length)
+
+/** Spec + 上一轮节点坐标 → 画布节点（保留已拖拽位置，新节点走分层布局；实例挂概念下方） */
+function deriveNodes(spec: Spec, prev: EditorFlowNode[], showInstances: boolean): EditorFlowNode[] {
   const concepts = spec.concepts ?? []
   const prevPos = new Map(prev.map((n) => [n.id, n.position]))
   const depth = computeDepths(concepts)
@@ -90,6 +96,8 @@ function deriveNodes(spec: Spec, prev: EditorFlowNode[]): EditorFlowNode[] {
   const width = PAD * 2 + maxCols * NODE_W + Math.max(0, maxCols - 1) * COL_GAP
   const counts = new Map<string, number>()
   for (const inst of spec.instances ?? []) counts.set(inst.concept, (counts.get(inst.concept) ?? 0) + 1)
+  // 同概念的多个实例横向排开，避免叠在一起
+  const instSlot = new Map<string, number>()
 
   const nodes: EditorFlowNode[] = []
   for (const [d, cs] of rows) {
@@ -98,21 +106,36 @@ function deriveNodes(spec: Spec, prev: EditorFlowNode[]): EditorFlowNode[] {
     const startX = (width - rowW) / 2
     cs.forEach((c, i) => {
       const fallback = { x: startX + i * (NODE_W + COL_GAP), y: PAD + d * ROW_STEP }
+      const pos = prevPos.get(c.name) ?? fallback
       nodes.push({
         id: c.name,
         type: 'concept' as const,
-        position: prevPos.get(c.name) ?? fallback,
+        position: pos,
         style: { width: NODE_W },
-        data: { label: c.label || c.name, name: c.name, count: counts.get(c.name) ?? 0, definition: c.definition },
+        data: { label: c.label || c.name, name: c.name, count: counts.get(c.name) ?? 0, definition: c.definition, kind: 'concept' },
       })
+      if (showInstances) {
+        for (const inst of (spec.instances ?? []).filter((x) => x.concept === c.name)) {
+          const slot = instSlot.get(c.name) ?? 0
+          instSlot.set(c.name, slot + 1)
+          nodes.push({
+            id: INST_ID(inst.name),
+            type: 'instance' as const,
+            position: prevPos.get(INST_ID(inst.name)) ?? { x: pos.x + slot * (NODE_W + COL_GAP), y: pos.y + ROW_STEP * 0.72 },
+            style: { width: NODE_W },
+            data: { label: inst.name, name: inst.name, count: 0, kind: 'instance', conceptName: c.name },
+          })
+        }
+      }
     })
   }
   return nodes
 }
 
-/** Spec → 画布边：关系实线带标签，继承虚线（父 → 子，与只读视图同方向） */
-function deriveEdges(spec: Spec): Edge[] {
+/** Spec → 画布边：关系实线带标签，继承虚线（父 → 子），实例归属点线，实例关系细实线 */
+function deriveEdges(spec: Spec, showInstances: boolean): Edge[] {
   const names = new Set((spec.concepts ?? []).map((c) => c.name))
+  const instNames = new Set((spec.instances ?? []).map((i) => i.name))
   const edges: Edge[] = []
   for (const r of spec.relations ?? []) {
     if (!names.has(r.from) || !names.has(r.to)) continue
@@ -139,6 +162,30 @@ function deriveEdges(spec: Spec): Edge[] {
       })
     }
   }
+  if (showInstances) {
+    for (const inst of spec.instances ?? []) {
+      if (!names.has(inst.concept)) continue
+      edges.push({
+        id: `belongs:${INST_ID(inst.name)}`,
+        source: INST_ID(inst.name),
+        target: inst.concept,
+        type: 'smoothstep',
+        className: 'onto-flow-edge-belongs',
+        style: { strokeDasharray: '2 4' },
+      })
+      for (const ir of inst.relations ?? []) {
+        if (!instNames.has(ir.target)) continue
+        edges.push({
+          id: `instrel:${ir.rel}:${inst.name}:${ir.target}`,
+          source: INST_ID(inst.name),
+          target: INST_ID(ir.target),
+          label: ir.rel,
+          type: 'smoothstep',
+          className: 'onto-flow-edge-instrel',
+        })
+      }
+    }
+  }
   return edges
 }
 
@@ -153,14 +200,26 @@ function EditorConceptNode({ data, selected }: NodeProps<EditorFlowNode>) {
   )
 }
 
-const nodeTypes: NodeTypes = { concept: EditorConceptNode }
+/** 实例节点：紫色调 + 所属概念脚标，可连线建实例关系 */
+function EditorInstanceNode({ data, selected }: NodeProps<EditorFlowNode>) {
+  return (
+    <div className={`onto-flow-node onto-flow-node-inst${selected ? ' selected' : ''}`} title={`实例 · ${data.conceptName}`}>
+      <Handle type="target" position={Position.Top} className="onto-flow-handle" />
+      <span className="onto-flow-node-label">{data.label}</span>
+      <span className="onto-flow-node-badge inst">{data.conceptName}</span>
+      <Handle type="source" position={Position.Bottom} className="onto-flow-handle" />
+    </div>
+  )
+}
+
+const nodeTypes: NodeTypes = { concept: EditorConceptNode, instance: EditorInstanceNode }
 
 type Selection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null
 
 interface ConnDraft {
   source: string
   target: string
-  kind: 'parent' | 'relation'
+  kind: 'parent' | 'relation' | 'instance-relation'
 }
 
 export default function GraphEditor({
@@ -180,8 +239,11 @@ export default function GraphEditor({
   const [saveErrors, setSaveErrors] = useState<{ path: string; message: string }[] | null>(null)
   const [selection, setSelection] = useState<Selection>(null)
   const [addOpen, setAddOpen] = useState(false)
+  const [addInstOpen, setAddInstOpen] = useState(false)
+  const [showInstances, setShowInstances] = useState(true)
   const [connDraft, setConnDraft] = useState<ConnDraft | null>(null)
   const [addForm] = Form.useForm<{ name: string; label?: string; definition?: string; parents?: string[] }>()
+  const [addInstForm] = Form.useForm<{ name: string; concept: string; attributes?: string }>()
   const [connForm] = Form.useForm<{ relName: string; relLabel?: string }>()
 
   // 外部 Spec 变化（切换本体 / 保存后刷新）→ 丢弃本地草稿
@@ -192,17 +254,21 @@ export default function GraphEditor({
     setSelection(null)
   }, [spec, ontologyId])
 
-  const initialNodes = useMemo(() => (draft ? deriveNodes(draft, []) : []), [draft])
+  const initialNodes = useMemo(() => (draft ? deriveNodes(draft, [], showInstances) : []), [draft, showInstances])
+  const initialEdges = useMemo(
+    () => deriveEdges(draft ?? { name: '', concepts: [], relations: [], instances: [] }, showInstances),
+    [draft, showInstances],
+  )
   const [nodes, setNodes, onNodesChange] = useNodesState<EditorFlowNode>(initialNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(deriveEdges(draft ?? { name: '', concepts: [], relations: [], instances: [] }))
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges)
 
-  // 结构变化时以 draft 重建画布（保留已有节点坐标）
+  // 结构变化或实例显示开关切换时以 draft 重建画布（保留已有节点坐标）
   const rebuild = useCallback(
-    (next: Spec) => {
-      setNodes((prev) => deriveNodes(next, prev))
-      setEdges(deriveEdges(next))
+    (next: Spec, withInstances = showInstances) => {
+      setNodes((prev) => deriveNodes(next, prev, withInstances))
+      setEdges(deriveEdges(next, withInstances))
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, showInstances],
   )
 
   const mutate = useCallback(
@@ -218,15 +284,44 @@ export default function GraphEditor({
   const onConnect = useCallback(
     (conn: Connection) => {
       if (!draft || !conn.source || !conn.target || conn.source === conn.target) return
+      const srcInst = conn.source.startsWith('inst:')
+      const tgtInst = conn.target.startsWith('inst:')
+      if (srcInst !== tgtInst) {
+        showToast('概念与实例之间不连线；归属关系随实例自动生成', 'err')
+        return
+      }
+      if (srcInst && tgtInst) {
+        setConnDraft({ source: conn.source, target: conn.target, kind: 'instance-relation' })
+        connForm.setFieldsValue({ relName: '', relLabel: '' })
+        return
+      }
       setConnDraft({ source: conn.source, target: conn.target, kind: 'relation' })
       connForm.setFieldsValue({ relName: `rel_${(draft.relations?.length ?? 0) + 1}`, relLabel: '' })
     },
-    [draft, connForm],
+    [draft, connForm, showToast],
   )
 
   const applyConnect = useCallback(() => {
     if (!draft || !connDraft) return
     const { source, target } = connDraft
+    const v = connForm.getFieldsValue()
+    const relName = (v.relName || '').trim()
+    if (!relName) {
+      showToast('关系名不能为空', 'err')
+      return
+    }
+    if (connDraft.kind === 'instance-relation') {
+      const srcName = instNameOf(source)
+      const tgtName = instNameOf(target)
+      mutate({
+        ...draft,
+        instances: (draft.instances ?? []).map((i) =>
+          i.name === srcName ? { ...i, relations: [...(i.relations ?? []), { rel: relName, target: tgtName }] } : i,
+        ),
+      })
+      setConnDraft(null)
+      return
+    }
     if (connDraft.kind === 'parent') {
       mutate({
         ...draft,
@@ -234,22 +329,17 @@ export default function GraphEditor({
           c.name === target && !(c.parents ?? []).includes(source) ? { ...c, parents: [...(c.parents ?? []), source] } : c,
         ),
       })
-    } else {
-      const v = connForm.getFieldsValue()
-      const relName = (v.relName || '').trim()
-      if (!relName) {
-        showToast('关系名不能为空', 'err')
-        return
-      }
-      const dup = (draft.relations ?? []).some((r) => r.name === relName)
-      if (dup) {
-        showToast(`关系名 ${relName} 已存在`, 'err')
-        return
-      }
-      const rel: SpecRelation = { name: relName, from: source, to: target }
-      if (v.relLabel?.trim()) rel.label = v.relLabel.trim()
-      mutate({ ...draft, relations: [...(draft.relations ?? []), rel] })
+      setConnDraft(null)
+      return
     }
+    const dup = (draft.relations ?? []).some((r) => r.name === relName)
+    if (dup) {
+      showToast(`关系名 ${relName} 已存在`, 'err')
+      return
+    }
+    const rel: SpecRelation = { name: relName, from: source, to: target }
+    if (v.relLabel?.trim()) rel.label = v.relLabel.trim()
+    mutate({ ...draft, relations: [...(draft.relations ?? []), rel] })
     setConnDraft(null)
   }, [draft, connDraft, mutate, connForm, showToast])
 
@@ -273,6 +363,54 @@ export default function GraphEditor({
       setSelection({ kind: 'node', id: name })
     })
   }, [draft, mutate, addForm, showToast])
+
+  // ---- 实例增删（v1.5）----
+  const addInstance = useCallback(() => {
+    if (!draft) return
+    addInstForm.validateFields().then((v) => {
+      const name = v.name.trim()
+      if (!name) return
+      if (draft.concepts.some((c) => c.name === name)) {
+        showToast(`「${name}」已是概念名，实例与概念不可同名`, 'err')
+        return
+      }
+      if ((draft.instances ?? []).some((i) => i.name === name)) {
+        showToast(`实例 ${name} 已存在`, 'err')
+        return
+      }
+      let attributes: Record<string, unknown> | undefined
+      if (v.attributes?.trim()) {
+        try {
+          const parsed = JSON.parse(v.attributes)
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('需为 JSON 对象')
+          attributes = parsed
+        } catch (e) {
+          showToast(`属性 JSON 不合法：${(e as Error).message}`, 'err')
+          return
+        }
+      }
+      const inst: SpecInstance = { name, concept: v.concept }
+      if (attributes) inst.attributes = attributes
+      mutate({ ...draft, instances: [...(draft.instances ?? []), inst] })
+      setAddInstOpen(false)
+      addInstForm.resetFields()
+      setSelection({ kind: 'node', id: INST_ID(name) })
+    })
+  }, [draft, mutate, addInstForm, showToast])
+
+  const removeInstance = useCallback(
+    (name: string) => {
+      if (!draft) return
+      mutate({
+        ...draft,
+        instances: (draft.instances ?? [])
+          .filter((i) => i.name !== name)
+          .map((i) => ({ ...i, relations: (i.relations ?? []).filter((r) => r.target !== name) })),
+      })
+      setSelection(null)
+    },
+    [draft, mutate],
+  )
 
   const removeConcept = useCallback(
     (name: string) => {
@@ -300,6 +438,17 @@ export default function GraphEditor({
             c.name === child ? { ...c, parents: (c.parents ?? []).filter((p) => p !== parent) } : c,
           ),
         })
+      } else if (edgeId.startsWith('instrel:')) {
+        const [, relName, from, to] = edgeId.split(':')
+        mutate({
+          ...draft,
+          instances: (draft.instances ?? []).map((i) =>
+            i.name === from ? { ...i, relations: (i.relations ?? []).filter((r) => !(r.rel === relName && r.target === to)) } : i,
+          ),
+        })
+      } else if (edgeId.startsWith('belongs:')) {
+        showToast('归属关系随实例存在；要移除请删除该实例或在属性面板更换所属概念', 'err')
+        return
       } else {
         const [, relName, from, to] = edgeId.split(':')
         mutate({
@@ -309,7 +458,7 @@ export default function GraphEditor({
       }
       setSelection(null)
     },
-    [draft, mutate],
+    [draft, mutate, showToast],
   )
 
   const save = useCallback(async () => {
@@ -332,14 +481,23 @@ export default function GraphEditor({
 
   // ---- 选中项详情 ----
   const selNode = useMemo(
-    () => (draft && selection?.kind === 'node' ? draft.concepts.find((c) => c.name === selection.id) ?? null : null),
+    () => (draft && selection?.kind === 'node' && !selection.id.startsWith('inst:') ? draft.concepts.find((c) => c.name === selection.id) ?? null : null),
+    [draft, selection],
+  )
+  const selInstance = useMemo(
+    () => (draft && selection?.kind === 'node' && selection.id.startsWith('inst:') ? (draft.instances ?? []).find((i) => i.name === instNameOf(selection.id)) ?? null : null),
     [draft, selection],
   )
   const selRelEdge = useMemo(() => {
-    if (!draft || selection?.kind !== 'edge') return null
+    if (!draft || selection?.kind !== 'edge' || !selection.id.startsWith('rel:')) return null
     const [, relName, from, to] = selection.id.split(':')
     return (draft.relations ?? []).find((r) => r.name === relName && r.from === from && r.to === to) ?? null
   }, [draft, selection])
+  const selInstRel = useMemo(() => {
+    if (!draft || selection?.kind !== 'edge' || !selection.id.startsWith('instrel:')) return null
+    const [, relName, from, to] = selection.id.split(':')
+    return { rel: relName, from, to }
+  }, [selection])
   const selParentEdge = useMemo(() => {
     if (selection?.kind !== 'edge' || !selection.id.startsWith('parent:')) return null
     const [, parent, child] = selection.id.split(':')
@@ -362,9 +520,25 @@ export default function GraphEditor({
           <Button size="small" type="primary" ghost onClick={() => setAddOpen(true)}>
             添加概念
           </Button>
+          <Button size="small" type="primary" ghost onClick={() => {
+            addInstForm.setFieldsValue({ attributes: '' })
+            setAddInstOpen(true)
+          }}>
+            添加实例
+          </Button>
           <Tag>概念 {d.concepts.length}</Tag>
           <Tag>关系 {d.relations?.length ?? 0}</Tag>
           <Tag>实例 {d.instances?.length ?? 0}</Tag>
+          <Switch
+            size="small"
+            checkedChildren="显示实例"
+            unCheckedChildren="隐藏实例"
+            checked={showInstances}
+            onChange={(v) => {
+              setShowInstances(v)
+              rebuild(d, v)
+            }}
+          />
           {dirty && <Tag color="orange">未保存修改</Tag>}
         </Space>
         <Space size={8}>
@@ -435,10 +609,19 @@ export default function GraphEditor({
             <div className="onto-flow-info-title">编辑面板</div>
             {!selection && (
               <p className="onto-flow-hint">
-                拖拽节点边缘连线即创建关系/继承；点击节点或连线在右侧编辑；「添加概念」新建节点。保存走统一校验门控并递增版本。
+                拖拽节点边缘连线即创建关系/继承（实例间连线=实例关系）；点击节点或连线在右侧编辑；「添加概念/实例」新建节点。保存走统一校验门控并递增版本。
               </p>
             )}
             {selNode && <NodePanel key={selNode.name} concept={selNode} draft={d} onApply={mutate} onRemove={removeConcept} />}
+            {selInstance && (
+              <InstancePanel
+                key={selInstance.name}
+                instance={selInstance}
+                draft={d}
+                onApply={mutate}
+                onRemove={removeInstance}
+              />
+            )}
             {selRelEdge && (
               <div className="onto-flow-detail">
                 <div className="onto-flow-detail-name">{selRelEdge.label || selRelEdge.name}</div>
@@ -463,6 +646,20 @@ export default function GraphEditor({
                 <Popconfirm title={`删除该继承（${selParentEdge.child} 不再继承 ${selParentEdge.parent}）？`} onConfirm={() => removeEdge(selection!.id)}>
                   <Button size="small" danger block style={{ marginTop: 8 }}>
                     删除继承
+                  </Button>
+                </Popconfirm>
+              </div>
+            )}
+            {selInstRel && (
+              <div className="onto-flow-detail">
+                <div className="onto-flow-detail-name">实例关系 · {selInstRel.rel}</div>
+                <div className="onto-flow-detail-key">
+                  {selInstRel.from} → {selInstRel.to}
+                </div>
+                <p className="onto-flow-detail-def muted">记录在 {selInstRel.from} 的 relations 上（细实线）</p>
+                <Popconfirm title={`删除实例关系「${selInstRel.rel}」？`} onConfirm={() => removeEdge(selection!.id)}>
+                  <Button size="small" danger block style={{ marginTop: 8 }}>
+                    删除实例关系
                   </Button>
                 </Popconfirm>
               </div>
@@ -503,7 +700,8 @@ export default function GraphEditor({
         title={
           connDraft ? (
             <span>
-              连线 <Tag style={{ margin: 0 }}>{connDraft.source}</Tag> → <Tag style={{ margin: 0 }}>{connDraft.target}</Tag>
+              连线 <Tag style={{ margin: 0 }}>{connDraft.source.startsWith('inst:') ? instNameOf(connDraft.source) : connDraft.source}</Tag> →{' '}
+              <Tag style={{ margin: 0 }}>{connDraft.target.startsWith('inst:') ? instNameOf(connDraft.target) : connDraft.target}</Tag>
             </span>
           ) : (
             '连线'
@@ -517,15 +715,17 @@ export default function GraphEditor({
         destroyOnHidden
       >
         <Form form={connForm} layout="vertical">
-          <Form.Item name="kind" label="连线类型" initialValue="relation">
-            <Radio.Group
-              onChange={(e) => setConnDraft((c) => (c ? { ...c, kind: e.target.value } : c))}
-              options={[
-                { value: 'relation', label: '关系（实线，from → to）' },
-                { value: 'parent', label: `继承（虚线，${connDraft?.source} 为父）` },
-              ]}
-            />
-          </Form.Item>
+          {connDraft?.kind !== 'instance-relation' && (
+            <Form.Item name="kind" label="连线类型" initialValue="relation">
+              <Radio.Group
+                onChange={(e) => setConnDraft((c) => (c ? { ...c, kind: e.target.value } : c))}
+                options={[
+                  { value: 'relation', label: '关系（实线，from → to）' },
+                  { value: 'parent', label: `继承（虚线，${connDraft?.source} 为父）` },
+                ]}
+              />
+            </Form.Item>
+          )}
           {connDraft?.kind === 'relation' && (
             <>
               <Form.Item name="relName" label="关系名（唯一标识）" rules={[{ required: true, message: '请输入关系名' }]}>
@@ -541,6 +741,58 @@ export default function GraphEditor({
               将为 {connDraft.target} 增加父概念 {connDraft.source}（若已存在则忽略）。
             </Typography.Text>
           )}
+          {connDraft?.kind === 'instance-relation' && (
+            <>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                实例间关系（记录在 {instNameOf(connDraft.source)} 的 relations 上，指向 {instNameOf(connDraft.target)}）。
+              </Typography.Text>
+              <Form.Item name="relName" label="关系名（对应概念层关系）" rules={[{ required: true, message: '请输入关系名' }]}>
+                <Input placeholder="如 cites（建议与概念层关系同名）" />
+              </Form.Item>
+            </>
+          )}
+        </Form>
+      </Modal>
+
+      <Modal
+        title="添加实例"
+        open={addInstOpen}
+        okText="添加"
+        cancelText="取消"
+        onOk={addInstance}
+        onCancel={() => {
+          setAddInstOpen(false)
+          addInstForm.resetFields()
+        }}
+        destroyOnHidden
+      >
+        <Form form={addInstForm} layout="vertical">
+          <Form.Item name="name" label="实例名（唯一标识）" rules={[{ required: true, message: '请输入实例名' }]}>
+            <Input placeholder="如 《知识图谱》" />
+          </Form.Item>
+          <Form.Item name="concept" label="所属概念" rules={[{ required: true, message: '请选择所属概念' }]}>
+            <Select placeholder="选择概念" options={d.concepts.map((c) => ({ value: c.name, label: c.label || c.name }))} />
+          </Form.Item>
+          <Form.Item
+            name="attributes"
+            label="属性（可选，JSON 对象）"
+            rules={[
+              {
+                validator: (_: unknown, v: string) => {
+                  if (!v?.trim()) return Promise.resolve()
+                  try {
+                    const p = JSON.parse(v)
+                    if (typeof p !== 'object' || p === null || Array.isArray(p)) return Promise.reject('需为 JSON 对象，如 {"year": 2024}')
+                  } catch {
+                    return Promise.reject('JSON 语法不合法')
+                  }
+                  return Promise.resolve()
+                },
+              },
+            ]}
+          >
+            <Input.TextArea rows={2} placeholder='如 {"year": 2024}' />
+          </Form.Item>
         </Form>
       </Modal>
     </div>
@@ -617,6 +869,97 @@ function NodePanel({
             </Button>
           </Popconfirm>
         </Space>
+      </div>
+    </div>
+  )
+}
+
+/** 选中实例节点的属性编辑面板（v1.5）：换所属概念 / 属性 JSON / 删除；改名不进画布 */
+function InstancePanel({
+  instance,
+  draft,
+  onApply,
+  onRemove,
+}: {
+  instance: SpecInstance
+  draft: Spec
+  onApply: (next: Spec) => void
+  onRemove: (name: string) => void
+}) {
+  const [concept, setConcept] = useState(instance.concept)
+  const [attrsText, setAttrsText] = useState(() => (instance.attributes ? JSON.stringify(instance.attributes, null, 0) : ''))
+  const [attrsErr, setAttrsErr] = useState<string | null>(null)
+  useEffect(() => {
+    setConcept(instance.concept)
+    setAttrsText(instance.attributes ? JSON.stringify(instance.attributes, null, 0) : '')
+    setAttrsErr(null)
+  }, [instance])
+
+  const conceptChanged = concept !== instance.concept
+  const attrsChanged = attrsText.trim() !== (instance.attributes ? JSON.stringify(instance.attributes, null, 0) : '')
+  const changed = conceptChanged || attrsChanged
+
+  const apply = () => {
+    let attributes: Record<string, unknown> | undefined
+    if (attrsText.trim()) {
+      try {
+        const parsed = JSON.parse(attrsText)
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('需为 JSON 对象')
+        attributes = parsed
+      } catch (e) {
+        setAttrsErr((e as Error).message)
+        return
+      }
+    }
+    setAttrsErr(null)
+    const next: SpecInstance = { ...instance, concept }
+    if (attributes) next.attributes = attributes
+    else delete next.attributes
+    onApply({ ...draft, instances: (draft.instances ?? []).map((i) => (i.name === instance.name ? next : i)) })
+  }
+
+  return (
+    <div className="onto-flow-detail">
+      <div className="onto-flow-detail-name">{instance.name}</div>
+      <div className="onto-flow-detail-key">实例</div>
+      <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+        <Select
+          size="small"
+          value={concept}
+          onChange={setConcept}
+          placeholder="所属概念"
+          options={draft.concepts.map((c) => ({ value: c.name, label: c.label || c.name }))}
+        />
+        <Input.TextArea
+          size="small"
+          rows={2}
+          value={attrsText}
+          onChange={(e) => {
+            setAttrsText(e.target.value)
+            setAttrsErr(null)
+          }}
+          placeholder='属性 JSON，如 {"year": 2024}'
+          status={attrsErr ? 'error' : undefined}
+        />
+        {attrsErr && <Typography.Text type="danger" style={{ fontSize: 12 }}>属性不合法：{attrsErr}</Typography.Text>}
+        {(instance.relations?.length ?? 0) > 0 && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            实例关系：{instance.relations!.map((r) => `—${r.rel}→ ${r.target}`).join('，')}（画布点连线删除）
+          </Typography.Text>
+        )}
+        <Space size={6}>
+          <Button size="small" type="primary" disabled={!changed} onClick={apply}>
+            应用修改
+          </Button>
+          <Popconfirm title={`删除实例「${instance.name}」？其被引用的实例关系将一并移除。`} onConfirm={() => onRemove(instance.name)}>
+            <Button size="small" danger>
+              删除实例
+            </Button>
+          </Popconfirm>
+        </Space>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          实例改名不进画布（name 是引用键）；如需改名请到 Spec 编辑。
+        </Typography.Text>
       </div>
     </div>
   )
