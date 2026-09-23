@@ -63,7 +63,6 @@ web/                React 18 + Vite + TS + antd 6 + Ant Design X + zustand
   src/pages/        agents / projects / ontology / knowledge / skills / settings
   src/components/   ChatWindow / Sidebar / AgentModal / ProjectModal / TopNav / NameModal
 docs/               需求与设计文档（见下）
-prototype/          界面原型（05）与原型设计说明（06）
 tools/              辅助脚本
 ```
 
@@ -76,7 +75,7 @@ tools/              辅助脚本
 | `docs/04_本体_方案设计.md` | 本体模块（独立维护：构建/运行两平面） |
 | `docs/11_知识库_需求文档.md` / `docs/12_知识库_方案设计.md` | 知识库模块（v0.12 起独立成档） |
 | `docs/16_部署与运行.md` | 部署事实源（本地开发 / Docker Compose / Helm / 客户端打包 / 环境变量速查） |
-| `prototype/05_智能体_界面交互原型.html` + `06_智能体_原型设计说明.md` | 界面交互基线 |
+| `docs/17_产品_信息架构与界面设计.md` | 界面/产品口径基线（原 prototype/ 原型已移除） |
 
 ## Roadmap
 
