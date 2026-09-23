@@ -15,6 +15,7 @@ import (
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/api"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
@@ -63,6 +64,7 @@ func main() {
 	}
 
 	svc := chat.NewService(st, asm, kbSvc)
+	svc.Inference = inference.NewRegistry() // M13/D-O13 §6.16：推理后端注册表（eino-adk + 外部 CLI）
 	srv := api.NewServer(st, box, svc, reg, kbSvc, asm.Ontology)
 	// M10 §6.3：Docker 沙箱执行后端（SANDBOX_IMAGE 配置即启用；PLATFORM_URL_EXTERNAL 为容器内回访主平台地址）
 	if img := getenv("SANDBOX_IMAGE", ""); img != "" {

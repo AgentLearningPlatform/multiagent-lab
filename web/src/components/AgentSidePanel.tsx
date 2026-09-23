@@ -11,8 +11,9 @@ import {
   SettingOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
-import type { Agent, ModelConnection, ToolInfo } from '../api/types'
+import type { Agent, InferenceBackendStatus, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
+import { inferenceBackendOptions } from './inferenceOptions'
 
 /** 连接名已按 `{提供商}·{模型}` 约定时直接展示，否则补上模型名（兼容老数据） */
 const connLabel = (c: ModelConnection) => (c.name.endsWith(`·${c.model_name}`) ? c.name : `${c.name} · ${c.model_name}`)
@@ -126,6 +127,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   const [allConns, setAllConns] = useState<ModelConnection[]>([])
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [toolsErr, setToolsErr] = useState(false)
+  const [backends, setBackends] = useState<InferenceBackendStatus[]>([]) // M13：推理后端探测清单
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   // MCP servers 实时值（预设挂载态判重用）。必须在组件顶层调用——Form.List 渲染槽内是
@@ -143,6 +145,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         setToolsErr(false)
       })
       .catch(() => setToolsErr(true))
+    // M13：推理后端探测清单（失败降级为仅 eino-adk 默认项）
+    api.listInferenceBackends().then((r) => setBackends(r.backends ?? [])).catch(() => {})
   }, [agent.id, form])
 
   // 可选 chat 连接（启用中）与生效的全局默认（默认连接须启用，与后端 GetDefaultConnection 语义一致）
@@ -168,6 +172,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         max_tokens: v.max_tokens ?? null,
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
+        inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
         tools: v.tools ?? [],
         // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
         skills: agent.skills ?? [],
@@ -311,6 +316,18 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         </Form.Item>
         <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M2 默认 inprocess；subprocess/容器后端在 M5 开放">
           <Input disabled />
+        </Form.Item>
+        <Form.Item
+          name="inference_backend"
+          label="推理后端"
+          extra="「在哪儿跑」由运行后端决定，「谁来推理」由此决定：eino-adk 为平台自研（完整能力）；外部 CLI 后端模型由其自身配置决定（Agent 模型连接不生效），技能/MCP 降级为提示注入，不支持多 Agent 编排"
+        >
+          <Select
+            options={inferenceBackendOptions(backends)}
+            showSearch
+            optionFilterProp="label"
+            placeholder="eino-adk（自研默认）"
+          />
         </Form.Item>
       </Form>
 

@@ -88,6 +88,9 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/model-connections/{id}/default", s.setDefaultConnection)
 	m.HandleFunc("POST /api/model-connections/test", s.testConnection)
 	m.HandleFunc("POST /api/model-connections/{id}/list-models", s.listConnectionModels)
+	// M13/D-O13 §6.16：推理后端探测清单
+	m.HandleFunc("GET /api/inference-backends", s.listInferenceBackends)
+	m.HandleFunc("POST /api/inference-backends/reprobe", s.reprobeInferenceBackends)
 
 	// 使用统计（按 model|agent|project 聚合 run_event）
 	m.HandleFunc("GET /api/stats/usage", s.usageStats)

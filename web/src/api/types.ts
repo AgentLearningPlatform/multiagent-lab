@@ -13,8 +13,29 @@ export interface Agent {
   skills: string[]
   mcp_servers: { name: string; url: string }[]
   runtime_backend: string
+  /** M13 §6.16：推理后端（eino-adk 自研默认；claude-code/opencode/aider 外部 CLI） */
+  inference_backend: string
   created_at: string
   updated_at: string
+}
+
+/** M13 §6.16：推理后端探测状态（GET /api/inference-backends） */
+export interface InferenceBackendStatus {
+  name: string
+  available: boolean
+  version?: string
+  path?: string
+  reason?: string
+  default: boolean
+  capabilities: {
+    chat: boolean
+    stream: boolean
+    skills_mode: 'tools' | 'instruction' | 'none'
+    mcp_mode: 'tools' | 'instruction' | 'none'
+    agent_as_tool: boolean
+    workflow: boolean
+    resume: boolean
+  }
 }
 
 export interface Project {

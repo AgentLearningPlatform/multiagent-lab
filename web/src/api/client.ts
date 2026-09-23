@@ -11,6 +11,7 @@ import type {
   ForkOntologyInput,
   GuideResponse,
   ImportReport,
+  InferenceBackendStatus,
   ChunksToKGResult,
   KBDoc,
   KBSearchResult,
@@ -172,6 +173,10 @@ export const api = {
   deleteConnection: (id: string) => req<{ deleted: string }>(`/api/model-connections/${id}`, { method: 'DELETE' }),
   setDefaultConnection: (id: string) => req<ModelConnection>(`/api/model-connections/${id}/default`, { method: 'PUT' }),
   testConnection: (input: any) => req<{ ok: boolean; error?: string; elapsed_ms: number }>('/api/model-connections/test', { method: 'POST', body: JSON.stringify(input) }),
+
+  // inference backends（M13 §6.16：探测清单，10min TTL 缓存）
+  listInferenceBackends: () => req<{ backends: InferenceBackendStatus[] }>('/api/inference-backends'),
+  reprobeInferenceBackends: () => req<{ backends: InferenceBackendStatus[] }>('/api/inference-backends/reprobe', { method: 'POST' }),
   /**
    * 自动获取某提供商（锚点连接）的可用模型列表（ASSUMED 契约，接口可能未就绪 → 抛错由 UI 降级）。
    * POST /api/model-connections/{anchorId}/list-models → { models: string[] }

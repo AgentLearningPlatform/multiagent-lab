@@ -16,6 +16,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
@@ -26,8 +27,9 @@ import (
 type Service struct {
 	Store     *store.Store
 	Assembler *Assembler
-	KB        *kb.Service     // M6：对话知识库召回（nil 时禁用）
-	Runtime   runtime.Backend // M10：沙箱执行后端（nil=inprocess；agent.RuntimeBackend=docker 时转发）
+	KB        *kb.Service           // M6：对话知识库召回（nil 时禁用）
+	Runtime   runtime.Backend       // M10：沙箱执行后端（nil=inprocess；agent.RuntimeBackend=docker 时转发）
+	Inference *inference.Registry   // M13：推理后端注册表（nil=仅 eino-adk；外部 CLI 后端走 runExternal）
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // conversationID -> cancel
@@ -95,6 +97,11 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了 docker 执行后端但沙箱后端未启用，已回退 inprocess"}))
 	}
 
+	// M13/D-O13 §6.16：推理后端分发——外部 CLI 后端（非 eino-adk）走适配器路径（能力降级见 §6.16.4）
+	if conv.Scope == "agent" && agent != nil && s.Inference != nil && s.Inference.IsExternal(agent.InferenceBackend) {
+		return s.runExternal(ctx, conv, agent, runID, input, emit)
+	}
+
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
 	if err != nil {
 		return nil, err
@@ -159,32 +166,7 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	}
 
 	// 知识库召回（M6，§11/§6.9：提问先检索 → retrieval 事件 → 上下文注入；失败降级不阻断）
-	if conv.EnableKB && conv.KBID != nil && *conv.KBID != "" && s.KB != nil {
-		kbcfg, kerr := s.Store.GetKnowledgeBase(*conv.KBID)
-		if kerr != nil {
-			s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库加载失败，本次回答未注入知识库内容: " + kerr.Error()}), emit)
-		} else {
-			// M14 D-KB4：graphrag 模式 KB 走 worker GraphRAG 检索；worker 不可达降级向量检索（不阻断，事件标注 degraded）
-			hits, mode, degraded, serr := s.KB.GraphragQueryWithFallback(runCtx, kbcfg, input, conv.TopK, conv.MinScore)
-			switch {
-			case serr != nil:
-				s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库检索失败，本次回答未注入知识库内容: " + serr.Error()}), emit)
-			case len(hits) > 0:
-				hd := make([]map[string]any, 0, len(hits))
-				for _, h := range hits {
-					hd = append(hd, map[string]any{"doc": h.Doc, "seq": h.Seq, "score": h.Score, "excerpt": h.Excerpt})
-				}
-				data := map[string]any{"kb_id": kbcfg.ID, "mode": mode, "hits": hd} // M14 ④：retrieval 事件带 mode
-				if degraded {
-					data["degraded"] = true
-				}
-				s.emitAndRecord(runCtx, conv, runID, newEvent("retrieval", runID, data), emit)
-				if ctxText := kb.RenderContext(kbcfg.Name, hits); ctxText != "" {
-					histMsgs = append(histMsgs, schema.SystemMessage(ctxText))
-				}
-			}
-		}
-	}
+	histMsgs = s.recallKB(runCtx, conv, runID, input, histMsgs, emit)
 
 	var (
 		buf        []byte
@@ -593,4 +575,37 @@ func (s *Service) AssembleSummary(ctx context.Context, agent *store.Agent) (stri
 		return "", err
 	}
 	return rt.ModelLabel, nil
+}
+
+// recallKB 知识库召回公共段（M13 抽取：inprocess 与外部推理后端两条路径共用）。
+// 检索 → retrieval 事件 → 命中内容作为 System 消息追加到 histMsgs；任何失败降级不阻断。
+func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, runID, input string, histMsgs []*schema.Message, emit EmitFn) []*schema.Message {
+	if !(conv.EnableKB && conv.KBID != nil && *conv.KBID != "" && s.KB != nil) {
+		return histMsgs
+	}
+	kbcfg, kerr := s.Store.GetKnowledgeBase(*conv.KBID)
+	if kerr != nil {
+		s.emitAndRecord(ctx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库加载失败，本次回答未注入知识库内容: " + kerr.Error()}), emit)
+		return histMsgs
+	}
+	// M14 D-KB4：graphrag 模式 KB 走 worker GraphRAG 检索；worker 不可达降级向量检索（不阻断，事件标注 degraded）
+	hits, mode, degraded, serr := s.KB.GraphragQueryWithFallback(ctx, kbcfg, input, conv.TopK, conv.MinScore)
+	switch {
+	case serr != nil:
+		s.emitAndRecord(ctx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库检索失败，本次回答未注入知识库内容: " + serr.Error()}), emit)
+	case len(hits) > 0:
+		hd := make([]map[string]any, 0, len(hits))
+		for _, h := range hits {
+			hd = append(hd, map[string]any{"doc": h.Doc, "seq": h.Seq, "score": h.Score, "excerpt": h.Excerpt})
+		}
+		data := map[string]any{"kb_id": kbcfg.ID, "mode": mode, "hits": hd} // M14 ④：retrieval 事件带 mode
+		if degraded {
+			data["degraded"] = true
+		}
+		s.emitAndRecord(ctx, conv, runID, newEvent("retrieval", runID, data), emit)
+		if ctxText := kb.RenderContext(kbcfg.Name, hits); ctxText != "" {
+			histMsgs = append(histMsgs, schema.SystemMessage(ctxText))
+		}
+	}
+	return histMsgs
 }

@@ -4,8 +4,24 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
+
+// normalizeInferenceBackend M13 §6.16：推理后端归一（空 = eino-adk 自研默认）+ 合法性校验。
+// PUT 为全量更新（老客户端不带该字段时置空），置空一律归一为默认，不产生破坏。
+func (s *Server) normalizeInferenceBackend(a *store.Agent) error {
+	a.InferenceBackend = strings.TrimSpace(a.InferenceBackend)
+	switch a.InferenceBackend {
+	case "", inference.DefaultBackend:
+		a.InferenceBackend = inference.DefaultBackend
+	default:
+		if s.Chat == nil || s.Chat.Inference == nil || !s.Chat.Inference.Known(a.InferenceBackend) {
+			return &store.HTTPError{Status: http.StatusBadRequest, Msg: "未知推理后端: " + a.InferenceBackend}
+		}
+	}
+	return nil
+}
 
 // ---- Agents ----
 
@@ -37,6 +53,10 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if a.RuntimeBackend == "" {
 		a.RuntimeBackend = "inprocess"
 	}
+	if err := s.normalizeInferenceBackend(&a); err != nil {
+		writeErr(w, err)
+		return
+	}
 	created, err := s.Store.CreateAgent(&a)
 	if err != nil {
 		writeErr(w, err)
@@ -61,6 +81,10 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = r.PathValue("id")
+	if err := s.normalizeInferenceBackend(&a); err != nil {
+		writeErr(w, err)
+		return
+	}
 	updated, err := s.Store.UpdateAgent(&a)
 	if err != nil {
 		writeErr(w, err)

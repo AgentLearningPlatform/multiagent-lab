@@ -3,10 +3,10 @@ import { Alert, Button, Checkbox, DatePicker, Form, Input, Menu, Modal, Popconfi
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import { api } from '../api/client'
-import type { ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
+import type { InferenceBackendStatus, ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
 import { useUI } from '../store/ui'
 
-type Category = 'models' | 'stats' | 'global' | 'security'
+type Category = 'models' | 'stats' | 'inference' | 'global' | 'security'
 /** 统计维度：供应商为前端归并（后端无提供商实体），其余直接映射后端 group_by */
 type StatsDimension = 'model' | 'supplier' | 'agent' | 'project'
 
@@ -277,6 +277,7 @@ export default function SettingsPage() {
             style={{ padding: '0 10px', background: 'transparent' }}
             items={[
               { key: 'models', label: '模型管理' },
+              { key: 'inference', label: '推理后端' },
               { key: 'stats', label: '使用统计' },
               { key: 'global', label: <Space size={6}>全局参数<Tag style={{ margin: 0 }}>P1 预留</Tag></Space>, disabled: true },
               { key: 'security', label: <Space size={6}>数据与安全<Tag style={{ margin: 0 }}>P2 预留</Tag></Space>, disabled: true },
@@ -290,7 +291,9 @@ export default function SettingsPage() {
       <Splitter.Panel className="content-panel">
 
         <div className="settings-main">
-          {category === 'stats' ? (
+          {category === 'inference' ? (
+            <InferencePanel />
+          ) : category === 'stats' ? (
             <>
               <div className="settings-head">
                 <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>使用统计</Typography.Title>
@@ -948,5 +951,70 @@ function ModelModal({ conn, groups, conns, initialProvider, onClose, onSaved }: 
         </Form.Item>
       </Form>
     </Modal>
+  )
+}
+
+/** M13/D-O13 §6.16：推理后端面板——已发现清单（PATH 探测 + 版本）+ 重新探测；能力矩阵（§6.16.4） */
+function InferencePanel() {
+  const { showToast } = useUI()
+  const [backends, setBackends] = useState<InferenceBackendStatus[]>([])
+  const [loading, setLoading] = useState(true)
+  const [probing, setProbing] = useState(false)
+
+  const load = (force = false) => {
+    setLoading(true)
+    const p = force ? api.reprobeInferenceBackends() : api.listInferenceBackends()
+    p.then((r) => setBackends(r.backends ?? []))
+      .catch((e) => showToast(e.message, 'err'))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load(false) }, [])
+
+  const columns: ColumnsType<InferenceBackendStatus> = [
+    {
+      title: '后端', dataIndex: 'name', width: 160,
+      render: (v: string, r) => (
+        <Space size={6}>
+          <span style={{ fontWeight: 600 }}>{v}</span>
+          {r.default && <Tag color="blue" style={{ margin: 0 }}>默认</Tag>}
+        </Space>
+      ),
+    },
+    {
+      title: '状态', dataIndex: 'available', width: 110,
+      render: (ok: boolean, r) => ok
+        ? <Tag color="green" style={{ margin: 0 }}>可用{r.version ? ` · ${r.version}` : ''}</Tag>
+        : <Tag color="default" style={{ margin: 0 }}>未发现</Tag>,
+    },
+    {
+      title: '能力', key: 'caps',
+      render: (_, r) => {
+        const c = r.capabilities
+        if (c.agent_as_tool) return <span>对话 / 流式 / 技能(工具) / MCP(工具) / 多 Agent / 工作流 / 可恢复</span>
+        return <span>对话 / 流式；技能→instruction 注入；MCP→prompt 注入；无多 Agent 与工作流；仅中断</span>
+      },
+    },
+    {
+      title: '路径 / 说明', key: 'where',
+      render: (_, r) => <Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.path || r.reason || '-'}</Typography.Text>,
+    },
+  ]
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <Table<InferenceBackendStatus>
+        rowKey="name"
+        loading={loading}
+        columns={columns}
+        dataSource={backends}
+        pagination={false}
+        size="middle"
+        locale={{ emptyText: '暂无推理后端' }}
+      />
+      <div className="tab-footer">
+        <Button loading={probing} onClick={() => { setProbing(true); load(true); setProbing(false) }}>重新探测</Button>
+        <span className="hint">外部 CLI 后端按 PATH 探测（结果缓存 10 分钟）；eino-adk 为平台自研默认（完整能力），外部后端能力降级（技能/MCP 注入为提示，不支持多 Agent 编排）</span>
+      </div>
+    </div>
   )
 }

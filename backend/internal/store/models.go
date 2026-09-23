@@ -15,7 +15,8 @@ type Agent struct {
 	Tools          []string    `json:"tools"`
 	Skills         []string    `json:"skills"`      // P2 生效
 	MCPServers     []MCPServer `json:"mcp_servers"` // P2 生效
-	RuntimeBackend string      `json:"runtime_backend"`
+	RuntimeBackend   string      `json:"runtime_backend"`
+	InferenceBackend string      `json:"inference_backend"` // M13 §6.16：空 = eino-adk 自研默认
 	CreatedAt      string      `json:"created_at"`
 	UpdatedAt      string      `json:"updated_at"`
 }

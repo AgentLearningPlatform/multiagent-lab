@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button, Col, Divider, Form, Input, InputNumber, Modal, Row, Select, Space } from 'antd'
 import { api } from '../api/client'
-import type { ModelConnection, ToolInfo } from '../api/types'
+import type { InferenceBackendStatus, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
+import { inferenceBackendOptions } from './inferenceOptions'
 
 /** 连接名已按 `{提供商}·{模型}` 约定时直接展示，否则补上模型名（兼容老数据） */
 const connLabel = (c: ModelConnection) => (c.name.endsWith(`·${c.model_name}`) ? c.name : `${c.name} · ${c.model_name}`)
@@ -40,10 +41,12 @@ export default function AgentModal({
   const [allConns, setAllConns] = useState<ModelConnection[]>([])
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [toolsErr, setToolsErr] = useState(false)
+  const [backends, setBackends] = useState<InferenceBackendStatus[]>([]) // M13：推理后端探测清单
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     api.listConnections().then(setAllConns).catch(() => {})
+    api.listInferenceBackends().then((r) => setBackends(r.backends ?? [])).catch(() => {})
     // M5：工具注册表（失败降级为空 + 提示，不阻塞保存）
     api
       .listTools()
@@ -76,6 +79,7 @@ export default function AgentModal({
         max_tokens: v.max_tokens ?? null,
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
+        inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
         tools: v.tools ?? [],
       })
       showToast('智能体已创建')
@@ -200,6 +204,16 @@ export default function AgentModal({
           <Col span={12}>
             <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M2 默认 inprocess；subprocess/容器后端在 M5 开放">
               <Input disabled />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              name="inference_backend"
+              label="推理后端"
+              initialValue="eino-adk"
+              extra="「谁来推理」：eino-adk 自研默认；外部 CLI 后端模型由其自身配置决定，技能/MCP 降级为提示注入"
+            >
+              <Select options={inferenceBackendOptions(backends)} showSearch optionFilterProp="label" />
             </Form.Item>
           </Col>
         </Row>
