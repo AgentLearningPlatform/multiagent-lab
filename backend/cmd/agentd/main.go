@@ -193,7 +193,7 @@ func (a *agentd) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	res, rerr := a.svc.Run(ctx, conv, a.agent, runID, req.Input, emit)
+	res, rerr := a.svc.Run(ctx, conv, a.agent, runID, req.Input, 0, emit) // 沙箱通道暂不透出调试档（M17 阶段二）
 	if rerr != nil {
 		_ = sw("event", chat.NewErrorEvent(runID, "run_failed", rerr.Error()))
 	}

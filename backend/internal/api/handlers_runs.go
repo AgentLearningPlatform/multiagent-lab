@@ -82,7 +82,7 @@ func (s *Server) runConversation(w http.ResponseWriter, r *http.Request) {
 		_ = sw.Event(ev.Type, ev)
 	}
 
-	if _, err := s.Chat.Run(r.Context(), conv, agent, runID, in.Input, emit); err != nil {
+	if _, err := s.Chat.Run(r.Context(), conv, agent, runID, in.Input, in.DebugLevel, emit); err != nil {
 		ev := chat.NewErrorEvent(runID, "run_failed", err.Error())
 		_ = sw.Event(ev.Type, ev)
 	}
@@ -124,7 +124,7 @@ func (s *Server) resumeConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = sw.Event(ev.Type, ev)
 	}
-	if _, err := s.Chat.Resume(r.Context(), conv, agent, runID, in.Input, emit); err != nil {
+	if _, err := s.Chat.Resume(r.Context(), conv, agent, runID, in.Input, in.DebugLevel, emit); err != nil {
 		ev := chat.NewErrorEvent(runID, "resume_failed", err.Error())
 		_ = sw.Event(ev.Type, ev)
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	einotool "github.com/cloudwego/eino/components/tool"
@@ -47,6 +48,7 @@ type BuildResult struct {
 	Warnings        []string          // 装配期告警（并入 run.started data）
 	LoadedSkills    []*store.Skill    // 本次运行生效的技能（skill.loaded 事件，M9）
 	OntoUnavailable *ontology.Issue   // M8：本体挂载降级（ontology.unavailable 事件，§6.10-4）
+	Snapshot        map[string]any    // REQ-117/M17 装配快照（mode + agents[]：模型/工具/技能/MCP/最终指令），调试模式随 run.started 透出
 }
 
 // Runtime 兼容别名（历史调用方）。
@@ -119,6 +121,9 @@ func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent, sc asse
 		Warnings:        b.Meta.Warnings,
 		LoadedSkills:    b.Meta.LoadedSkills,
 		OntoUnavailable: b.Meta.OntoUnavailable,
+		Snapshot: snapshotOf("single", []map[string]any{
+			agentSnapshotEntry("single", ag.Name, b.Meta.ModelLabel, b.Meta.SourceOf, b.Meta.LoadedSkills, ag.MCPServers, b.Meta.Instruction),
+		}),
 	}, nil
 }
 
@@ -209,6 +214,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 	loaded := appendLoadedSkills(nil, tbc.LoadedSkills)
 
 	// 成员 → AgentTool（成员全量装配：各自模型/技能/MCP/工具；ADK 要求 Name/Description 非空）
+	entries := make([]map[string]any, 0, len(subs)+1)
 	for _, s := range subs {
 		if err := requireAgentToolFields(s); err != nil {
 			return nil, err
@@ -217,6 +223,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 		if berr != nil {
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
+		entries = append(entries, agentSnapshotEntry("member", s.Name, sb.Meta.ModelLabel, sb.Meta.SourceOf, sb.Meta.LoadedSkills, s.MCPServers, sb.Meta.Instruction))
 		tools = append(tools, adk.NewAgentTool(ctx, sb.Inst))
 		for k, v := range sb.Meta.SourceOf {
 			if _, dup := src[k]; !dup {
@@ -228,15 +235,18 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 		src[s.Name] = fmt.Sprintf("agent:%s", s.ID) // AgentTool 的 function name = 成员名
 	}
 
-	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstructionWithScope(coord, sc), coord.MaxIteration, cm, tools)
+	coordInstruction := a.composeInstructionWithScope(coord, sc)
+	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, coordInstruction, coord.MaxIteration, cm, tools)
 	if err != nil {
 		return nil, err
 	}
+	entries = append(entries, agentSnapshotEntry("coordinator", coord.Name, label, tbc.SourceOf, tbc.LoadedSkills, coord.MCPServers, coordInstruction))
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: inst, EnableStreaming: true, CheckPointStore: a.CheckPoints})
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
 		ModelLabel: label, ConnID: connID,
 		SourceOf: src, Warnings: allWarns, LoadedSkills: loaded,
+		Snapshot: snapshotOf("agent_as_tool", entries),
 	}, nil
 }
 
@@ -254,7 +264,9 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	allWarns := append(append([]string{}, tbc.Warnings...), warns...)
 	loaded := appendLoadedSkills(nil, tbc.LoadedSkills)
 
-	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, a.composeInstructionWithScope(coord, sc), coord.MaxIteration, cm, tbc.Tools)
+	entries := make([]map[string]any, 0, len(subs)+1)
+	coordInstruction := a.composeInstructionWithScope(coord, sc)
+	inst, err := newChatModelAgent(ctx, coord.Name, coord.Description, coordInstruction, coord.MaxIteration, cm, tbc.Tools)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +277,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
 		subAgents = append(subAgents, sb.Inst)
+		entries = append(entries, agentSnapshotEntry("member", s.Name, sb.Meta.ModelLabel, sb.Meta.SourceOf, sb.Meta.LoadedSkills, s.MCPServers, sb.Meta.Instruction))
 		for k, v := range sb.Meta.SourceOf {
 			if _, dup := src[k]; !dup {
 				src[k] = v
@@ -277,12 +290,14 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	if err != nil {
 		return nil, fmt.Errorf("set sub agents: %w", err)
 	}
+	entries = append(entries, agentSnapshotEntry("coordinator", coord.Name, label, tbc.SourceOf, tbc.LoadedSkills, coord.MCPServers, coordInstruction))
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: root, EnableStreaming: true, CheckPointStore: a.CheckPoints})
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
 		ModelLabel: label, ConnID: connID,
 		SourceOf: src, Warnings: allWarns, LoadedSkills: loaded,
 		OntoUnavailable: tbc.OntoIssue,
+		Snapshot:        snapshotOf("transfer", entries),
 	}, nil
 }
 
@@ -317,6 +332,7 @@ func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent, sc assembleSc
 		Meta: &agentMeta{
 			ModelLabel:      label,
 			ConnID:          connID,
+			Instruction:     instruction,
 			SourceOf:        tb.SourceOf,
 			Warnings:        tb.Warnings,
 			LoadedSkills:    tb.LoadedSkills,
@@ -528,6 +544,7 @@ type agentBuild struct {
 type agentMeta struct {
 	ModelLabel      string
 	ConnID          string
+	Instruction     string          // REQ-117：最终系统提示词（技能/guide/约束注入后），调试档随装配快照透出
 	SourceOf        map[string]string
 	Warnings        []string
 	LoadedSkills    []*store.Skill
@@ -535,7 +552,7 @@ type agentMeta struct {
 }
 
 // newChatModelAgent 构造 ADK ChatModelAgent（统一 ToolsConfig / EmitInternalEvents）。
-func newChatModelAgent(ctx context.Context, name, description, instruction string, maxIter int, cm *openai.ChatModel, tools []einotool.BaseTool) (adk.Agent, error) {
+func newChatModelAgent(ctx context.Context, name, description, instruction string, maxIter int, cm model.BaseChatModel, tools []einotool.BaseTool) (adk.Agent, error) {
 	inst, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          name,
 		Description:   description,
@@ -566,7 +583,7 @@ func requireAgentToolFields(ag *store.Agent) error {
 }
 
 // buildModel 解析模型连接（Agent 显式指定 > 全局默认 chat 连接）并构造 ChatModel。
-func (a *Assembler) buildModel(ctx context.Context, ag *store.Agent) (*openai.ChatModel, string, string, error) {
+func (a *Assembler) buildModel(ctx context.Context, ag *store.Agent) (model.BaseChatModel, string, string, error) {
 	var rec *store.ConnectionRecord
 	var err error
 	if ag.ModelConnID != nil && *ag.ModelConnID != "" {
@@ -612,11 +629,41 @@ func (a *Assembler) buildModel(ctx context.Context, ag *store.Agent) (*openai.Ch
 		mt := *ag.MaxTokens
 		cfg.MaxTokens = &mt
 	}
-	cm, err := openai.NewChatModel(ctx, cfg)
+	var cm model.BaseChatModel
+	cm, err = openai.NewChatModel(ctx, cfg)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("create chat model: %w", err)
 	}
+	// REQ-117/M17：按观测级别包装（level 0 原样返回），每次 Generate/Stream 采集 model.step
+	cm = wrapDebug(cm, ag.Name, debugFrom(ctx))
 	return cm, rec.Conn.Name + "@" + rec.Conn.ModelName, rec.Conn.ID, nil
+}
+
+// agentSnapshotEntry REQ-117 装配快照的单 Agent 条目。
+func agentSnapshotEntry(role, name, modelLabel string, src map[string]string, skills []*store.Skill, mcp []store.MCPServer, instruction string) map[string]any {
+	tools := make([]map[string]string, 0, len(src))
+	for toolName, source := range src {
+		tools = append(tools, map[string]string{"name": toolName, "source": source})
+	}
+	skillNames := make([]string, 0, len(skills))
+	for _, sk := range skills {
+		skillNames = append(skillNames, sk.Name)
+	}
+	mcpUrls := make([]string, 0, len(mcp))
+	for _, ms := range mcp {
+		if ms.URL != "" {
+			mcpUrls = append(mcpUrls, ms.Name+"@"+ms.URL)
+		}
+	}
+	return map[string]any{
+		"role": role, "name": name, "model": modelLabel,
+		"tools": tools, "skills": skillNames, "mcp": mcpUrls,
+		"instruction": instruction,
+	}
+}
+
+func snapshotOf(mode string, agents []map[string]any) map[string]any {
+	return map[string]any{"mode": mode, "agents": agents}
 }
 
 func copySourceOf(m map[string]string) map[string]string {

@@ -70,7 +70,8 @@ func newEvent(typ, runID string, data any) *Event {
 
 // RunInput 用户输入。
 type RunInput struct {
-	Input string `json:"input"`
+	Input      string `json:"input"`
+	DebugLevel int    `json:"debug_level"` // REQ-117：观测级别 0 简洁 / 1 详细 / 2 调试
 }
 
 // RunResult 运行结果摘要。
@@ -81,7 +82,7 @@ type RunResult struct {
 }
 
 // Run 执行一次对话运行：持久化用户消息 → 装配（M4：单 Agent / 项目多 Agent）→ 流式执行 → 翻译事件 → 持久化。
-func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, emit EmitFn) (*RunResult, error) {
+func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, debug int, emit EmitFn) (*RunResult, error) {
 	if emit == nil {
 		emit = func(*Event) {}
 	}
@@ -101,6 +102,11 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	// M13/D-O13 §6.16：推理后端分发——外部 CLI 后端（非 eino-adk）走适配器路径（能力降级见 §6.16.4）
 	if conv.Scope == "agent" && agent != nil && s.Inference != nil && s.Inference.IsExternal(agent.InferenceBackend) {
 		return s.runExternal(ctx, conv, agent, runID, input, emit)
+	}
+
+	// REQ-117/M17 调试模式：注入模型调用链路采集器（装饰器在模型调用期读取）
+	if debug > 0 {
+		ctx = withDebug(ctx, &debugRecorder{level: DebugLevel(debug), runID: runID, emit: emit})
 	}
 
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
@@ -145,6 +151,13 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	}
 	if len(rt.Warnings) > 0 {
 		startData["warnings"] = rt.Warnings
+	}
+	// REQ-117：装配快照（详细档=结构；调试档含最终指令全文）
+	if debug >= 1 && rt.Snapshot != nil {
+		startData["assembly"] = rt.Snapshot
+		if debug < 2 {
+			startData["assembly"] = snapshotWithoutInstructions(rt.Snapshot)
+		}
 	}
 	s.emitAndRecord(runCtx, conv, runID, newEvent("run.started", runID, startData), emit)
 
@@ -325,6 +338,7 @@ type runConsumer struct {
 	lastUsage   *schema.TokenUsage
 	lastFinish  string
 	toolAgg     map[int]*pendingToolCall
+	toolCallAt  map[string]time.Time // REQ-117：tool.call 发出时刻 → tool.result 计算执行耗时
 	lastAgent   string
 }
 
@@ -334,6 +348,7 @@ func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, r
 		s: s, ctx: ctx, conv: conv, runID: runID, rt: rt, emit: emit, start: start,
 		rootAgent: rt.AgentName,
 		toolAgg:   map[int]*pendingToolCall{},
+		toolCallAt: map[string]time.Time{},
 	}
 	rc.subagentLeave = func(name string) {
 		if name != "" && name != rc.rootAgent {
@@ -438,7 +453,7 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 				}
 			}
 			// 流结束：输出聚合完成的 tool.call（含入参 JSON 与 source）
-			flushToolCalls(s, runCtx, conv, runID, rt, rc.toolAgg, emit)
+			flushToolCalls(s, rc, conv, runID, rt, emit)
 			for k := range rc.toolAgg {
 				delete(rc.toolAgg, k)
 			}
@@ -447,6 +462,11 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 			data := map[string]any{"tool_name": mo.Message.ToolName, "content": mo.Message.Content}
 			if mo.Message.ToolCallID != "" {
 				data["tool_call_id"] = mo.Message.ToolCallID
+				// REQ-117：工具执行耗时（tool.call 发出 → tool.result 到达）
+				if t0, ok := rc.toolCallAt[mo.Message.ToolCallID]; ok {
+					data["duration_ms"] = time.Since(t0).Milliseconds()
+					delete(rc.toolCallAt, mo.Message.ToolCallID)
+				}
 			}
 			if src := rt.SourceOf[mo.Message.ToolName]; src != "" {
 				data["source"] = src
@@ -469,7 +489,7 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 				rc.recordDelta(mo.Message.Content)
 			}
 			for _, tc := range mo.Message.ToolCalls {
-				emitToolCall(s, runCtx, conv, runID, rt, tc, emit)
+				emitToolCall(s, rc, conv, runID, rt, tc, emit)
 			}
 			if mo.Message.ResponseMeta != nil {
 				if mo.Message.ResponseMeta.Usage != nil {
@@ -485,13 +505,16 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 
 // Resume 恢复挂起的中断（M11 收尾）：以用户答复按 InterruptCtx.ID 定向恢复 ask_human 中断点，
 // 复用 Run 的事件翻译管线；恢复过程若再次中断（如连环提问），照常落新的挂起状态。
-func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, answer string, emit EmitFn) (*RunResult, error) {
+func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, answer string, debug int, emit EmitFn) (*RunResult, error) {
 	if emit == nil {
 		emit = func(*Event) {}
 	}
 	var st interruptState
 	if conv.InterruptState == "" || json.Unmarshal([]byte(conv.InterruptState), &st) != nil || st.CheckpointID == "" || st.TargetID == "" {
 		return nil, errors.New("该会话没有挂起的中断提问")
+	}
+	if debug > 0 {
+		ctx = withDebug(ctx, &debugRecorder{level: DebugLevel(debug), runID: runID, emit: emit})
 	}
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
 	if err != nil {
@@ -510,10 +533,17 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 	}()
 
 	start := time.Now()
-	s.emitAndRecord(runCtx, conv, runID, newEvent("run.started", runID, map[string]any{
+	startData := map[string]any{
 		"conversation_id": conv.ID, "agent_name": rt.AgentName, "model": rt.ModelLabel,
 		"backend": "inprocess", "resumed": true,
-	}), emit)
+	}
+	if debug >= 1 && rt.Snapshot != nil {
+		startData["assembly"] = rt.Snapshot
+		if debug < 2 {
+			startData["assembly"] = snapshotWithoutInstructions(rt.Snapshot)
+		}
+	}
+	s.emitAndRecord(runCtx, conv, runID, newEvent("run.started", runID, startData), emit)
 	// 先清挂起状态：恢复过程中若再次中断，handleInterrupted 会写入新状态
 	_ = s.Store.SetConversationInterruptState(conv.ID, "")
 
@@ -597,19 +627,22 @@ func mergeToolCallChunk(agg map[int]*pendingToolCall, tcs []schema.ToolCall) {
 }
 
 // flushToolCalls 输出聚合完成的 tool.call 事件（含入参 JSON 与 source）。
-func flushToolCalls(s *Service, ctx context.Context, conv *store.Conversation, runID string, rt *BuildResult, agg map[int]*pendingToolCall, emit EmitFn) {
-	for _, p := range agg {
+func flushToolCalls(s *Service, rc *runConsumer, conv *store.Conversation, runID string, rt *BuildResult, emit EmitFn) {
+	for _, p := range rc.toolAgg {
 		if p.Name == "" {
 			continue
 		}
-		emitToolCall(s, ctx, conv, runID, rt, schema.ToolCall{
+		emitToolCall(s, rc, conv, runID, rt, schema.ToolCall{
 			ID: p.ID, Function: schema.FunctionCall{Name: p.Name, Arguments: p.Args.String()},
 		}, emit)
 	}
 }
 
 // emitToolCall 输出模型发起的工具调用事件（含入参 JSON 字符串与 source 标注）。
-func emitToolCall(s *Service, ctx context.Context, conv *store.Conversation, runID string, rt *BuildResult, tc schema.ToolCall, emit EmitFn) {
+func emitToolCall(s *Service, rc *runConsumer, conv *store.Conversation, runID string, rt *BuildResult, tc schema.ToolCall, emit EmitFn) {
+	if rc != nil && tc.ID != "" && rc.toolCallAt != nil {
+		rc.toolCallAt[tc.ID] = time.Now()
+	}
 	data := map[string]any{"tool_name": tc.Function.Name, "arguments": tc.Function.Arguments}
 	if tc.ID != "" {
 		data["tool_call_id"] = tc.ID
@@ -624,7 +657,31 @@ func emitToolCall(s *Service, ctx context.Context, conv *store.Conversation, run
 			}
 		}
 	}
+	ctx := context.Background()
+	if rc != nil {
+		ctx = rc.ctx
+	}
 	s.emitAndRecord(ctx, conv, runID, newEvent("tool.call", runID, data), emit)
+}
+
+// snapshotWithoutInstructions 装配快照脱敏副本：详细档（<2）不含最终指令全文。
+func snapshotWithoutInstructions(snap map[string]any) map[string]any {
+	out := map[string]any{"mode": snap["mode"]}
+	if agents, ok := snap["agents"].([]map[string]any); ok {
+		outAgents := make([]map[string]any, 0, len(agents))
+		for _, a := range agents {
+			cp := map[string]any{}
+			for k, v := range a {
+				if k == "instruction" {
+					continue
+				}
+				cp[k] = v
+			}
+			outAgents = append(outAgents, cp)
+		}
+		out["agents"] = outAgents
+	}
+	return out
 }
 
 // Stop 停止对话正在进行的运行。

@@ -32,6 +32,7 @@ interface ChatItem {
   reasoning?: string // 深度思考累积内容
   evKey?: string // 稳定卡片键（深度思考展开状态按它记录，历史/实时各自生成）
   streamKey?: string // 运行中的 reasoning 卡合并键；运行结束置空收起
+  subDepth?: number // REQ-117：子智能体嵌套深度（缩进渲染）
 }
 
 // 子 Agent 名（§6.5 subagent.enter/exit payload = 子 Agent 名；字段名做兼容取值）
@@ -55,6 +56,16 @@ function describeEvent(type: string, d: any): { text: string; err?: boolean; war
       return { text: `⚠ 运行警告 · ${d?.message ?? ''}`.replace(/ ·\s*$/, ''), warn: true }
     case 'run.error':
       return { text: `⚠ ${d?.message ?? '运行失败'}`, err: true }
+    case 'model.step': {
+      // REQ-117/M17：模型调用链路（调试观测）
+      const parts = [`🧠 模型调用 #${d?.seq ?? '?'}`]
+      if (d?.agent) parts.push(String(d.agent))
+      if (typeof d?.duration_ms === 'number') parts.push(d.duration_ms >= 1000 ? `${(d.duration_ms / 1000).toFixed(1)}s` : `${d.duration_ms}ms`)
+      const u = d?.usage
+      if (u && typeof u.total_tokens === 'number') parts.push(`tokens ${u.prompt_tokens ?? 0}+${u.completion_tokens ?? 0}=${u.total_tokens}`)
+      if (d?.input_count) parts.push(`输入 ${d.input_count} 条/${d.input_chars ?? 0} 字`)
+      return { text: parts.join(' · ') }
+    }
     case 'tool.call':
       return { text: `⚙ 调用工具 ${d?.tool_name ?? ''}` }
     case 'tool.result':
@@ -241,6 +252,15 @@ export default function ChatWindow({
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
   const [showRaw, setShowRaw] = useState(false) // 原始事件 JSON 调试开关
+  // REQ-117/M17 三档观测级别：0 简洁 / 1 详细 / 2 调试（每会话记忆；仅影响之后的运行）
+  const [debugLevel, setDebugLevel] = useState(() => Number(localStorage.getItem(`eino.debug.${conversation?.id}`)) || 0)
+  useEffect(() => {
+    setDebugLevel(Number(localStorage.getItem(`eino.debug.${conversation?.id}`)) || 0)
+  }, [conversation?.id])
+  const changeDebugLevel = (lv: number) => {
+    setDebugLevel(lv)
+    if (conversation?.id) localStorage.setItem(`eino.debug.${conversation.id}`, String(lv))
+  }
   // 深度思考卡的展开状态（按稳定 evKey 记录，独立于 items，历史重载不丢失）：
   // 无记录时默认「流式中展开、结束后收起」，用户手动开合后以用户选择为准
   const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({})
@@ -396,6 +416,24 @@ export default function ChatWindow({
 
   // 事件卡渲染（ThoughtChain 深度思考 / 工具详情 / 终态摘要）：
   // 紧凑、左侧色条区分来源、与助手文本列对齐（margin-left 44 = 头像 32 + 间距 12）
+  // REQ-117：按 enter/exit 序列计算子智能体嵌套深度（回放与实时共用，渲染时缩进）
+  const withSubDepth = (list: ChatItem[]): ChatItem[] => {
+    let depth = 0
+    return list.map((it) => {
+      if (it.kind !== 'event') return it
+      if (it.evType === 'subagent.enter') {
+        const d = depth
+        depth += 1
+        return { ...it, subDepth: d }
+      }
+      if (it.evType === 'subagent.exit') {
+        depth = Math.max(0, depth - 1)
+        return { ...it, subDepth: depth }
+      }
+      return { ...it, subDepth: depth }
+    })
+  }
+
   const renderEventCard = (it: ChatItem, i: number) => {
     if (it.evType === 'reasoning') {
       const len = it.reasoning?.length ?? 0
@@ -419,6 +457,46 @@ export default function ChatWindow({
             },
           ]}
         />
+      )
+    }
+    if (it.evType === 'model.step') {
+      const msgs: any[] = Array.isArray(it.evData?.input) ? it.evData.input : []
+      const tools: any[] = Array.isArray(it.evData?.tools) ? it.evData.tools : []
+      const roleLabel: Record<string, string> = { user: '用户', assistant: '助手', system: '系统', tool: '工具' }
+      return (
+        <div key={i} className="event-card src-builtin" style={{ marginLeft: (it.subDepth ?? 0) * 14 }}>
+          <span>{it.eventText}</span>
+          {(msgs.length > 0 || tools.length > 0) && (
+            <Collapse
+              ghost
+              size="small"
+              items={[{
+                key: 'detail',
+                label: <span className="event-link">调用链路详情</span>,
+                children: (
+                  <div>
+                    {msgs.length > 0 && (
+                      <>
+                        <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary, #888)', marginBottom: 4 }}>
+                          本次模型输入（{msgs.length} 条，含历史与系统提示词）
+                        </div>
+                        <pre className="raw-json">{msgs.map((m, mi) => `[${mi + 1}] ${roleLabel[m.role] ?? m.role}（${m.chars} 字）${m.content ? `\n${m.content}` : m.preview ? `\n${m.preview}` : ''}`).join('\n\n')}</pre>
+                      </>
+                    )}
+                    {tools.length > 0 && (
+                      <>
+                        <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary, #888)', margin: '6px 0 4px' }}>
+                          本次绑定工具（{tools.length}）
+                        </div>
+                        <pre className="raw-json">{tools.map((tt) => `• ${tt.name}${tt.desc ? `：${tt.desc}` : ''}`).join('\n')}</pre>
+                      </>
+                    )}
+                  </div>
+                ),
+              }]}
+            />
+          )}
+        </div>
       )
     }
     const isTool = it.evType === 'tool.call' || it.evType === 'tool.result'
@@ -458,9 +536,27 @@ export default function ChatWindow({
       )
     }
 
+    const assembly = it.evType === 'run.started' ? it.evData?.assembly : undefined
     return (
-      <div key={i} className={`event-card src-${eventSource(it.evType, it.evData)}${it.eventErr ? ' err' : ''}${it.eventWarn ? ' warn' : ''}`}>
+      <div key={i} className={`event-card src-${eventSource(it.evType, it.evData)}${it.eventErr ? ' err' : ''}${it.eventWarn ? ' warn' : ''}`} style={{ marginLeft: (it.subDepth ?? 0) * 14 }}>
         <span>{it.eventText}</span>
+        {assembly && (
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'assembly',
+              label: <span className="event-link">装配快照（{assembly.mode} · {(assembly.agents ?? []).length} 个智能体）</span>,
+              children: (
+                <pre className="raw-json">{(assembly.agents ?? []).map((a: any, ai: number) => {
+                  const lines = [`[${ai + 1}] ${a.name}（${a.role}）· ${a.model}`, `   工具: ${(a.tools ?? []).map((x: any) => x.name).join(', ') || '无'}`, `   技能: ${(a.skills ?? []).join(', ') || '无'}`, `   MCP: ${(a.mcp ?? []).join(', ') || '无'}`]
+                  if (a.instruction) lines.push(`   指令: ${a.instruction}`)
+                  return lines.join('\n')
+                }).join('\n')}</pre>
+              ),
+            }]}
+          />
+        )}
         {it.evType === 'ontology.unavailable' && (it.evData?.reason != null || it.evData?.detail != null) && (
           <div className="event-detail">{String(it.evData.reason ?? it.evData.detail)}</div>
         )}
@@ -485,7 +581,7 @@ export default function ChatWindow({
   // Bubble.List 数据（消息走 user/ai 角色，事件卡为无边框自定义内容）
   const listItems = useMemo(
     () =>
-      items.map((it, i) => {
+      withSubDepth(items).map((it, i) => {
         if (it.kind === 'msg') {
           return {
             key: `m${i}`,
@@ -613,7 +709,7 @@ export default function ChatWindow({
           event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded' ||
           event === 'subagent.enter' || event === 'subagent.exit' ||
           event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable' ||
-          event === 'run.warning'
+          event === 'run.warning' || event === 'model.step'
         ) {
           const desc = describeEvent(event, payload)
           setItems((prev) => {
@@ -656,7 +752,7 @@ export default function ChatWindow({
     setInput('')
     runKeyRef.current = `run-${Date.now()}`
     setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
-    await streamStart((handler) => runConversation(conversation.id, text, handler))
+    await streamStart((handler) => runConversation(conversation.id, text, debugLevel, handler))
   }
 
   // resume 答复挂起中断（ask_human 自由答复 / 审批 批准|拒绝），事件流与运行同构
@@ -677,7 +773,7 @@ export default function ChatWindow({
           : text,
       },
     ])
-    await streamStart((handler) => resumeConversation(conversation.id, text, handler))
+    await streamStart((handler) => resumeConversation(conversation.id, text, debugLevel, handler))
   }
 
   const stop = () => {
@@ -741,9 +837,27 @@ export default function ChatWindow({
           >
             <Button size="small">导出</Button>
           </Dropdown>
-          <BugOutlined style={{ color: showRaw ? 'var(--ant-color-primary, #4f46e5)' : undefined }} />
-          <span style={{ fontSize: 12 }}>调试</span>
-          <Switch size="small" checked={showRaw} onChange={setShowRaw} />
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              selectable: true,
+              selectedKeys: [String(debugLevel)],
+              items: [
+                { key: '0', label: '简洁（默认）' },
+                { key: '1', label: '详细 · 装配快照/分步用量/工具耗时' },
+                { key: '2', label: '调试 · 另附模型输入全文/工具 schema' },
+              ],
+              onClick: ({ key }) => changeDebugLevel(Number(key)),
+            }}
+            disabled={running || !conversation.id}
+          >
+            <Button size="small" icon={<BugOutlined />} style={{ color: debugLevel > 0 ? 'var(--ant-color-primary, #4f46e5)' : undefined }}>
+              调试{debugLevel > 0 ? ' L' + debugLevel : ''}
+            </Button>
+          </Dropdown>
+          <Tooltip title="显示事件原始 JSON">
+            <Switch size="small" checked={showRaw} onChange={setShowRaw} />
+          </Tooltip>
           <Button
             size="small"
             onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
