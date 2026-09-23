@@ -17,6 +17,7 @@ type Agent struct {
 	MCPServers     []MCPServer `json:"mcp_servers"` // P2 生效
 	RuntimeBackend   string      `json:"runtime_backend"`
 	InferenceBackend string      `json:"inference_backend"` // M13 §6.16：空 = eino-adk 自研默认
+	ToolApproval    string      `json:"tool_approval"`  // REQ-14 恢复②：工具调用人工审批（""=off | "all"）
 	CreatedAt      string      `json:"created_at"`
 	UpdatedAt      string      `json:"updated_at"`
 }

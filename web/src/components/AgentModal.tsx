@@ -216,6 +216,21 @@ export default function AgentModal({
               <Select options={inferenceBackendOptions(backends)} showSearch optionFilterProp="label" />
             </Form.Item>
           </Col>
+          <Col span={12}>
+            <Form.Item
+              name="tool_approval"
+              label="工具调用人工审批"
+              initialValue=""
+              extra="开启后每次工具调用前挂起等待批准/拒绝（REQ-14 恢复语义）"
+            >
+              <Select
+                options={[
+                  { value: '', label: '关闭（直接执行）' },
+                  { value: 'all', label: '全部工具调用前审批' },
+                ]}
+              />
+            </Form.Item>
+          </Col>
         </Row>
       </Form>
     </Modal>

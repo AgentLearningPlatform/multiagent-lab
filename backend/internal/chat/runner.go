@@ -227,16 +227,20 @@ func checkPointIDOf(runID string) string { return "ckpt_" + runID }
 
 // interruptState 会话中断挂起信息（conversation.interrupt_state JSON）。
 // TargetID 为中断点地址串（InterruptCtx.ID），恢复时作为 ResumeParams.Targets 的键定向投递答复。
+// Kind：ask_human（自由答复）/ approval（工具审批，恢复数据 approve|deny）。
 type interruptState struct {
+	Kind         string   `json:"kind"`
 	CheckpointID string   `json:"checkpoint_id"`
 	TargetID     string   `json:"target_id"`
 	Question     string   `json:"question"`
 	Choices      []string `json:"choices,omitempty"`
+	ToolName     string   `json:"tool_name,omitempty"`
+	Arguments    string   `json:"arguments,omitempty"`
 	RunID        string   `json:"run_id"`
 }
 
-// handleInterrupted 捕获运行中断（ask_human 等）：提取根因中断点的问题信息，
-// 挂起状态落 conversation.interrupt_state，发 run.interrupted 事件（前端渲染答复卡）。
+// handleInterrupted 捕获运行中断（ask_human / 工具审批）：提取根因中断点信息，
+// 挂起状态落 conversation.interrupt_state，发 run.interrupted 事件（前端渲染答复/审批卡）。
 func (s *Service) handleInterrupted(ctx context.Context, conv *store.Conversation, runID string, ii *adk.InterruptInfo, emit EmitFn) {
 	st := interruptState{CheckpointID: checkPointIDOf(runID), RunID: runID}
 	if ii != nil {
@@ -256,22 +260,34 @@ func (s *Service) handleInterrupted(ctx context.Context, conv *store.Conversatio
 			st.TargetID = chosen.ID
 			if b, err := json.Marshal(chosen.Info); err == nil {
 				var hi struct {
-					Question string   `json:"question"`
-					Choices  []string `json:"choices"`
+					Question  string   `json:"question"`
+					Choices   []string `json:"choices"`
+					ToolName  string   `json:"tool_name"`
+					Arguments string   `json:"arguments"`
 				}
-				if json.Unmarshal(b, &hi) == nil && hi.Question != "" {
-					st.Question, st.Choices = hi.Question, hi.Choices
+				if json.Unmarshal(b, &hi) == nil {
+					switch {
+					case hi.Question != "":
+						st.Kind, st.Question, st.Choices = "ask_human", hi.Question, hi.Choices
+					case hi.ToolName != "":
+						st.Kind, st.ToolName, st.Arguments = "approval", hi.ToolName, hi.Arguments
+					}
 				}
 			}
 		}
 	}
+	if st.Kind == "" {
+		st.Kind = "ask_human" // 未知中断信息形态的兜底（答复卡至少可展示并定向续跑）
+	}
 	if b, err := json.Marshal(st); err == nil {
 		_ = s.Store.SetConversationInterruptState(conv.ID, string(b))
 	}
-	s.emitAndRecord(ctx, conv, runID, newEvent("run.interrupted", runID, map[string]any{
-		"checkpoint_id": st.CheckpointID, "target_id": st.TargetID,
+	data := map[string]any{
+		"kind": st.Kind, "checkpoint_id": st.CheckpointID, "target_id": st.TargetID,
 		"question": st.Question, "choices": st.Choices,
-	}), emit)
+		"tool_name": st.ToolName, "arguments": st.Arguments,
+	}
+	s.emitAndRecord(ctx, conv, runID, newEvent("run.interrupted", runID, data), emit)
 }
 
 // abandonInterrupt 新消息运行时放弃挂起中断（清 checkpoint + 挂起状态，发警告事件）。

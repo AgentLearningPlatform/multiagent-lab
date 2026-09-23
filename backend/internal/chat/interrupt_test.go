@@ -9,13 +9,117 @@ import (
 	"testing"
 
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/compose"
-	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/model"
+	einotool "github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 )
+
+// stubApprovalModel 桩模型：首轮调用 current_time；收到工具结果后原样转述（含拒绝载荷）。
+type stubApprovalModel struct{}
+
+func (stubApprovalModel) Generate(_ context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	for i := len(input) - 1; i >= 0; i-- {
+		if input[i].Role == schema.Tool {
+			return schema.AssistantMessage("工具结果："+input[i].Content, nil), nil
+		}
+	}
+	return schema.AssistantMessage("", []schema.ToolCall{
+		{ID: "call_t", Function: schema.FunctionCall{Name: "current_time", Arguments: `{}`}},
+	}), nil
+}
+
+func (stubApprovalModel) Stream(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, fmt.Errorf("stub model: stream not implemented")
+}
+
+// TestToolApprovalInterrupt 批准路径：审批挂起 → approve 定向恢复 → 工具真实执行。
+func TestToolApprovalInterrupt(t *testing.T) {
+	ctx := context.Background()
+	reg := tool.NewRegistry()
+	if err := tool.RegisterBuiltin(reg); err != nil {
+		t.Fatal(err)
+	}
+	composed, err := reg.Compose(ctx, []string{"current_time"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, ok := tool.NewApprovalTool(composed.Tools[0], "current_time")
+	if !ok {
+		t.Fatal("wrap approval failed")
+	}
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name: "approver", Model: stubApprovalModel{},
+		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []einotool.BaseTool{wrapped}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent, EnableStreaming: false, CheckPointStore: NewMemCheckPointStore()})
+
+	iter := runner.Run(ctx, []*schema.Message{schema.UserMessage("现在几点")}, adk.WithCheckPointID("ckpt_ap"))
+	root, _ := consumeEvents(t, iter)
+	if root == nil {
+		t.Fatal("expected approval interrupt")
+	}
+	info, ok := root.Info.(*tool.ApprovalInfo)
+	if !ok {
+		t.Fatalf("interrupt info type = %T, want *tool.ApprovalInfo", root.Info)
+	}
+	if info.ToolName != "current_time" {
+		t.Fatalf("approval tool = %q", info.ToolName)
+	}
+
+	iter2, err := runner.ResumeWithParams(ctx, "ckpt_ap", &adk.ResumeParams{Targets: map[string]any{root.ID: tool.ApprovalApprove}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root2, text2 := consumeEvents(t, iter2)
+	if root2 != nil {
+		t.Fatal("unexpected second interrupt")
+	}
+	if !strings.Contains(text2, "now") {
+		t.Fatalf("final text = %q, want tool executed (now=...)", text2)
+	}
+}
+
+// TestToolApprovalDeny 拒绝路径：deny 恢复 → 工具不执行、返回拒答载荷。
+func TestToolApprovalDeny(t *testing.T) {
+	ctx := context.Background()
+	reg := tool.NewRegistry()
+	if err := tool.RegisterBuiltin(reg); err != nil {
+		t.Fatal(err)
+	}
+	composed, err := reg.Compose(ctx, []string{"current_time"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, _ := tool.NewApprovalTool(composed.Tools[0], "current_time")
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name: "denier", Model: stubApprovalModel{},
+		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []einotool.BaseTool{wrapped}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent, EnableStreaming: false, CheckPointStore: NewMemCheckPointStore()})
+
+	iter := runner.Run(ctx, []*schema.Message{schema.UserMessage("现在几点")}, adk.WithCheckPointID("ckpt_dn"))
+	root, _ := consumeEvents(t, iter)
+	if root == nil {
+		t.Fatal("expected approval interrupt")
+	}
+	iter2, err := runner.ResumeWithParams(ctx, "ckpt_dn", &adk.ResumeParams{Targets: map[string]any{root.ID: tool.ApprovalDeny}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, text2 := consumeEvents(t, iter2)
+	if !strings.Contains(text2, "approved") || !strings.Contains(text2, "false") {
+		t.Fatalf("final text = %q, want deny payload", text2)
+	}
+}
 
 // stubAskModel 桩模型：首轮发起 ask_human 工具调用；收到 tool 结果（用户答复）后输出最终回答。
 type stubAskModel struct{}

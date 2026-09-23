@@ -453,6 +453,21 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 			tb.SourceOf["read_file"] = "builtin"
 		}
 	}
+
+	// 6) 工具调用人工审批（REQ-14 恢复② / LG-8：Agent 开启 tool_approval=all 时，
+	// 本 Agent 的全部工具调用前挂起等待批准/拒绝，恢复数据 approve/deny 定向续跑。
+	// 注意：本列表天然不含成员智能体 AgentTool——它们在外层装配函数追加、协作编排非外部副作用）
+	if ag.ToolApproval == "all" {
+		for i, bt := range tb.Tools {
+			ti, ierr := bt.Info(ctx)
+			if ierr != nil || ti == nil || ti.Name == "" {
+				continue
+			}
+			if wrapped, ok := tool.NewApprovalTool(bt, ti.Name); ok {
+				tb.Tools[i] = wrapped
+			}
+		}
+	}
 	return tb, nil
 }
 

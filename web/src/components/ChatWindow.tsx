@@ -46,9 +46,11 @@ function describeEvent(type: string, d: any): { text: string; err?: boolean; war
       return { text: `▶ 运行开始 · ${d?.agent_name ?? ''} · ${d?.model ?? ''}`.replace(/ ·\s*$/, '') }
     case 'run.finished':
       return d?.reason === 'stopped' ? { text: '⏹ 已停止' } : d?.reason === 'interrupted' ? { text: '⏸ 已挂起 · 等待答复' } : { text: finishSummary(d) }
-    // M11 收尾：中断恢复（ask_human 等待用户答复）
+    // M11 收尾 + REQ-14 审批：中断恢复（ask_human 答复 / 工具审批）
     case 'run.interrupted':
-      return { text: `⏸ 等待答复 · ${d?.question ?? ''}` }
+      return d?.kind === 'approval' || (!d?.question && d?.tool_name)
+        ? { text: `⏸ 工具审批 · ${d?.tool_name ?? ''}` }
+        : { text: `⏸ 等待答复 · ${d?.question ?? ''}` }
     case 'run.warning':
       return { text: `⚠ 运行警告 · ${d?.message ?? ''}`.replace(/ ·\s*$/, ''), warn: true }
     case 'run.error':
@@ -502,13 +504,29 @@ export default function ChatWindow({
     [items, showRaw, reasoningOpen],
   )
 
-  // 中断恢复（M11 收尾）：会话挂起的 ask_human 提问（随会话数据同步）
-  const [interrupt, setInterrupt] = useState<{ question: string; choices: string[] } | null>(null)
+  // 中断恢复（M11 收尾 + REQ-14 审批）：会话挂起的 ask_human 提问 / 工具审批（随会话数据同步）
+  const [interrupt, setInterrupt] = useState<{
+    kind: 'ask_human' | 'approval'
+    question: string
+    choices: string[]
+    toolName: string
+    arguments: string
+  } | null>(null)
   const [answer, setAnswer] = useState('')
   useEffect(() => {
     try {
       const st = conversation.interrupt_state ? JSON.parse(conversation.interrupt_state) : null
-      setInterrupt(st && st.question ? { question: st.question, choices: Array.isArray(st.choices) ? st.choices : [] } : null)
+      setInterrupt(
+        st && (st.question || st.tool_name)
+          ? {
+              kind: st.kind === 'approval' || (!st.question && st.tool_name) ? 'approval' : 'ask_human',
+              question: st.question ?? '',
+              choices: Array.isArray(st.choices) ? st.choices : [],
+              toolName: st.tool_name ?? '',
+              arguments: st.arguments ?? '',
+            }
+          : null,
+      )
     } catch {
       setInterrupt(null)
     }
@@ -542,8 +560,11 @@ export default function ChatWindow({
       case 'run.interrupted': {
         const desc = describeEvent(event, payload)
         setInterrupt({
+          kind: payload.kind === 'approval' || (!payload.question && payload.tool_name) ? 'approval' : 'ask_human',
           question: payload.question ?? '',
           choices: Array.isArray(payload.choices) ? payload.choices : [],
+          toolName: payload.tool_name ?? '',
+          arguments: payload.arguments ?? '',
         })
         setItems((prev) => {
           const next = [...prev]
@@ -638,14 +659,24 @@ export default function ChatWindow({
     await streamStart((handler) => runConversation(conversation.id, text, handler))
   }
 
-  // resume 答复挂起的 ask_human 提问（M11 收尾）：答复作为用户气泡展示，事件流与运行同构
-  const resume = async () => {
-    const text = answer.trim()
+  // resume 答复挂起中断（ask_human 自由答复 / 审批 批准|拒绝），事件流与运行同构
+  const resume = async (decision?: string) => {
+    const isApproval = interrupt?.kind === 'approval'
+    const text = isApproval ? (decision ?? '') : answer.trim()
     if (!text || running || !interrupt) return
     setAnswer('')
     setInterrupt(null)
     runKeyRef.current = `resume-${Date.now()}`
-    setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
+    setItems((prev) => [
+      ...prev,
+      {
+        kind: 'msg' as const,
+        role: 'user' as const,
+        content: isApproval
+          ? `[审批] ${decision === 'approve' ? '批准' : '拒绝'} · ${interrupt.toolName}`
+          : text,
+      },
+    ])
     await streamStart((handler) => resumeConversation(conversation.id, text, handler))
   }
 
@@ -741,38 +772,58 @@ export default function ChatWindow({
         )}
       </div>
 
-      {/* 中断恢复（M11 收尾）：ask_human 挂起时展示问题答复卡（choices 快选 + 自由输入） */}
+      {/* 中断恢复（M11 收尾 + REQ-14 审批）：ask_human 答复卡 / 工具审批卡 */}
       {interrupt && !running && (
         <div className="composer chat-interrupt">
-          <Alert
-            type="warning"
-            showIcon
-            message={`智能体需要你的输入：${interrupt.question}`}
-            description={
-              <div className="chat-interrupt-body">
-                {interrupt.choices.length > 0 && (
-                  <Space size={6} wrap>
-                    {interrupt.choices.map((c) => (
-                      <Button key={c} size="small" onClick={() => setAnswer(c)}>{c}</Button>
-                    ))}
+          {interrupt.kind === 'approval' ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={`工具调用等待审批：${interrupt.toolName}`}
+              description={
+                <div className="chat-interrupt-body">
+                  <pre className="chat-interrupt-args">{interrupt.arguments || '（无参数）'}</pre>
+                  <Space size={8}>
+                    <Button type="primary" onClick={() => resume('approve')}>批准并执行</Button>
+                    <Button danger onClick={() => resume('deny')}>拒绝</Button>
                   </Space>
-                )}
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input
-                    value={answer}
-                    onChange={(e) => setAnswer(e.target.value)}
-                    placeholder="输入你的答复…"
-                    onPressEnter={() => resume()}
-                    autoFocus
-                  />
-                  <Button type="primary" onClick={() => resume()} disabled={!answer.trim()}>答复并继续</Button>
-                </Space.Compact>
-                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                  也可直接发送新消息（将放弃本次提问，按新问题运行）。
-                </Typography.Text>
-              </div>
-            }
-          />
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    批准后工具将真实执行；拒绝会把拒答结果返回给智能体。也可直接发送新消息（放弃本次审批）。
+                  </Typography.Text>
+                </div>
+              }
+            />
+          ) : (
+            <Alert
+              type="warning"
+              showIcon
+              message={`智能体需要你的输入：${interrupt.question}`}
+              description={
+                <div className="chat-interrupt-body">
+                  {interrupt.choices.length > 0 && (
+                    <Space size={6} wrap>
+                      {interrupt.choices.map((c) => (
+                        <Button key={c} size="small" onClick={() => setAnswer(c)}>{c}</Button>
+                      ))}
+                    </Space>
+                  )}
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input
+                      value={answer}
+                      onChange={(e) => setAnswer(e.target.value)}
+                      placeholder="输入你的答复…"
+                      onPressEnter={() => resume()}
+                      autoFocus
+                    />
+                    <Button type="primary" onClick={() => resume()} disabled={!answer.trim()}>答复并继续</Button>
+                  </Space.Compact>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    也可直接发送新消息（将放弃本次提问，按新问题运行）。
+                  </Typography.Text>
+                </div>
+              }
+            />
+          )}
         </div>
       )}
 

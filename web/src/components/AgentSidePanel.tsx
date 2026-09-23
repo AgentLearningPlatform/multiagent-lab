@@ -328,6 +328,19 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
             placeholder="eino-adk（自研默认）"
           />
         </Form.Item>
+        <Form.Item
+          name="tool_approval"
+          label="工具调用人工审批"
+          initialValue=""
+          extra="开启后，本智能体每次调用工具前都会挂起等待你批准或拒绝（REQ-14 恢复语义 / 危险操作审批）；关闭则工具直接执行"
+        >
+          <Select
+            options={[
+              { value: '', label: '关闭（直接执行）' },
+              { value: 'all', label: '全部工具调用前审批' },
+            ]}
+          />
+        </Form.Item>
       </Form>
 
       <div className="proj-view-actions">

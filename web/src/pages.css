@@ -632,3 +632,11 @@
 .ref-sourcemap { margin-top: 24px; max-width: 860px; }
 .ref-sourcemap-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; flex-wrap: wrap; }
 .ref-sourcemap-label { flex: none; width: 64px; color: var(--ant-color-text-secondary, #888); font-size: 12px; }
+
+/* REQ-14 审批卡：工具参数预览 */
+.chat-interrupt-args {
+  margin: 0; max-height: 140px; overflow: auto;
+  font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--c-ink-2);
+  background: #f6f7fb; border: 1px solid #e3e6f0; border-radius: 6px; padding: 6px 8px;
+  white-space: pre-wrap; word-break: break-word;
+}
