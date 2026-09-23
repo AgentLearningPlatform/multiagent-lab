@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontobuild"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
@@ -206,6 +207,111 @@ func truncateTitle(s string) string {
 		rs = rs[:30]
 	}
 	return string(rs)
+}
+
+// ---- O13（D-O14/REQ-108）：由知识库构建本体——构建栏第六路径 4 端点 ----
+// 路由用「方法 + 精确路径」注册在反代前缀（/api/ontologies*、/api/semantica*）之上，
+// ServeMux 最长优先匹配会选中这里的精确模式，构建平面/worker 零侵入（04 §3.7）。
+
+// selectableForOntologyBuild GET /api/kbs/selectable-for-ontology-build
+// KB 选择器：mode 徽标 + chunk 数 / KG 实体关系数预览。
+func (s *Server) selectableForOntologyBuild(w http.ResponseWriter, r *http.Request) {
+	items, err := s.OntoBuild.SelectableKBs()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// buildFromKB POST /api/ontologies/build-from-kb
+// {kb_id, strategy: chunk-llm|kg-direct|hybrid, cq_mode: auto|custom|skip, custom_cqs?, conn_id?}
+// → {spec_json, validation_report, cqs, rounds, ...}（草稿预览用；入库走构建平面 POST /api/ontologies + PUT spec）。
+func (s *Server) buildFromKB(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		KBID      string   `json:"kb_id"`
+		Strategy  string   `json:"strategy"`
+		CQMode    string   `json:"cq_mode"`
+		CustomCQs []string `json:"custom_cqs"`
+		ConnID    string   `json:"conn_id"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if strings.TrimSpace(in.KBID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kb_id is required"})
+		return
+	}
+	if in.CQMode == "custom" && len(in.CustomCQs) == 0 { // 与 REQ-90 自定义模式一致：选了自定义必须给问题
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cq_mode=custom 需提供 custom_cqs（每行一个问题）"})
+		return
+	}
+	res, err := s.OntoBuild.BuildFromKB(r.Context(), in.KBID, in.Strategy, in.CQMode, in.CustomCQs, in.ConnID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// chunksToKG POST /api/semantica/chunks-to-kg
+// {kb_id} → 把该 KB 的 chunk 池推给 semantica worker /graphrag/ingest 建 KG
+// （graphrag 模式导入时已自动；此处供 rag 模式 KB / 显式重建，M15 ④ 薄封装）。
+func (s *Server) chunksToKG(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		KBID string `json:"kb_id"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if strings.TrimSpace(in.KBID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kb_id is required"})
+		return
+	}
+	info, n, err := s.OntoBuild.ChunksToKG(r.Context(), in.KBID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"kb_id": in.KBID, "chunks": n, "graphrag": info})
+}
+
+// kgToSpecJSON POST /api/ontologies/kg-to-spec-json
+// {kb_id} → 回读 worker KG 做薄映射（entity→Concept / relation→Relation / HAS→具有），
+// 不做语义抽取（04 §3.7 <300 行约定）；策略 B 的独立入口（策略 C 走 build-from-kb）。
+func (s *Server) kgToSpecJSON(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		KBID string `json:"kb_id"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if strings.TrimSpace(in.KBID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kb_id is required"})
+		return
+	}
+	k, err := s.Store.GetKnowledgeBase(in.KBID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	kg, err := s.OntoBuild.KB.GraphragKG(r.Context(), in.KBID)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "KG 回读失败（semantica worker 不可达或该库无 KG）: " + err.Error()})
+		return
+	}
+	if len(kg.Entities) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该知识库尚无 KG（可先 POST /api/semantica/chunks-to-kg 构建）"})
+		return
+	}
+	spec := ontobuild.MapKGToSpec(kg, k.Name)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"kb_id": in.KBID, "method": kg.Method, "kg_entities": len(kg.Entities), "kg_relationships": len(kg.Relationships),
+		"spec_json": spec, "validation_report": ontobuild.ValidateBuildSpec(spec),
+	})
 }
 
 var _ = json.Marshal

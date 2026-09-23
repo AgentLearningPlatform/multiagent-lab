@@ -169,24 +169,34 @@ def _lightweight_extract(chunks: list[dict]):
         if not text.strip():
             continue
         src = f"kb:{ch.get('doc_id', '')}:{ch.get('seq', '')}"
-        for m in pat_of.finditer(text):
-            a, b = m.group(1), m.group(2)
-            if a in stop or b in stop:
+        # 按句抽取：「A 是 B」所在句回填实体 desc（O13 策略 B/C 的 definition 来源）
+        for sent in re.split(r"[。！？!?;\n\r]+", text):
+            s = sent.strip()
+            if not s:
                 continue
-            ents.setdefault(a, {"id": a, "name": a, "type": "entity"})
-            ents.setdefault(b, {"id": b, "name": b, "type": "entity"})
-            rels.append({"source": a, "target": b, "type": "HAS", "provenance": src})
-        for m in pat_is.finditer(text):
-            a, b = m.group(1), m.group(2)
-            if a in stop or b in stop:
-                continue
-            ents.setdefault(a, {"id": a, "name": a, "type": "entity"})
-            ents.setdefault(b, {"id": b, "name": b, "type": "entity"})
-            rels.append({"source": a, "target": b, "type": "IS_A", "provenance": src})
+            for m in pat_of.finditer(s):
+                a, b = m.group(1), m.group(2)
+                if a in stop or b in stop:
+                    continue
+                ents.setdefault(a, {"id": a, "name": a, "type": "entity"})
+                ents.setdefault(b, {"id": b, "name": b, "type": "entity"})
+                rels.append({"source": a, "target": b, "type": "HAS", "provenance": src})
+            for m in pat_is.finditer(s):
+                a, b = m.group(1), m.group(2)
+                if a in stop or b in stop or a == b:
+                    continue
+                ents.setdefault(a, {"id": a, "name": a, "type": "entity"})
+                ents.setdefault(b, {"id": b, "name": b, "type": "entity"})
+                ents[a].setdefault("desc", s[:120])  # 首个定义句作实体描述
+                rels.append({"source": a, "target": b, "type": "IS_A", "provenance": src})
     return list(ents.values()), rels
 
 def _graphrag_ingest_chunks(req: "GraphragIngestReq"):
-    g = _ensure_graph()
+    try:  # semantica 缺失时图不可用：跳过入图，仅完成抽取 + per-KB 记录（O13 回读不受阻）
+        g = _ensure_graph()
+    except Exception as e:  # noqa: BLE001
+        g = None
+        _warnings.append(f"semantica 图不可用，KG 仅按 KB 记录（/graphrag/kg 可回读）: {e}")
     chunks = [c for c in (req.chunks or []) if str(c.get("content") or "").strip()]
     if not chunks:
         return JSONResponse(status_code=400, content={"error": "chunks 为空（需含 content 字段）"})
@@ -209,8 +219,9 @@ def _graphrag_ingest_chunks(req: "GraphragIngestReq"):
     if method == "lightweight":
         ents, rels = _lightweight_extract(chunks)
     with _lock:
-        _apply(g, ents, "entity", warns)
-        _apply(g, rels, "relationship", warns)
+        if g is not None:
+            _apply(g, ents, "entity", warns)
+            _apply(g, rels, "relationship", warns)
         try:  # chunk 原文进向量索引（GraphRAG 检索的文本侧）
             text = " ".join(str(c.get("content")) for c in chunks)[:8000]
             if text.strip():
@@ -221,9 +232,82 @@ def _graphrag_ingest_chunks(req: "GraphragIngestReq"):
                     ctx.store(text)
         except Exception as e:  # noqa: BLE001
             warns.append(f"向量索引写入失败（GraphRAG 检索可能降级）: {e}")
+        _record_kbkg(req.kb_id, method, ents, rels)  # O13：按 KB 记录 KG 子图（/graphrag/kg 回读）
         _save_graph()
     return {"kb_id": req.kb_id, "method": method, "chunks": len(chunks),
             "entities": len(ents), "relationships": len(rels), "warnings": warns + _warnings}
+
+
+# ---- O13（D-O14/REQ-108）：per-KB KG 记录与回读（本体平面零侵入，仅 worker 接口面扩展） ----
+KBKG_PATH = PERSIST_PATH.parent / "kb_kg.json"
+_kbkg: dict | None = None
+
+def _normalize_ent(e):
+    """KG 实体归一化（dict/对象/标量 → {id, name, type, desc}）。"""
+    if isinstance(e, (str, int, float)):
+        s = str(e)
+        return {"id": s, "name": s, "type": "entity", "desc": ""}
+    return {"id": str(_pick(e, "id", "name", "label", default="")),
+            "name": str(_pick(e, "name", "label", "id", default="")),
+            "type": str(_pick(e, "type", "entity_type", default="entity") or "entity"),
+            "desc": str(_pick(e, "desc", "description", default="") or "")}
+
+def _normalize_rel(r):
+    """KG 关系归一化（→ {source, target, type}）。"""
+    if isinstance(r, (list, tuple)) and len(r) >= 2:
+        return {"source": str(r[0]), "target": str(r[1]), "type": "RELATED"}
+    return {"source": str(_pick(r, "source", "source_id", "from", default="")),
+            "target": str(_pick(r, "target", "target_id", "to", default="")),
+            "type": str(_pick(r, "type", "relationship_type", "relation", default="RELATED") or "RELATED")}
+
+def _load_kbkg() -> dict:
+    global _kbkg
+    if _kbkg is None:
+        try:
+            _kbkg = json.loads(KBKG_PATH.read_text(encoding="utf-8")) if KBKG_PATH.exists() else {}
+        except Exception:  # noqa: BLE001
+            _kbkg = {}
+    return _kbkg
+
+def _save_kbkg():
+    try:
+        KBKG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        KBKG_PATH.write_text(json.dumps(_load_kbkg(), ensure_ascii=False), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        _warnings.append(f"kb_kg 持久化失败: {e}")
+
+def _record_kbkg(kb_id: str, method: str, ents: list, rels: list):
+    """按 kb_id 合并记录抽取产物（entity 按 name 去重保留首个 desc；关系三元组去重）。"""
+    data = _load_kbkg()
+    rec = data.setdefault(str(kb_id), {"method": method, "entities": [], "relationships": []})
+    seen_e = {e["name"] or e["id"] for e in rec["entities"]}
+    seen_r = {(r["source"], r["target"], r["type"]) for r in rec["relationships"]}
+    for raw in ents:
+        e = _normalize_ent(raw)
+        key = e["name"] or e["id"]
+        if not key or key in seen_e:
+            continue
+        seen_e.add(key)
+        rec["entities"].append(e)
+    for raw in rels:
+        r = _normalize_rel(raw)
+        key = (r["source"], r["target"], r["type"])
+        if not r["source"] or not r["target"] or key in seen_r:
+            continue
+        seen_r.add(key)
+        rec["relationships"].append(r)
+    rec["method"] = method
+    _save_kbkg()
+
+class GraphragKGReq(BaseModel):
+    """O13 策略 B/C：按 kb_id 回读该库抽取出的 KG 子图（04 §3.7 kg-to-spec-json 数据源）。"""
+    kb_id: str
+
+@app.post("/graphrag/kg")
+def graphrag_kg(req: GraphragKGReq):
+    rec = _load_kbkg().get(str(req.kb_id)) or {}
+    return {"kb_id": str(req.kb_id), "method": rec.get("method", ""),
+            "entities": rec.get("entities", []), "relationships": rec.get("relationships", [])}
 
 # ---- 审计/溯源（REQ-101，§4.9.4）：决策链 + PROV-O lineage/export + Explorer 惰性挂载 ----
 def _normalize_node(x):

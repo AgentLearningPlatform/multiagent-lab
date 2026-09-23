@@ -11,10 +11,14 @@ import type {
   ForkOntologyInput,
   GuideResponse,
   ImportReport,
+  ChunksToKGResult,
   KBDoc,
   KBSearchResult,
+  KGToSpecResult,
   KnowledgeBase,
   LearningExample,
+  OntoBuildResult,
+  OntoBuildSelectableKB,
   PipelineCatalogResponse,
   PipelineDetail,
   PipelineProfile,
@@ -202,6 +206,19 @@ export const api = {
   // M14 D-KB4：GraphRAG 子模块直查（worker 不可达返回 degraded:true，不抛错）
   graphragSearchKB: (kbId: string, q: string, maxResults?: number) =>
     req<KBSearchResult>(`/api/kb/${kbId}/graphrag-search`, { method: 'POST', body: JSON.stringify({ query: q, max_results: maxResults }) }),
+
+  // ---- O13 由知识库构建本体（REQ-108；精确路由压过本体/semantica 反代前缀） ----
+  selectableKBsForBuild: () => req<OntoBuildSelectableKB[]>('/api/kbs/selectable-for-ontology-build'),
+  buildFromKB: (input: {
+    kb_id: string
+    strategy: 'chunk-llm' | 'kg-direct' | 'hybrid'
+    cq_mode: 'auto' | 'custom' | 'skip'
+    custom_cqs?: string[]
+  }) => req<OntoBuildResult>('/api/ontologies/build-from-kb', { method: 'POST', body: JSON.stringify(input) }),
+  chunksToKG: (kbId: string) =>
+    req<ChunksToKGResult>('/api/semantica/chunks-to-kg', { method: 'POST', body: JSON.stringify({ kb_id: kbId }) }),
+  kgToSpecJSON: (kbId: string) =>
+    req<KGToSpecResult>('/api/ontologies/kg-to-spec-json', { method: 'POST', body: JSON.stringify({ kb_id: kbId }) }),
 
   // ---- M7 技能（§8：/api/skills 系列 + 注入预览） ----
   listSkills: () => req<Skill[]>('/api/skills'),

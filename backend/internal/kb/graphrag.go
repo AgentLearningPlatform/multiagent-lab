@@ -115,6 +115,44 @@ func (s *Service) GraphragQuery(ctx context.Context, k *store.KnowledgeBase, que
 	return hits, nil
 }
 
+// KGEntity / KGRelationship worker 回读的 KG 元素（O13 策略 B/C 数据源）。
+type KGEntity struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type,omitempty"`
+	Desc string `json:"desc,omitempty"` // 轻量抽取捕获的首个描述句（semantica 路径尽力回填）
+}
+
+type KGRelationship struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Type   string `json:"type,omitempty"`
+}
+
+// KGData 一个 KB 的 KG 子图（worker /graphrag/kg 回读）。
+type KGData struct {
+	KBID          string           `json:"kb_id"`
+	Method        string           `json:"method,omitempty"`
+	Entities      []KGEntity       `json:"entities"`
+	Relationships []KGRelationship `json:"relationships"`
+}
+
+// GraphragKG 回读某 KB 抽取出的 KG 子图（O13 ④ kg-to-spec-json 的数据源；
+// worker 侧按 kb_id 记录，本体平面零侵入）。
+func (s *Service) GraphragKG(ctx context.Context, kbID string) (*KGData, error) {
+	var out KGData
+	if err := workerPost(ctx, "/graphrag/kg", map[string]any{"kb_id": kbID}, &out); err != nil {
+		return nil, err
+	}
+	if out.Entities == nil {
+		out.Entities = []KGEntity{}
+	}
+	if out.Relationships == nil {
+		out.Relationships = []KGRelationship{}
+	}
+	return &out, nil
+}
+
 // GraphragQueryWithFallback M14 ⑥：graphrag 检索失败 → 回退向量检索，返回 (hits, mode, degraded, err)。
 func (s *Service) GraphragQueryWithFallback(ctx context.Context, k *store.KnowledgeBase, query string, maxResults int, minScore float64) ([]RetrievalHit, string, bool, error) {
 	if k.Mode != "graphrag" {

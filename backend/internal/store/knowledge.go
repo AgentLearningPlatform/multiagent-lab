@@ -300,6 +300,24 @@ func (s *Store) ListKnowledgeChunksByDoc(docID string) ([]*KnowledgeChunk, error
 	return out, rows.Err()
 }
 
+// ListKnowledgeChunksByKB 按库取全部 chunks（O13 策略 A chunk 池：按 doc→seq 稳定排序喂 LLM）。
+func (s *Store) ListKnowledgeChunksByKB(kbID string) ([]*KnowledgeChunk, error) {
+	rows, err := s.DB.Query(`SELECT `+kchunkCols+` FROM knowledge_chunk WHERE kb_id = ? ORDER BY doc_id, seq`, kbID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*KnowledgeChunk
+	for rows.Next() {
+		c, err := scanKChunk(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // DeleteKnowledgeChunksByDoc 删除文档全部 chunks。
 func (s *Store) DeleteKnowledgeChunksByDoc(docID string) error {
 	_, err := s.DB.Exec(`DELETE FROM knowledge_chunk WHERE doc_id = ?`, docID)

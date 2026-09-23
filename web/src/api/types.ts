@@ -206,6 +206,62 @@ export interface KBSearchResult {
   hits: KBHit[]
 }
 
+// ---- O13 由知识库构建本体（REQ-108，04 §3.7；主平台 4 端点） ----
+
+/** KB 选择器条目（GET /api/kbs/selectable-for-ontology-build） */
+export interface OntoBuildSelectableKB {
+  id: string
+  name: string
+  description?: string
+  mode?: 'rag' | 'graphrag'
+  doc_count: number
+  chunk_count: number
+  kg_entities: number
+  kg_relationships: number
+  kg_ready: boolean
+  updated_at?: string
+}
+
+/** 生成侧结构校验报告（入库时构建平面 PUT spec 做权威校验） */
+export interface OntoBuildSpecReport {
+  ok: boolean
+  errors: ValidationError[]
+  warnings?: string[]
+}
+
+/** build-from-kb 结果（spec_json 为构建平面 Spec 同形草稿；cqs = REQ-90 能力问题） */
+export interface OntoBuildResult {
+  kb_id: string
+  kb_name: string
+  strategy: 'chunk-llm' | 'kg-direct' | 'hybrid'
+  method?: string
+  cq_mode: 'auto' | 'custom' | 'skip'
+  cqs?: string[]
+  rounds: number
+  chunks_used: number
+  truncated?: boolean
+  spec_json: Spec
+  validation_report: OntoBuildSpecReport
+  warnings?: string[]
+}
+
+/** chunks-to-kg 结果（POST /api/semantica/chunks-to-kg；graphrag 复用 M14 GraphragInfo） */
+export interface ChunksToKGResult {
+  kb_id: string
+  chunks: number
+  graphrag: KBGraphragInfo
+}
+
+/** kg-to-spec-json 结果（策略 B 独立入口：KG 薄映射） */
+export interface KGToSpecResult {
+  kb_id: string
+  method?: string
+  kg_entities: number
+  kg_relationships: number
+  spec_json: Spec
+  validation_report: OntoBuildSpecReport
+}
+
 // ---- M7 技能（02 文档 §5.2 skill DDL / §6.12） ----
 
 export interface SkillResource {

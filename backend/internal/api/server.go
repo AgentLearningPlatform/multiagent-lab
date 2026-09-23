@@ -11,6 +11,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontobuild"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
@@ -23,14 +24,15 @@ type Server struct {
 	Chat      *chat.Service
 	Tools     *tool.Registry
 	KB        *kb.Service
-	Ontology  *ontology.Service // M8：本体对接（反代/facade 探测）
-	FilesRoot string            // M11：项目文件根目录（上传/下载落盘）
+	Ontology  *ontology.Service  // M8：本体对接（反代/facade 探测）
+	OntoBuild *ontobuild.Service // O13：由知识库构建本体（KB→spec 编排）
+	FilesRoot string             // M11：项目文件根目录（上传/下载落盘）
 	Mux       *http.ServeMux
 }
 
 // NewServer 构造并注册全部路由。
 func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service) *Server {
-	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, Mux: http.NewServeMux()}
+	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -106,6 +108,12 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/kb/{id}/docs/{did}/reindex", s.reindexKBDoc)
 	m.HandleFunc("POST /api/kb/{id}/search-preview", s.previewKBSearch)
 	m.HandleFunc("POST /api/kb/{id}/graphrag-search", s.graphragSearchKB) // M14 D-KB4：GraphRAG 子模块直查
+
+	// O13 由知识库构建本体（D-O14/REQ-108，M15）：精确路由压过 /api/ontologies* /api/semantica* 反代前缀
+	m.HandleFunc("GET /api/kbs/selectable-for-ontology-build", s.selectableForOntologyBuild)
+	m.HandleFunc("POST /api/ontologies/build-from-kb", s.buildFromKB)
+	m.HandleFunc("POST /api/ontologies/kg-to-spec-json", s.kgToSpecJSON)
+	m.HandleFunc("POST /api/semantica/chunks-to-kg", s.chunksToKG)
 
 	m.HandleFunc("GET /api/skills", s.listSkills)
 	m.HandleFunc("POST /api/skills", s.createSkill)
