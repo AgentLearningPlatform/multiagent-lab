@@ -26,6 +26,7 @@ import type { BadgeProps } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
+import EmptyGuide from '../components/EmptyGuide'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -340,7 +341,22 @@ export default function KnowledgePage() {
                 </div>
               </div>
             ))}
-            {kbs.length === 0 && <div className="empty-hint">{loadErr ? '知识库接口未就绪' : '暂无知识库，点击上方新建'}</div>}
+            {kbs.length === 0 &&
+              (loadErr ? (
+                <div className="empty-hint">{loadErr}</div>
+              ) : (
+                <EmptyGuide
+                  title="创建第一个知识库"
+                  steps={[
+                    '选择类型：RAG（向量检索）或 GraphRAG（向量 + KG 关联扩展）',
+                    '导入 txt / md 文档（自动切分并向量化）',
+                    '对话中点亮「知识」chip 即可召回',
+                  ]}
+                  actionLabel="＋ 新建知识库"
+                  onAction={() => setCreateOpen(true)}
+                  footer="嵌入模型使用设置页标记默认的向量连接。"
+                />
+              ))}
           </div>
         </aside>
       </Splitter.Panel>

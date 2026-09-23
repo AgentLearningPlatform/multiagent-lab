@@ -640,3 +640,8 @@
   background: #f6f7fb; border: 1px solid #e3e6f0; border-radius: 6px; padding: 6px 8px;
   white-space: pre-wrap; word-break: break-word;
 }
+
+/* REQ-112/111②：模块空态引导卡（EmptyGuide） */
+.empty-guide { display: flex; flex-direction: column; gap: 8px; }
+.empty-guide-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.empty-guide-steps li { font-size: 11.5px; line-height: 1.6; color: var(--c-ink-2); }

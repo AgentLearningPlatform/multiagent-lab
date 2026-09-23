@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Empty } from 'antd'
+import { Button } from 'antd'
 import {
   PlusOutlined,
   SettingOutlined,
@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons'
 import { Conversations } from '@ant-design/x'
 import { api } from '../api/client'
+import EmptyGuide from './EmptyGuide'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
 import { confirmAction } from '../lib/antd'
@@ -140,11 +141,31 @@ export default function Sidebar({
 
       <div className="conv-list">
         {nodes.length === 0 && (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={isAgent ? '还没有智能体，点击上方创建' : '还没有项目，点击上方创建'}
-            style={{ marginTop: 32 }}
-          />
+          isAgent ? (
+            <EmptyGuide
+              title="创建第一个智能体"
+              steps={[
+                '起个名称，写一句话描述它的职责（系统提示词）',
+                '模型连接可留空 = 跟随全局默认（设置页已预置 DeepSeek）',
+                '需要执行动作就勾选工具（current_time / ask_human 等）',
+              ]}
+              actionLabel="＋ 新建智能体"
+              onAction={onNewAgent}
+              footer="创建后点节点上的 ＋ 新建对话即可开始。"
+            />
+          ) : (
+            <EmptyGuide
+              title="创建第一个项目"
+              steps={[
+                '起个名称，选择协作模式（默认 agent_as_tool）',
+                '可绑定本地目录：对话产物写入该目录，文件/Git 侧边栏可见（绑定即授予模型该目录读写权限）',
+                '在项目配置中勾选成员智能体并指定主智能体',
+              ]}
+              actionLabel="＋ 新建项目"
+              onAction={onNewProject}
+              footer="项目会话由成员智能体协作处理。"
+            />
+          )
         )}
 
         {nodes.map((n) => {
