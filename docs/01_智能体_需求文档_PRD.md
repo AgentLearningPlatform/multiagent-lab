@@ -1,6 +1,6 @@
 # eino-multiagent-lab · 智能体平台 需求文档（PRD）
 
-> 状态：Draft v0.26
+> 状态：Draft v0.27
 > 日期：2026-09-23
 > 负责人：董奎
 > 文档性质：**活文档**。每个迭代开始前更新「迭代记录」与「需求池」，已确认需求不要直接删除，改为在条目后标注 `（已变更/已移交，见 vX.X）`。
@@ -443,4 +443,4 @@
 | v0.24 | 2026-09-24 | **REQ-14(恢复②) 工具调用人工审批交付（LG-8 危险操作审批）**：①Agent 配置新增 `tool_approval`（迁移 013，""=off / all=全部工具调用前审批），装配层对非 AgentTool 工具统一审批包装；②首次调用 `compose.StatefulInterrupt` 挂起（run.interrupted 事件 kind=approval 携带 tool_name/arguments），恢复数据 approve/deny 定向续跑——批准真实执行、拒绝返回拒答载荷（模型据此调整）；③前端审批卡（参数预览 + 批准/拒绝按钮），AgentModal/AgentSidePanel 表单新增审批下拉；④复用 REQ-14 恢复管线（checkpoint/InterruptCtx.ID/答复卡框架）。冒烟：单测批准/拒绝两路径 + 真实模型端到端（审批挂起→批准执行返回时间 / 拒绝后模型诚实告知）+ 20 号 S2 节口径；技术方案同步 02 v0.39 | 董奎 × 协作 Agent |
 | v0.25 | 2026-09-24 | **REQ-113 数据导出与生命周期交付**：①对话导出 `GET /api/conversations/{id}/export?events=1`（Markdown：元信息头 + 按角色分节正文 + 可选过程事件附录 ≤500 条），ChatWindow 头部「导出」下拉（仅消息/含事件）；②`GET /api/stats/storage` + 设置「数据与安全」激活——DB 体积与各表行数概览、项目/会话列表带级联规模（会话数/消息数），删除 Popconfirm 明示级联范围；③16 号新增 §9 SQLite 数据增长声明（各表来源/量级/清理建议）。冒烟：真实库导出 Markdown 结构正确、storage 端点返回真实统计；技术方案同步 02 v0.40 | 董奎 × 协作 Agent |
 | v0.26 | 2026-09-24 | **REQ-114①/112/115 产品横切批次交付**：①REQ-114①——项目新建/配置表单本地目录节增「绑定即授权」提示卡（授权范围：list_files/read_file/save_file + Git 只读；越界由 fsutil.SafeJoin 强制；时间线可审计）；②REQ-112——共享 EmptyGuide 空态引导卡接入智能体/项目/知识库三左栏（引导矩阵见 17 §9.1）；③REQ-115——三态与错误文案规范沉淀至 17 §9.2（错误文案三要素），存量页面渐进对齐。冒烟：tsc/vite 构建通过；界面口径沉淀 17 v0.6 | 董奎 × 协作 Agent |
-| v0.24 | 2026-09-24 | **REQ-117 执行调试模式交付（M17 阶段一）**：①对话头部三档观测级别（简洁/详细/调试，下拉选择、每会话 localStorage 记忆、运行中禁改）；②后端新增 debugModel 装饰器（包装 BaseChatModel，Generate/Stream 全量采集——含流式旁路 tee）+ model.step 事件（agent/轮次/耗时/分步 usage/finish/输入逐条预览/绑定工具名+schema，仅实时透传不入库）；③run.started 附装配快照（协作模式 + 各 Agent 模型/工具及来源/技能/MCP，详细档含最终指令全文）；④tool.result 增执行耗时（tool.call→result 计时）；⑤前端：调试下拉、model.step 卡（调用链路详情：输入逐条/绑定工具 schema）、run.started 装配快照折叠视图、子智能体嵌套缩进（enter/exit 深度计算）。单测 TestDebugModelEmitsStep + headless 冒烟通过。阶段二（池）：外部 CLI 原始输出、调试事件入库开关、事件流导出重放 | 董奎 × 协作 Agent |
+| v0.27 | 2026-09-24 | **REQ-117 执行调试模式交付（M17 阶段一；版本号顺延 v0.27——v0.24~v0.26 已被并行 REQ-112/114/115 批次占用）**：①对话头部三档观测级别（简洁/详细/调试，下拉选择、每会话 localStorage 记忆、运行中禁改）；②后端新增 debugModel 装饰器（包装 BaseChatModel，Generate/Stream 全量采集——含流式旁路 tee）+ model.step 事件（agent/轮次/耗时/分步 usage/finish/输入逐条预览/绑定工具名+schema，仅实时透传不入库）；③run.started 附装配快照（协作模式 + 各 Agent 模型/工具及来源/技能/MCP，详细档含最终指令全文）；④tool.result 增执行耗时（tool.call→result 计时）；⑤前端：调试下拉、model.step 卡（调用链路详情：输入逐条/绑定工具 schema）、run.started 装配快照折叠视图、子智能体嵌套缩进（enter/exit 深度计算）。单测 TestDebugModelEmitsStep + headless 冒烟通过。阶段二（池）：外部 CLI 原始输出、调试事件入库开关、事件流导出重放 | 董奎 × 协作 Agent |
