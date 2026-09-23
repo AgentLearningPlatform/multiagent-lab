@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Empty, Splitter, Space, Tag, Typography } from 'antd'
 import { Background, BackgroundVariant, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, useEdgesState, useNodesState } from '@xyflow/react'
 import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
+// React Flow 基础样式表（v12 必需）：缺失时画布/节点/连线/MiniMap 全部无样式错乱（bugfix：此前从未引入）
+import '@xyflow/react/dist/style.css'
 import type { Spec, SpecConcept } from '../../../api/types'
 
 // ---------------------------------------------------------------------------

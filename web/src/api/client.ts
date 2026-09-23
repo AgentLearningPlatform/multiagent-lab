@@ -72,7 +72,15 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
   })
   const text = await res.text()
-  const data = text ? JSON.parse(text) : null
+  // 非 JSON 响应（如反代未注册时的 "404 page not found"）不再抛 SyntaxError，
+  // 归一为带状态码与响应片段的 ApiError，提示可读（bugfix：此前报 "Unexpected non-whitespace
+  // character after JSON at position 4"，无法定位是哪个端点断了）
+  let data: any = null
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    throw new ApiError(`HTTP ${res.status}：响应非 JSON — ${text.slice(0, 140) || '(空)'}`, res.status)
+  }
   if (!res.ok) {
     const msg = (data && data.error) || `HTTP ${res.status}`
     throw new ApiError(msg, res.status, data?.validation_errors)

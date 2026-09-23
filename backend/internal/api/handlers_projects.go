@@ -208,13 +208,19 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必填"})
 		return
 	}
+	// ~ 前缀展开（macOS/Linux 输入习惯；Windows 盘符形态不受影响）
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(dir, "~"), "/"))
+		}
+	}
 	// Windows 路径支持：filepath.IsAbs 在 Linux 运行时对 `C:\...` 返回 false，
 	// 显式识别盘符形态（C:/ 或 C:\，含正斜杠变体），归一为运行时格式后校验。
 	if isWindowsPath(dir) {
 		dir = filepath.FromSlash(dir)
 	}
 	if !filepath.IsAbs(dir) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必须是绝对路径"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必须是绝对路径（以 / 开头，Windows 用 C:\\ 开头，或以 ~ 开头）；收到: " + req.Dir})
 		return
 	}
 	resp := validateDirResp{}

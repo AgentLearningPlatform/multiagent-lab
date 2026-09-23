@@ -130,6 +130,10 @@ func (s *Server) routes() {
 	if s.Ontology != nil {
 		m.Handle("/api/ontologies", s.Ontology.BuildProxy()) // → 构建平面 BUILD_SVC_URL(:8091)
 		m.Handle("/api/ontologies/", s.Ontology.BuildProxy())
+		// REQ-103 模式 A：OntoChat 会话/turn/save 全在构建平面 /api/ontochat/*（bugfix：此前漏注册反代，
+		// 同源请求命中主后端 404 文本，前端 JSON.parse 报 "Unexpected non-whitespace character after JSON"）
+		m.Handle("/api/ontochat", s.Ontology.BuildProxy())
+		m.Handle("/api/ontochat/", s.Ontology.BuildProxy())
 		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
 		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
 		// Semantica 独立栏（§4.9 D-O10）：剥离前缀反代到 worker，:8093
