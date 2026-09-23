@@ -81,6 +81,46 @@ export interface ProjectDirListing {
   entries: ProjectDirEntry[] | null
 }
 
+// ---- M12 REQ-102 深度版：Git 视图（提交历史 / 分支 / 变更明细）----
+
+/** 提交历史条目（GET /api/projects/{id}/git-log） */
+export interface GitCommit {
+  hash: string
+  short: string
+  author: string
+  date: string
+  subject: string
+  /** decorations：HEAD -> main / origin/main / tag: x（去掉 HEAD -> 前缀） */
+  refs?: string[]
+  /** 父提交 ≥2 即合并提交 */
+  merge?: boolean
+}
+
+/** 分支条目（GET /api/projects/{id}/git-branches） */
+export interface GitBranch {
+  name: string
+  current: boolean
+  is_remote: boolean
+  short_commit: string
+  date: string
+}
+
+/** 变更文件（numstat；add/del = -1 表示二进制或合并提交无统计） */
+export interface GitFileChange {
+  path: string
+  add: number
+  del: number
+}
+
+/** 工作区未提交变更（porcelain 状态码 + numstat） */
+export interface GitWorkingFile {
+  path: string
+  code: string
+  staged?: boolean
+  add?: number | null
+  del?: number | null
+}
+
 export interface Conversation {
   id: string
   scope: 'agent' | 'project'

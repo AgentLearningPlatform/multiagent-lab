@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -210,16 +211,25 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// gitOutput 执行 git 子命令（-C dir），单次 3s 超时。
+// gitOutput 执行 git 子命令（-C dir），单次 3s 超时，返回修剪首尾空白的输出。
 func gitOutput(dir string, args ...string) (string, error) {
+	out, err := gitOutRaw(dir, args...)
+	return strings.TrimSpace(out), err
+}
+
+// gitOutRaw 同 gitOutput，但不修剪首尾空白——porcelain 输出首行的前导空格是状态位（如 " M path"），
+// 修剪会让首行 code/path 错位（REQ-102 深度版修复，gitStatusMap 同步受益）；
+// -c core.quotepath=off 让中文等非 ASCII 路径原样输出（否则被 \346 八进制转义，前端匹配/展示失真）。
+func gitOutRaw(dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	full := append([]string{"-C", dir, "-c", "core.quotepath=off"}, args...)
+	cmd := exec.CommandContext(ctx, "git", full...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return string(out), nil
 }
 
 // ---- REQ-102 文件视图 API（项目目录文件列表） ----
@@ -343,8 +353,9 @@ func gitRelKey(sub, name string) string {
 }
 
 // gitStatusMap 单次 git status --porcelain，映射为 modified/added/untracked/deleted。
+// 用 gitOutRaw 取原始输出：porcelain 首行的前导空格是状态位，TrimSpace 会让首行路径错位。
 func gitStatusMap(dir string) map[string]string {
-	out, err := gitOutput(dir, "status", "--porcelain")
+	out, err := gitOutRaw(dir, "status", "--porcelain")
 	if err != nil {
 		return map[string]string{}
 	}
@@ -401,6 +412,276 @@ func contentTypeOf(name string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// ---- REQ-102 深度版：Git 视图（提交历史 / 分支 / 变更明细） ----
+
+// gitPatchLimit 单次 patch 文本上限（超限报错，防大 diff 撑爆前端）。
+const gitPatchLimit = 200 << 10
+
+// gitCommit 提交历史条目。
+type gitCommit struct {
+	Hash    string   `json:"hash"`
+	Short   string   `json:"short"`
+	Author  string   `json:"author"`
+	Date    string   `json:"date"`
+	Subject string   `json:"subject"`
+	Refs    []string `json:"refs,omitempty"`
+	Merge   bool     `json:"merge,omitempty"`
+}
+
+// gitBranch 分支条目。
+type gitBranch struct {
+	Name        string `json:"name"`
+	Current     bool   `json:"current"`
+	IsRemote    bool   `json:"is_remote"`
+	ShortCommit string `json:"short_commit"`
+	Date        string `json:"date"`
+}
+
+// gitFileChange 变更文件（numstat；add/del 为 -1 表示二进制或合并提交无统计）。
+type gitFileChange struct {
+	Path string `json:"path"`
+	Add  int64  `json:"add"`
+	Del  int64  `json:"del"`
+}
+
+// gitWorkingFile 工作区未提交变更（porcelain 状态码 + numstat 统计）。
+type gitWorkingFile struct {
+	Path   string `json:"path"`
+	Code   string `json:"code"`
+	Staged bool   `json:"staged,omitempty"`
+	Add    *int64 `json:"add,omitempty"`
+	Del    *int64 `json:"del,omitempty"`
+}
+
+// loadGitProject 取项目并校验已绑定本地目录且为 git 仓库，返回归一化目录。
+// 失败时已写响应，调用方直接 return。
+func (s *Server) loadGitProject(w http.ResponseWriter, r *http.Request) (string, bool) {
+	proj, err := s.Store.GetProject(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err)
+		return "", false
+	}
+	if proj.LocalDir == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "项目未绑定本地目录"})
+		return "", false
+	}
+	dir := fsutil.NormalizeDir(proj.LocalDir)
+	if !filepath.IsAbs(dir) || !isGitDir(dir) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该目录不可用或不是 Git 仓库（无 .git）"})
+		return "", false
+	}
+	return dir, true
+}
+
+// gitSafeRev 校验 git 修订参数（ref/commit）：拒绝空串以 - 开头的值（会被当成 git 选项注入）。
+func gitSafeRev(v string) bool {
+	return v != "" && !strings.HasPrefix(v, "-")
+}
+
+// gitProjectLog GET /api/projects/{id}/git-log?ref=<branch>&limit=50：提交历史（REQ-102 深度版）。
+// ref 缺省为当前 HEAD；limit 1~200（缺省 50）。
+func (s *Server) gitProjectLog(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.loadGitProject(w, r)
+	if !ok {
+		return
+	}
+	limit := 50
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 200 {
+		limit = v
+	}
+	ref := strings.TrimSpace(r.URL.Query().Get("ref"))
+	if ref != "" && !gitSafeRev(ref) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ref 不合法"})
+		return
+	}
+	args := []string{"log", "--date=iso-strict", "--max-count=" + strconv.Itoa(limit)}
+	if ref != "" {
+		args = append(args, ref)
+	}
+	args = append(args, `--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%D%x1f%P%x1e`)
+	out, err := gitOutput(dir, args...)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git log 失败: " + err.Error()})
+		return
+	}
+	commits := make([]gitCommit, 0, limit)
+	for _, rec := range strings.Split(out, "\x1e") {
+		rec = strings.TrimLeft(rec, "\n")
+		if rec == "" {
+			continue
+		}
+		f := strings.Split(rec, "\x1f")
+		if len(f) < 7 {
+			continue
+		}
+		c := gitCommit{Hash: f[0], Short: f[1], Author: f[2], Date: f[3], Subject: f[4], Merge: len(strings.Fields(strings.TrimSpace(f[6]))) >= 2}
+		if d := strings.TrimSpace(f[5]); d != "" {
+			for _, part := range strings.Split(d, ", ") {
+				part = strings.TrimSpace(part)
+				if part == "" {
+					continue
+				}
+				c.Refs = append(c.Refs, strings.TrimPrefix(part, "HEAD -> "))
+			}
+		}
+		commits = append(commits, c)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"commits": commits})
+}
+
+// gitProjectBranches GET /api/projects/{id}/git-branches：本地 + 远程分支（REQ-102 深度版）。
+func (s *Server) gitProjectBranches(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.loadGitProject(w, r)
+	if !ok {
+		return
+	}
+	out, err := gitOutput(dir, "for-each-ref",
+		`--format=%(refname)%09%(objectname:short)%09%(creatordate:iso-strict)%09%(HEAD)`,
+		"refs/heads", "refs/remotes")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git for-each-ref 失败: " + err.Error()})
+		return
+	}
+	branches := []gitBranch{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Split(strings.TrimSpace(line), "\t")
+		if len(f) < 4 || f[0] == "" {
+			continue
+		}
+		isRemote := strings.HasPrefix(f[0], "refs/remotes/")
+		name := strings.TrimPrefix(strings.TrimPrefix(f[0], "refs/heads/"), "refs/remotes/")
+		if isRemote && strings.HasSuffix(name, "/HEAD") {
+			continue // 远程 HEAD 符号引用与实体分支重复，跳过
+		}
+		branches = append(branches, gitBranch{
+			Name: name, Current: f[3] == "*", IsRemote: isRemote, ShortCommit: f[1], Date: f[2],
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"branches": branches})
+}
+
+// parseNumstat 解析 numstat 输出（add\tdel\tpath；- 为二进制 → -1）。
+func parseNumstat(out string) []gitFileChange {
+	files := []gitFileChange{}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		f := strings.Split(line, "\t")
+		if len(f) < 3 {
+			continue
+		}
+		ch := gitFileChange{Path: strings.Join(f[2:], "\t")}
+		n, err := strconv.ParseInt(f[0], 10, 64)
+		ch.Add = map[bool]int64{true: n, false: -1}[err == nil]
+		n, err = strconv.ParseInt(f[1], 10, 64)
+		ch.Del = map[bool]int64{true: n, false: -1}[err == nil]
+		files = append(files, ch)
+	}
+	return files
+}
+
+// gitProjectCommitFiles GET /api/projects/{id}/git-commit-files?commit=<sha>：单次提交变更文件明细。
+func (s *Server) gitProjectCommitFiles(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.loadGitProject(w, r)
+	if !ok {
+		return
+	}
+	commit := strings.TrimSpace(r.URL.Query().Get("commit"))
+	if !gitSafeRev(commit) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commit 不合法"})
+		return
+	}
+	out, err := gitOutput(dir, "show", "--numstat", "--format=", commit)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "提交不存在或读取失败: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": parseNumstat(out)})
+}
+
+// gitProjectCommitPatch GET /api/projects/{id}/git-commit-patch?commit=<sha>&path=<file>：
+// 单提交（或提交内单文件）patch 文本，≤200KB。
+func (s *Server) gitProjectCommitPatch(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.loadGitProject(w, r)
+	if !ok {
+		return
+	}
+	commit := strings.TrimSpace(r.URL.Query().Get("commit"))
+	if !gitSafeRev(commit) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commit 不合法"})
+		return
+	}
+	args := []string{"show", "--format=", commit}
+	if path := strings.TrimSpace(r.URL.Query().Get("path")); path != "" {
+		if strings.HasPrefix(path, "-") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path 不合法"})
+			return
+		}
+		args = append(args, "--", path)
+	}
+	out, err := gitOutput(dir, args...)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "patch 读取失败: " + err.Error()})
+		return
+	}
+	if len(out) > gitPatchLimit {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "diff 过大（>200KB），请在本地编辑器查看"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(out))
+}
+
+// gitProjectWorking GET /api/projects/{id}/git-working：工作区未提交变更明细（porcelain + numstat）。
+func (s *Server) gitProjectWorking(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.loadGitProject(w, r)
+	if !ok {
+		return
+	}
+	statusOut, err := gitOutRaw(dir, "status", "--porcelain")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git status 失败: " + err.Error()})
+		return
+	}
+	unstaged := map[string]gitFileChange{}
+	if out, err := gitOutput(dir, "diff", "--numstat"); err == nil {
+		for _, f := range parseNumstat(out) {
+			unstaged[f.Path] = f
+		}
+	}
+	staged := map[string]gitFileChange{}
+	if out, err := gitOutput(dir, "diff", "--cached", "--numstat"); err == nil {
+		for _, f := range parseNumstat(out) {
+			staged[f.Path] = f
+		}
+	}
+	files := []gitWorkingFile{}
+	for _, line := range strings.Split(statusOut, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		code, path := line[:2], strings.TrimSpace(line[3:])
+		if i := strings.Index(path, " -> "); i >= 0 { // rename 取新路径
+			path = path[i+4:]
+		}
+		path = strings.Trim(path, `"`)
+		wf := gitWorkingFile{Path: path, Code: strings.TrimSpace(code), Staged: code[0] != ' '}
+		var m map[string]gitFileChange
+		if code[1] != ' ' && code[1] != '?' {
+			m = unstaged
+		} else if wf.Staged {
+			m = staged
+		}
+		if f, hit := m[path]; hit {
+			add, del := f.Add, f.Del
+			wf.Add, wf.Del = &add, &del
+		}
+		files = append(files, wf)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
 }
 
 func timeStamp() string {

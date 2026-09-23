@@ -12,7 +12,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
-import type { Agent, DirValidation, Project, ProjectDirEntry } from '../api/types'
+import type { Agent, DirValidation, GitBranch, GitCommit, GitFileChange, GitWorkingFile, Project, ProjectDirEntry } from '../api/types'
 import { useUI } from '../store/ui'
 
 export type PanelView = 'files' | 'git' | 'config'
@@ -312,38 +312,127 @@ function FilesView({ project, onOpenConfig }: { project: Project; onOpenConfig: 
 }
 
 // ---------------------------------------------------------------------------
-// Git 视图（REQ-102：状态概览，深度 Graph 为后续迭代）
+// Git 视图（REQ-102 深度版：分支切换 + 提交历史时间线 + 每提交变更明细/patch + 工作区变更）
 // ---------------------------------------------------------------------------
+
+/** git iso-strict 日期 → 同年 "MM-DD HH:mm"，跨年 "YY-MM-DD HH:mm" */
+function fmtGitDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  const now = new Date()
+  const hm = `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return d.getFullYear() === now.getFullYear() ? hm : `${String(d.getFullYear()).slice(2)}-${hm}`
+}
+
+/** porcelain 状态码 → Tag */
+function gitCodeTag(code: string) {
+  const map: Record<string, { color: string; text: string }> = {
+    M: { color: 'orange', text: '改' },
+    A: { color: 'green', text: '增' },
+    D: { color: 'red', text: '删' },
+    R: { color: 'blue', text: '移' },
+    C: { color: 'blue', text: '拷' },
+    '??': { color: 'default', text: '未跟踪' },
+  }
+  const hit = map[code] ?? { color: 'default', text: code || '—' }
+  return (
+    <Tag color={hit.color} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+      {hit.text}
+    </Tag>
+  )
+}
+
+/** numstat 数字渲染：-1=二进制，undefined=无统计 */
+function numStat(add?: number | null, del?: number | null) {
+  const one = (v?: number | null, cls?: string) => {
+    if (v === undefined || v === null) return <span className="proj-entry-size">—</span>
+    if (v < 0) return <span className="proj-entry-size">二进制</span>
+    return <span className={cls}>{v}</span>
+  }
+  return (
+    <span className="git-numstat">
+      {one(add, 'git-add')}
+      {one(del, 'git-del')}
+    </span>
+  )
+}
 
 function GitView({ project }: { project: Project }) {
   const bound = !!project.local_dir
-  const [info, setInfo] = useState<DirValidation | null>(null)
+  const [branches, setBranches] = useState<GitBranch[]>([])
+  const [curRef, setCurRef] = useState<string | undefined>(undefined) // undefined = 当前 HEAD
+  const [commits, setCommits] = useState<GitCommit[]>([])
+  const [working, setWorking] = useState<GitWorkingFile[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // 展开的提交 → 变更文件明细
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [files, setFiles] = useState<GitFileChange[] | null>(null)
+  const [filesLoading, setFilesLoading] = useState(false)
+  // patch 预览
+  const [patch, setPatch] = useState<{ commit: string; path?: string; text: string } | null>(null)
+  const [patchLoading, setPatchLoading] = useState(false)
+  const [patchErr, setPatchErr] = useState<string | null>(null)
 
-  const load = () => {
+  const load = (ref?: string) => {
     setLoading(true)
     setErr(null)
-    api
-      .validateProjectDir(project.local_dir)
-      .then(setInfo)
-      .catch((e: any) => {
-        setInfo(null)
-        setErr(e?.message ?? '检测失败')
+    setExpanded(null)
+    setFiles(null)
+    setPatch(null)
+    setPatchErr(null)
+    Promise.all([api.gitBranches(project.id), api.gitLog(project.id, ref), api.gitWorking(project.id)])
+      .then(([b, l, w]) => {
+        setBranches(b.branches ?? [])
+        setCommits(l.commits ?? [])
+        setWorking(w.files ?? [])
+        setCurRef(ref)
       })
+      .catch((e: any) => setErr(e?.message ?? 'Git 信息读取失败'))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
-    setInfo(null)
-    if (project.local_dir) load()
+    setBranches([])
+    setCommits([])
+    setWorking([])
+    setCurRef(undefined)
+    if (project.local_dir) load(undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, project.local_dir])
+
+  const openCommit = (c: GitCommit) => {
+    if (expanded === c.hash) {
+      setExpanded(null)
+      setFiles(null)
+      return
+    }
+    setExpanded(c.hash)
+    setFiles(null)
+    setFilesLoading(true)
+    api
+      .gitCommitFiles(project.id, c.hash)
+      .then((r) => setFiles(r.files ?? []))
+      .catch(() => setFiles([]))
+      .finally(() => setFilesLoading(false))
+  }
+
+  const openPatch = (c: GitCommit, path?: string) => {
+    setPatchLoading(true)
+    setPatchErr(null)
+    setPatch(null)
+    api
+      .gitCommitPatch(project.id, c.hash, path)
+      .then((t) => setPatch({ commit: c.hash, path, text: t }))
+      .catch((e: any) => setPatchErr(e?.message ?? 'patch 读取失败'))
+      .finally(() => setPatchLoading(false))
+  }
 
   if (!bound) {
     return (
       <div className="proj-view-body">
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未绑定本地目录；绑定后此处显示 Git 状态概览" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未绑定本地目录；绑定后此处显示 Git 状态与提交历史" />
       </div>
     )
   }
@@ -357,58 +446,133 @@ function GitView({ project }: { project: Project }) {
   if (err) {
     return (
       <div className="proj-view-body">
-        <Alert type="warning" showIcon message="检测失败" description={err} />
+        <Alert type="warning" showIcon message="Git 信息读取失败" description={err} />
       </div>
     )
   }
-  if (!info) return <div className="proj-view-body" />
-  if (info.error) {
+
+  const locals = branches.filter((b) => !b.is_remote)
+  const remotes = branches.filter((b) => b.is_remote)
+  const current = locals.find((b) => b.current)
+
+  // patch 预览态
+  if (patch || patchErr || patchLoading) {
+    const backTo = expanded
     return (
       <div className="proj-view-body">
-        <Alert type="error" showIcon message="目录不可用" description={info.error} />
-      </div>
-    )
-  }
-  if (!info.is_git) {
-    return (
-      <div className="proj-view-body">
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该目录不是 Git 仓库（无 .git）" />
+        <div className="proj-view-toolbar">
+          <Button
+            size="small"
+            type="text"
+            icon={<LeftOutlined />}
+            onClick={() => {
+              setPatch(null)
+              setPatchErr(null)
+              void backTo
+            }}
+          >
+            返回
+          </Button>
+          <span className="proj-preview-path" title={patch?.path || patch?.commit}>
+            {patch?.path || '提交完整 diff'}
+          </span>
+        </div>
+        {patchLoading ? <Spin size="small" /> : patchErr ? <Alert type="info" showIcon message="无法查看 diff" description={patchErr} /> : <pre className="proj-preview">{patch?.text || '（空 diff）'}</pre>}
       </div>
     )
   }
 
   return (
     <div className="proj-view-body">
-      <div className="proj-view-note">Git 状态概览</div>
-      <div className="proj-kv">
-        <span className="proj-k">分支</span>
-        <span className="proj-mono">{info.git_branch || '—'}</span>
+      <div className="proj-view-note">分支（点击切换提交历史范围）</div>
+      <div className="git-branch-chips">
+        {locals.map((b) => (
+          <button key={b.name} type="button" className={`git-chip${b.current ? ' active' : ''}`} onClick={() => load(b.current ? undefined : b.name)}>
+            {b.name}
+            {b.current ? ' ·' : ''}
+          </button>
+        ))}
       </div>
-      <div className="proj-kv">
-        <span className="proj-k">最新提交</span>
-        <span className="proj-mono">{(info.git_commit || '').slice(0, 10) || '—'}</span>
-      </div>
-      <div className="proj-kv">
-        <span className="proj-k">工作区</span>
-        <span>
-          {info.git_dirty ? (
-            <Tag color="orange" style={{ margin: 0 }}>
-              已修改
-            </Tag>
-          ) : (
-            <Tag color="green" style={{ margin: 0 }}>
-              干净
-            </Tag>
-          )}
-        </span>
-      </div>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginTop: 10 }}
-        message="完整 Git Graph 视图规划中（REQ-102 深度版）"
-        description="本轮交付状态概览；提交历史 / 分支图 / diff 属后续迭代。"
-      />
+      {remotes.length > 0 && (
+        <div className="git-branch-chips">
+          {remotes.map((b) => (
+            <button key={b.name} type="button" className="git-chip remote" onClick={() => load(b.name)}>
+              {b.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {working.length > 0 && (
+        <>
+          <Section>未提交变更（{working.length}）</Section>
+          <ul className="git-files">
+            {working.map((f) => (
+              <li key={f.code + f.path} className="git-file-row">
+                {gitCodeTag(f.code)}
+                <span className="git-file-path" title={f.path}>
+                  {f.path}
+                </span>
+                {numStat(f.add, f.del)}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <Section>
+        提交历史{curRef ? ` · ${curRef}` : current ? ` · ${current.name}` : ''}（{commits.length}）
+      </Section>
+      {commits.length === 0 ? (
+        <div className="proj-entry-empty">（该分支暂无提交）</div>
+      ) : (
+        <ul className="git-timeline">
+          {commits.map((c) => (
+            <li key={c.hash} className="git-commit-row" onClick={() => openCommit(c)}>
+              <span className={`git-dot${c.merge ? ' merge' : ''}`} />
+              <div className="git-commit-subject" title={c.subject}>
+                {c.subject}
+              </div>
+              <div className="git-commit-meta">
+                <code>{c.short}</code> · {c.author} · {fmtGitDate(c.date)}
+                {(c.refs ?? []).length > 0 && (
+                  <span className="git-refs">
+                    {(c.refs ?? []).map((rf) => (
+                      <Tag key={rf} color={rf === 'HEAD' ? 'gold' : 'blue'} style={{ marginInlineStart: 4, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                        {rf}
+                      </Tag>
+                    ))}
+                  </span>
+                )}
+              </div>
+              {expanded === c.hash && (
+                <div className="git-commit-files" onClick={(e) => e.stopPropagation()}>
+                  {filesLoading ? (
+                    <Spin size="small" />
+                  ) : (files ?? []).length === 0 ? (
+                    <div className="proj-entry-empty">（无文件变更）</div>
+                  ) : (
+                    <ul className="git-files">
+                      {(files ?? []).map((f) => (
+                        <li key={f.path} className="git-file-row clickable" title="查看 diff" onClick={() => openPatch(c, f.path)}>
+                          <FileOutlined className="git-file-icon" />
+                          <span className="git-file-path" title={f.path}>
+                            {f.path}
+                          </span>
+                          {numStat(f.add, f.del)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <Button size="small" type="link" onClick={() => openPatch(c)}>
+                    查看完整 diff
+                  </Button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

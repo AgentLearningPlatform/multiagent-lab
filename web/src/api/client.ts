@@ -9,6 +9,10 @@ import type {
   DiffResult,
   DirValidation,
   ForkOntologyInput,
+  GitBranch,
+  GitCommit,
+  GitFileChange,
+  GitWorkingFile,
   GuideResponse,
   ImportReport,
   InferenceBackendStatus,
@@ -150,6 +154,22 @@ export const api = {
   /** REQ-102：读取目录内文件文本内容（≤1MB；超限 → 400） */
   getProjectDirFile: (id: string, path: string) =>
     reqText(`/api/projects/${id}/dir-file?path=${encodeURIComponent(path)}`),
+  // REQ-102 深度版：Git 视图（提交历史 / 分支 / 变更明细）
+  gitLog: (id: string, ref?: string, limit = 50) => {
+    const qs = new URLSearchParams()
+    if (ref) qs.set('ref', ref)
+    if (limit !== 50) qs.set('limit', String(limit))
+    const s = qs.toString()
+    return req<{ commits: GitCommit[] }>(`/api/projects/${id}/git-log${s ? '?' + s : ''}`)
+  },
+  gitBranches: (id: string) => req<{ branches: GitBranch[] }>(`/api/projects/${id}/git-branches`),
+  gitCommitFiles: (id: string, commit: string) =>
+    req<{ files: GitFileChange[] }>(`/api/projects/${id}/git-commit-files?commit=${encodeURIComponent(commit)}`),
+  gitCommitPatch: (id: string, commit: string, path?: string) => {
+    const qs = path ? `&path=${encodeURIComponent(path)}` : ''
+    return reqText(`/api/projects/${id}/git-commit-patch?commit=${encodeURIComponent(commit)}${qs}`)
+  },
+  gitWorking: (id: string) => req<{ files: GitWorkingFile[] }>(`/api/projects/${id}/git-working`),
 
   // conversations
   listConversations: (q: { scope?: string; agent_id?: string; project_id?: string } = {}) => {

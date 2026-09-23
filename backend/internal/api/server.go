@@ -55,6 +55,12 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/projects/validate-dir", s.validateProjectDir)
 	m.HandleFunc("GET /api/projects/{id}/dir-files", s.listDirFiles)
 	m.HandleFunc("GET /api/projects/{id}/dir-file", s.getDirFile)
+	// M12 REQ-102 深度版：Git 视图（提交历史 / 分支 / 变更明细）
+	m.HandleFunc("GET /api/projects/{id}/git-log", s.gitProjectLog)
+	m.HandleFunc("GET /api/projects/{id}/git-branches", s.gitProjectBranches)
+	m.HandleFunc("GET /api/projects/{id}/git-commit-files", s.gitProjectCommitFiles)
+	m.HandleFunc("GET /api/projects/{id}/git-commit-patch", s.gitProjectCommitPatch)
+	m.HandleFunc("GET /api/projects/{id}/git-working", s.gitProjectWorking)
 	m.HandleFunc("POST /api/agents", s.createAgent)
 	m.HandleFunc("GET /api/agents/{id}", s.getAgent)
 	m.HandleFunc("PUT /api/agents/{id}", s.updateAgent)
