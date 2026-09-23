@@ -7,3 +7,5 @@ web/tsconfig.tsbuildinfo
 /data/
 __pycache__/
 tools/bin/
+runtime-manager/data/
+runtime-manager/run/

@@ -15,11 +15,14 @@ import type {
   ChunksToKGResult,
   KBDoc,
   KBSearchResult,
+  KGReadResult,
   KGToSpecResult,
   KnowledgeBase,
   LearningExample,
   OntoBuildResult,
   OntoBuildSelectableKB,
+  OntoDecision,
+  OntoDecisionInput,
   PipelineCatalogResponse,
   PipelineDetail,
   PipelineProfile,
@@ -34,16 +37,6 @@ import type {
   ProviderModelList,
   RunEventDTO,
   RuntimeProfile,
-  SemanticaCausalResult,
-  SemanticaCausalType,
-  SemanticaDecisionChain,
-  SemanticaDecisionInput,
-  SemanticaDecisionsResponse,
-  SemanticaHealth,
-  SemanticaIngestResult,
-  SemanticaLineage,
-  SemanticaQueryResult,
-  SemanticaStats,
   Skill,
   Spec,
   ToolInfo,
@@ -216,11 +209,11 @@ export const api = {
   reindexKBDoc: (kbId: string, docId: string) => req<KBDoc>(`/api/kb/${kbId}/docs/${docId}/reindex`, { method: 'POST' }),
   searchPreview: (kbId: string, q: string, topK?: number, minScore?: number) =>
     req<KBSearchResult>(`/api/kb/${kbId}/search-preview`, { method: 'POST', body: JSON.stringify({ query: q, top_k: topK, min_score: minScore }) }),
-  // M14 D-KB4：GraphRAG 子模块直查（worker 不可达返回 degraded:true，不抛错）
+  // M14 D-KB4：GraphRAG 子模块直查（D-O15 自研：KG 无命中返回 degraded:true，不抛错）
   graphragSearchKB: (kbId: string, q: string, maxResults?: number) =>
     req<KBSearchResult>(`/api/kb/${kbId}/graphrag-search`, { method: 'POST', body: JSON.stringify({ query: q, max_results: maxResults }) }),
 
-  // ---- O13 由知识库构建本体（REQ-108；精确路由压过本体/semantica 反代前缀） ----
+  // ---- O13 由知识库构建本体（REQ-108；精确路由压过本体反代前缀） ----
   selectableKBsForBuild: () => req<OntoBuildSelectableKB[]>('/api/kbs/selectable-for-ontology-build'),
   buildFromKB: (input: {
     kb_id: string
@@ -228,10 +221,31 @@ export const api = {
     cq_mode: 'auto' | 'custom' | 'skip'
     custom_cqs?: string[]
   }) => req<OntoBuildResult>('/api/ontologies/build-from-kb', { method: 'POST', body: JSON.stringify(input) }),
-  chunksToKG: (kbId: string) =>
-    req<ChunksToKGResult>('/api/semantica/chunks-to-kg', { method: 'POST', body: JSON.stringify({ kb_id: kbId }) }),
+  // D-O15：显式重建自存 KG（原 /api/semantica/chunks-to-kg 退役）
+  chunksToKG: (kbId: string) => req<ChunksToKGResult>(`/api/kg/${kbId}/rebuild`, { method: 'POST' }),
   kgToSpecJSON: (kbId: string) =>
     req<KGToSpecResult>('/api/ontologies/kg-to-spec-json', { method: 'POST', body: JSON.stringify({ kb_id: kbId }) }),
+
+  // ---- KG 自存 + 消费/审计（D-O15/REQ-110：主平台自研，零外部进程） ----
+  /** 某库全量 KG 子图 + 计数（GET /api/kg/{kbID}） */
+  kgRead: (kbId: string) => req<KGReadResult>(`/api/kg/${kbId}`),
+  /** 审计决策列表（GET /api/audit/decisions；subject_kind/subject_id/limit 可选） */
+  listDecisions: (q: { subject_kind?: string; subject_id?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (q.subject_kind) params.set('subject_kind', q.subject_kind)
+    if (q.subject_id) params.set('subject_id', q.subject_id)
+    if (q.limit) params.set('limit', String(q.limit))
+    const qs = params.toString()
+    return req<OntoDecision[]>(`/api/audit/decisions${qs ? '?' + qs : ''}`)
+  },
+  /** 手工/系统补录决策留痕（POST /api/audit/decisions）→ 201 */
+  createDecision: (d: OntoDecisionInput) =>
+    req<OntoDecision>('/api/audit/decisions', { method: 'POST', body: JSON.stringify(d) }),
+  /** 溯源链：沿 derived_from 回溯（GET /api/audit/decisions/{id}/chain；32 跳封顶） */
+  decisionChain: (id: string) => req<OntoDecision[]>(`/api/audit/decisions/${encodeURIComponent(id)}/chain`),
+  /** PROV-O 导出（GET /api/audit/prov-export?kb_id=）→ text/turtle 原文（Go 原生模板，零 rdflib） */
+  provExport: (kbId?: string) =>
+    reqText(`/api/audit/prov-export${kbId ? `?kb_id=${encodeURIComponent(kbId)}` : ''}`),
 
   // ---- M7 技能（§8：/api/skills 系列 + 注入预览） ----
   listSkills: () => req<Skill[]>('/api/skills'),
@@ -347,45 +361,6 @@ export const api = {
   /** 某版本原始源文件下载地址（REQ-93；>1MB 时前端提示下载查看而非渲染） */
   versionOriginalUrl: (ontologyId: string, version: number) =>
     `/api/ontologies/${ontologyId}/versions/${version}/original`,
-
-  // ---- Semantica 独立栏（§4.9 D-O10；REQ-99~101；反代 /api/semantica/* → worker :8093）----
-  /** worker 健康/图规模；未启动 → 反代 502（UI 降级） */
-  semanticaHealth: () => req<SemanticaHealth>('/api/semantica/health'),
-  /** 本体 TTL → KG：worker ingest + GraphBuilder（返回实体/关系数与警告） */
-  semanticaIngestTtl: (ontologyId: string, ttl: string) =>
-    req<SemanticaIngestResult>('/api/semantica/ingest-ttl', {
-      method: 'POST',
-      body: JSON.stringify({ ontology_id: ontologyId, ttl }),
-    }),
-  /** GraphRAG 语义问答（向量 + 图混合检索） */
-  semanticaQuery: (q: string, maxResults?: number) =>
-    req<SemanticaQueryResult>('/api/semantica/query', {
-      method: 'POST',
-      body: JSON.stringify({ q, max_results: maxResults }),
-    }),
-  /** record_decision 落决策记录（PROV-O 审计链） */
-  semanticaRecordDecision: (d: SemanticaDecisionInput) =>
-    req<{ decision_id: string }>('/api/semantica/decision', { method: 'POST', body: JSON.stringify(d) }),
-  /** 决策列表（worker 侧已按 limit 截断） */
-  semanticaDecisions: (limit = 20) => req<SemanticaDecisionsResponse>(`/api/semantica/decisions?limit=${limit}`),
-  /** 图规模统计 */
-  semanticaStats: () => req<SemanticaStats>('/api/semantica/stats'),
-  /** 导出本体 Turtle 原文（ingest 数据源；复用既有构建平面导出端点，text/turtle） */
-  exportOntologyTurtle: (ontologyId: string) => reqText(`/api/ontologies/${ontologyId}/export?format=turtle`),
-  /** 决策因果链（GET /api/semantica/decision-chain/{id}；PROV-O 溯源，REQ-101） */
-  semanticaDecisionChain: (decisionId: string) =>
-    req<SemanticaDecisionChain>(`/api/semantica/decision-chain/${encodeURIComponent(decisionId)}`),
-  /** 实体 PROV-O 溯源（GET /api/semantica/lineage/{entity_id}；REQ-101） */
-  semanticaLineage: (entityId: string) =>
-    req<SemanticaLineage>(`/api/semantica/lineage/${encodeURIComponent(entityId)}`),
-  /** PROV-O 导出（GET /api/semantica/prov-export?format=turtle）→ text/turtle 原文（错误为 JSON {error}） */
-  semanticaProvExport: (format = 'turtle') => reqText(`/api/semantica/prov-export?format=${encodeURIComponent(format)}`),
-  /** 写入因果/先例关系（POST /api/semantica/causal；type ∈ CAUSED|INFLUENCED|PRECEDENT_FOR） */
-  semanticaAddCausal: (fromId: string, toId: string, type: SemanticaCausalType = 'CAUSED') =>
-    req<SemanticaCausalResult>('/api/semantica/causal', {
-      method: 'POST',
-      body: JSON.stringify({ from_id: fromId, to_id: toId, type }),
-    }),
 
   // ---- P2 本体增量（REQ-95 diff / REQ-96 CSV 灌装 / REQ-83 fork）----
   /** 版本 diff：GET /api/ontologies/{id}/diff?from&to；400 版本无快照 / 404 → ApiError（UI 内联 Alert） */

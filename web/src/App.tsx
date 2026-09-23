@@ -6,7 +6,6 @@ import SettingsPage from './pages/SettingsPage'
 import KnowledgePage from './pages/KnowledgePage'
 import SkillsPage from './pages/SkillsPage'
 import OntologyPage from './pages/OntologyPage'
-import SemanticaPage from './pages/SemanticaPage'
 
 export default function App() {
   const { page } = useUI()
@@ -20,7 +19,6 @@ export default function App() {
         {page === 'ontology' && <OntologyPage />}
         {page === 'knowledge' && <KnowledgePage />}
         {page === 'skills' && <SkillsPage />}
-        {page === 'semantica' && <SemanticaPage />}
         {page === 'settings' && <SettingsPage />}
       </div>
     </div>

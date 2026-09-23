@@ -183,7 +183,7 @@ export default function KnowledgePage() {
       const r = await api.graphragSearchKB(active.id, q, topK ?? undefined)
       setSearchMeta({ mode: r.mode, degraded: r.degraded, error: r.error })
       setHits(r.hits ?? [])
-      if (r.degraded) showToast('semantica worker 不可达，GraphRAG 检索降级', 'err')
+      if (r.degraded) showToast('KG 无命中或不可用，GraphRAG 检索已降级为向量', 'err')
     } catch (e: any) {
       showToast(e.message, 'err')
       setHits(null)
@@ -250,13 +250,13 @@ export default function KnowledgePage() {
       render: (_, d: KBDoc) => {
         const st = docStatusOf(d.status)
         const badge = <Badge status={st.status} text={st.text} />
-        const tip = [d.status === 'failed' ? d.error : '', d.graphrag?.degraded ? `KG 抽取降级：${d.graphrag.error ?? 'worker 不可达'}` : ''].filter(Boolean).join('；')
+        const tip = [d.status === 'failed' ? d.error : '', d.graphrag?.degraded ? `KG 抽取降级：${d.graphrag.error ?? '抽取异常'}` : ''].filter(Boolean).join('；')
         const withGr = d.graphrag && (
           <span style={{ marginInlineStart: 6 }}>
             {d.graphrag.degraded ? (
               <Tag color="warning" style={{ margin: 0, fontSize: 11 }}>KG 降级</Tag>
             ) : (
-              <Tooltip title={`KG 抽取完成（${d.graphrag.method ?? 'semantica'}：实体 ${d.graphrag.entities ?? 0} / 关系 ${d.graphrag.relationships ?? 0}）`}>
+              <Tooltip title={`KG 抽取完成（${d.graphrag.method ?? 'llm'}：实体 ${d.graphrag.entities ?? 0} / 关系 ${d.graphrag.relationships ?? 0}）`}>
                 <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>KG ✓</Tag>
               </Tooltip>
             )}
@@ -396,7 +396,7 @@ export default function KnowledgePage() {
                   showIcon
                   style={{ marginBottom: 12 }}
                   message="GraphRAG 子模块（M14）"
-                  description="文档索引后自动把 chunks 同步抽取为 KG（semantica worker :8093 /graphrag/ingest）；检索优先 GraphRAG，worker 不可达自动回退向量检索（不阻断）。注意：KG 抽取与 embedding 是两套独立模型，chunk 切分质量直接影响抽取输入。"
+                  description="文档索引后自动把 chunks 同步抽取为自存 KG（D-O15 自研抽取：REQ-98 LLM 主路径 + 规则回退，零外部进程）；检索优先 GraphRAG，KG 无命中自动回退向量检索（不阻断）。注意：KG 抽取与 embedding 是两套独立模型，chunk 切分质量直接影响抽取输入。"
                 />
               )}
               <div className="stat-strip">
@@ -635,14 +635,14 @@ function CreateKBModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           label="子模块模式（M14 D-KB4）"
           extra={
             mode === 'graphrag'
-              ? 'GraphRAG：chunks 额外抽取为 KG（依赖 semantica worker :8093）；KG 抽取与 embedding 是两套独立模型，切分质量影响抽取输入；worker 不可达自动回退向量检索。'
+              ? 'GraphRAG：chunks 额外抽取为自存 KG（D-O15 自研，零外部进程）；KG 抽取与 embedding 是两套独立模型，切分质量影响抽取输入；KG 无命中自动回退向量检索。'
               : 'RAG：向量检索（默认）。GraphRAG 模式额外构建 KG，适合关系型问答。'
           }
         >
           <Select
             options={[
               { value: 'rag', label: 'RAG（向量检索）' },
-              { value: 'graphrag', label: 'GraphRAG（KG + 向量，需 semantica worker）' },
+              { value: 'graphrag', label: 'GraphRAG（KG + 向量混合检索）' },
             ]}
           />
         </Form.Item>

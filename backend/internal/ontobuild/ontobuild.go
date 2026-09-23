@@ -1,5 +1,5 @@
 // Package ontobuild 实现「由知识库构建本体」（O13，D-O14/REQ-108，M15）——
-// 构建栏第六路径的编排层：KB（M6/M14）× LLM 能力代理（REQ-98）× semantica worker（D-O10）三方粘合。
+// 构建栏第六路径的编排层：KB（M6/M14）× LLM 能力代理（REQ-98）× 自存 KG（D-O15/REQ-110）多方粘合。
 package ontobuild
 
 import (
@@ -19,9 +19,9 @@ import (
 //
 // 三种抽取策略（04 §3.7）：
 //   A chunk-llm：KB chunk 池 → LLM 抽 spec_json（复用 chat.GenerateStructured，REQ-82/90 CQ 引导）
-//   B kg-direct：GraphRAG KG（worker /graphrag/kg 回读）→ 薄映射 spec_json（不做抽取）
+//   B kg-direct：自存 KG（D-O15：store kg_* 表直读）→ 薄映射 spec_json（不做抽取）
 //   C hybrid：   B 初稿 + LLM 校验补全（definition / 缺失关系）
-// 本层不建 KG（复用 M14 GraphragIngest）、不做语义抽取（semantica 已抽好，只做映射）。
+// 本层不建 KG（复用 M14 槽位 GraphragIngest，D-O15 起为自研抽取落自存表）、只做映射。
 
 // Service 编排依赖（Store/Box 供 chat.GenerateStructured 使用；KB 供 chunk 池与 KG 回读）。
 // 独立成包的原因：chat → kb 已有依赖，本层再引 kb 会成环（api 层聚合注入）。
@@ -78,14 +78,13 @@ func (s *Service) SelectableKBs() ([]*SelectableKB, error) {
 				item.ChunkCount += d.ChunkCount
 			}
 		}
-		// KG 规模从 worker 按库回读（O13：worker kb_kg.json 为 KG 子图权威记录；
-		// doc.Graphrag 仅当次接口回显不落库，不能作为统计来源）。worker 不可达时
-		// 保持 0/false，降级不阻断选择器（M14 同款语义）。
+		// KG 规模自存表直读（D-O15：kg_entity/kg_relationship 为主平台一等数据，
+		// 无需外部回读，永不降级）。
 		if k.Mode == "graphrag" {
-			if kg, err := s.KB.GraphragKG(context.Background(), k.ID); err == nil && kg != nil {
-				item.KGEntities = len(kg.Entities)
-				item.KGRelationships = len(kg.Relationships)
-				item.KGReady = len(kg.Entities) > 0 || len(kg.Relationships) > 0
+			if ents, rels, err := s.Store.KGCounts(k.ID); err == nil {
+				item.KGEntities = ents
+				item.KGRelationships = rels
+				item.KGReady = ents > 0 || rels > 0
 			}
 		}
 		out = append(out, item)
@@ -150,7 +149,7 @@ type BuildResult struct {
 	KBID       string      `json:"kb_id"`
 	KBName     string      `json:"kb_name"`
 	Strategy   string      `json:"strategy"` // chunk-llm | kg-direct | hybrid
-	Method     string      `json:"method,omitempty"` // KG 来源抽取方式（策略 B/C）：semantica | lightweight
+	Method     string      `json:"method,omitempty"` // KG 来源抽取方式（策略 B/C）：llm | lightweight
 	CQMode     string      `json:"cq_mode"`
 	CQs        []string    `json:"cqs,omitempty"` // 生成的/采用的能力问题（REQ-90）
 	Rounds     int         `json:"rounds"`        // LLM 调用轮数（1 = 首轮即成；2 = 含一次校验修复）
@@ -196,10 +195,10 @@ func (s *Service) BuildFromKB(ctx context.Context, kbID, strategy, cqMode string
 	case "kg-direct", "hybrid": // 策略 B / C
 		kg, err := s.KB.GraphragKG(ctx, kbID)
 		if err != nil {
-			return nil, &store.HTTPError{Status: 502, Msg: "KG 回读失败（semantica worker 不可达或该库无 KG）: " + err.Error()}
+			return nil, &store.HTTPError{Status: 500, Msg: "KG 读取失败（自存表异常）: " + err.Error()}
 		}
 		if len(kg.Entities) == 0 {
-			return nil, &store.HTTPError{Status: 400, Msg: "该知识库尚无 KG（graphrag 模式导入后才有；可先 POST /api/semantica/chunks-to-kg 显式构建）"}
+			return nil, &store.HTTPError{Status: 400, Msg: "该知识库尚无 KG（graphrag 模式导入后自动抽取；也可先 POST /api/kg/{id}/rebuild 显式重建）"}
 		}
 		res.Method = kg.Method
 		res.Spec = MapKGToSpec(kg, k.Name)
@@ -466,8 +465,8 @@ func ValidateBuildSpec(spec *buildSpec) *SpecReport {
 	return rep
 }
 
-// ChunksToKG 显式把某 KB 的 chunk 池推给 worker 建 KG（POST /api/semantica/chunks-to-kg；
-// graphrag 模式导入时已自动做，此处供 rag 模式 KB / 重建场景）。
+// ChunksToKG 显式重建某 KB 的自存 KG（POST /api/kg/{id}/rebuild；
+// graphrag 模式导入时已自动做，此处供重建/强制刷新场景）。
 func (s *Service) ChunksToKG(ctx context.Context, kbID string) (*store.GraphragInfo, int, error) {
 	if _, err := s.Store.GetKnowledgeBase(kbID); err != nil {
 		return nil, 0, err

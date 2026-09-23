@@ -16,6 +16,9 @@ type Service struct {
 	Store  *store.Store
 	Box    *secrets.Box
 	Vector VectorStore
+
+	// kgExtract KG 抽取注入点（D-O15：internal/kg 实现，api 层装配；nil = graphrag 抽取 degraded）
+	kgExtract KGExtractFunc
 }
 
 // NewService 构造（backend=qdrant|sqlite，qdrantURL 见 §469 QDRANT_URL）。

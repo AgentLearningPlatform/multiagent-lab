@@ -713,7 +713,7 @@ function ExportPane({ ontology }: { ontology: Ontology }) {
         showIcon
         style={{ marginBottom: 12 }}
         message="spec_json → Turtle 导出（O1 sidecar）"
-        description="从零创建的本体（仅有 spec_json）经此导出 RDF 形态后，可在 SPARQL 型运行方案（Oxigraph/Fuseki）中加载运行；导出也可供 semantica 消费建库（消费环节见 Semantica 独立栏）。"
+        description="从零创建的本体（仅有 spec_json）经此导出 RDF 形态后，可在 SPARQL 型运行方案（Oxigraph/Fuseki）中加载运行；消费与审计环节见本体模块「消费与审计」栏（D-O15 自研 KG）。"
       />
       <Space>
         <Button

@@ -39,10 +39,10 @@ type KnowledgeDoc struct {
 	Graphrag *GraphragInfo `json:"graphrag,omitempty"`
 }
 
-// GraphragInfo graphrag 文档与 semantica worker 的联动结果（M14 ②⑥：worker 不可达 = degraded 不阻断）。
+// GraphragInfo graphrag 文档与 KG 抽取的联动结果（M14 ②⑥ 建制；D-O15 起自研抽取，degraded 不阻断语义保留）。
 type GraphragInfo struct {
 	OK            bool     `json:"ok"`
-	Method        string   `json:"method,omitempty"` // semantica | lightweight
+	Method        string   `json:"method,omitempty"` // llm | lightweight（D-O15 自研抽取方式）
 	Chunks        int      `json:"chunks,omitempty"`
 	Entities      int      `json:"entities,omitempty"`
 	Relationships int      `json:"relationships,omitempty"`
@@ -178,6 +178,7 @@ func (s *Store) DeleteKnowledgeBase(id string) error {
 	}
 	s.DB.Exec(`DELETE FROM knowledge_chunk WHERE kb_id = ?`, id)
 	s.DB.Exec(`DELETE FROM knowledge_doc WHERE kb_id = ?`, id)
+	s.deleteKG(id, "") // D-O15：KG 自存行级联清理
 	return nil
 }
 
@@ -246,6 +247,7 @@ func (s *Store) DeleteKnowledgeDoc(kbID, docID string) error {
 		return ErrNotFound
 	}
 	s.DB.Exec(`DELETE FROM knowledge_chunk WHERE doc_id = ?`, docID)
+	s.deleteKG(kbID, docID) // D-O15：KG 自存行级联清理
 	return nil
 }
 

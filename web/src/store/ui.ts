@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { toast } from '../lib/antd'
 
-export type PageKey = 'agents' | 'projects' | 'ontology' | 'knowledge' | 'skills' | 'semantica' | 'settings'
+export type PageKey = 'agents' | 'projects' | 'ontology' | 'knowledge' | 'skills' | 'settings'
 
 /** PageKey ↔ URL path 双向映射（刷新/前进后退保持当前页面） */
 const PAGE_PATHS: Record<PageKey, string> = {
@@ -10,11 +10,12 @@ const PAGE_PATHS: Record<PageKey, string> = {
   ontology: '/ontology',
   knowledge: '/knowledge',
   skills: '/skills',
-  semantica: '/semantica',
   settings: '/settings',
 }
 function pageFromPath(pathname: string): PageKey {
   const p = pathname.replace(/\/+$/, '') || '/'
+  // D-O15：原 Semantica 独立栏（/semantica）并入本体模块第五栏「消费与审计」，旧链接回落本体页
+  if (p === '/semantica') return 'ontology'
   const hit = (Object.entries(PAGE_PATHS) as [PageKey, string][]).find(([, v]) => v === p)
   return hit ? hit[0] : 'agents' // 未知路径回落首页
 }

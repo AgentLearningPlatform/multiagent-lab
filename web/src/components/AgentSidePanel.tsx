@@ -33,10 +33,9 @@ function Section({ children, first }: { children: ReactNode; first?: boolean }) 
   )
 }
 
-/** 本地已知 MCP server 预设（REQ-99 ③：semantica 一键挂载；后续 open-ontologies 等随里程碑补入） */
-const MCP_PRESETS: { name: string; url: string; desc: string }[] = [
-  { name: 'semantica', url: 'http://127.0.0.1:8093/mcp', desc: 'Semantica 语义检索 / 图谱 / 决策记录（需 semantica-worker 运行中）' },
-]
+/** 本地已知 MCP server 预设（REQ-99 ③ 通用挂载契约保留；D-O15 起 semantica 预设随「去-semantica 化」移除，
+ *  通用 MCP servers 编辑能力不变，后续 open-ontologies 等预设随里程碑补入） */
+const MCP_PRESETS: { name: string; url: string; desc: string }[] = []
 
 /** MCP server 编辑行（name + url，Form.List 受控） */
 function McpServerRow({ name, remove }: { name: number; remove: (i: number) => void }) {
@@ -50,7 +49,7 @@ function McpServerRow({ name, remove }: { name: number; remove: (i: number) => v
           { pattern: /^[a-zA-Z0-9_-]+$/, message: '字母/数字/下划线/连字符' },
         ]}
       >
-        <Input placeholder="名称（如 semantica）" style={{ width: '38%' }} />
+        <Input placeholder="名称（如 my-mcp）" style={{ width: '38%' }} />
       </Form.Item>
       <Form.Item
         name={[name, 'url']}

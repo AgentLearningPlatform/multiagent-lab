@@ -17,6 +17,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kg"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
@@ -62,6 +63,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("init knowledge base service: %v", err)
 	}
+	// D-O15/REQ-110：KG 自研抽取器注入（REQ-98 LLM 能力代理主路径 + 规则抽取回退，零外部进程；
+	// KG_LLM_CONN_ID 可选指定模型连接，缺省走默认 chat 连接）
+	kbSvc.SetKGExtractor((&kg.Extractor{Store: st, Box: box, ConnID: getenv("KG_LLM_CONN_ID", "")}).ExtractForDoc)
 
 	svc := chat.NewService(st, asm, kbSvc)
 	svc.Inference = inference.NewRegistry() // M13/D-O13 §6.16：推理后端注册表（eino-adk + 外部 CLI）
@@ -122,8 +126,7 @@ func withStatic(next http.Handler) http.Handler {
 	}
 	fs := http.FileServer(http.Dir(abs))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") ||
-			strings.HasPrefix(r.URL.Path, "/semantica/") { // Semantica Explorer iframe（§4.9.2/§4.9.4）
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") {
 			next.ServeHTTP(w, r)
 			return
 		}

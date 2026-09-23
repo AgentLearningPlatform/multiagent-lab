@@ -213,7 +213,7 @@ function KbBuildFlow() {
               showIcon
               style={{ marginTop: 12 }}
               message={`「${selected.name}」尚无 KG`}
-              description="策略 B / C 需要先抽取 KG。点击下方按钮把该库 chunk 语料推给 semantica worker 构建（graphrag 模式导入文档时也会自动构建）。"
+              description="策略 B / C 需要先抽取 KG。点击下方按钮用自研抽取器重建（REQ-98 LLM 主路径 + 规则回退，D-O15；graphrag 模式导入文档时也会自动构建）。"
               action={
                 <Button size="small" icon={<DatabaseOutlined />} loading={buildingKG === selected.id} onClick={() => buildKG(selected.id)}>
                   构建 KG

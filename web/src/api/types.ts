@@ -187,10 +187,10 @@ export interface KnowledgeBase {
   updated_at: string
 }
 
-/** graphrag 文档索引后的 worker 联动结果（M14 ②⑥：degraded = worker 不可达，非阻断） */
+/** graphrag 文档索引后的 KG 抽取结果（M14 ②⑥ 建制；D-O15 起自研抽取，degraded = 非阻断降级） */
 export interface KBGraphragInfo {
   ok?: boolean
-  method?: 'semantica' | 'lightweight'
+  method?: 'llm' | 'lightweight'
   chunks?: number
   entities?: number
   relationships?: number
@@ -218,7 +218,7 @@ export interface KBHit {
   excerpt: string
 }
 
-/** 检索响应（M14 ③④：mode = 实际生效的检索路径；degraded = worker 不可达回退） */
+/** 检索响应（M14 ③④：mode = 实际生效的检索路径；degraded = KG 无命中/异常回退向量） */
 export interface KBSearchResult {
   kb_id: string
   mode?: 'rag' | 'graphrag'
@@ -266,7 +266,7 @@ export interface OntoBuildResult {
   warnings?: string[]
 }
 
-/** chunks-to-kg 结果（POST /api/semantica/chunks-to-kg；graphrag 复用 M14 GraphragInfo） */
+/** chunks-to-kg 结果（D-O15：POST /api/kg/{id}/rebuild 显式重建自存 KG；graphrag 复用 M14 GraphragInfo） */
 export interface ChunksToKGResult {
   kb_id: string
   chunks: number
@@ -506,109 +506,70 @@ export interface LearningExample {
   description: string
 }
 
-// ---- Semantica 独立栏（docs/04 §4.9 D-O10；REQ-99~101；主平台反代 /api/semantica/* → worker :8093）----
+// ---- KG 自存 + 消费/审计（D-O15/REQ-110：去-semantica 化，主平台自研 /api/kg、/api/audit）----
 
-/** worker 健康与图规模（GET /api/semantica/health；worker 未启动时反代 502） */
-export interface SemanticaHealth {
-  ok: boolean
-  version: string
-  graph_loaded: boolean
-  entities: number
-  relationships: number
-  decisions: number
+/** KG 实体（GET /api/kg/{kbID}；name 库内业务键，同 KB 跨 doc 同名归一） */
+export interface KGEntity {
+  id: string
+  kb_id: string
+  doc_id?: string
+  name: string
+  type?: string
+  description?: string
+  created_at?: string
 }
 
-/** TTL 摄入结果（POST /api/semantica/ingest-ttl） */
-export interface SemanticaIngestResult {
-  ontology_id: string
-  entities: number
-  relationships: number
-  warnings: string[] | null
+/** KG 关系（source/target 引用实体 name；type 为大写短语，如 IS_A/具有/引发） */
+export interface KGRelationship {
+  id: string
+  kb_id: string
+  doc_id?: string
+  source: string
+  target: string
+  type?: string
+  created_at?: string
 }
 
-/** GraphRAG 命中片段（POST /api/semantica/query） */
-export interface SemanticaClaim {
+/** KG claim：实体的一条可溯源陈述（原文句），chunk_id 指向出处片段 */
+export interface KGClaim {
+  id: string
+  kb_id: string
+  doc_id?: string
+  chunk_id?: string
+  subject: string
   text: string
-  source_node?: string | null
-  score?: number | null
+  created_at?: string
 }
 
-export interface SemanticaQueryResult {
-  claims: SemanticaClaim[] | null
-  query: string
+/** KG 子图读取结果（GET /api/kg/{kbID}；消费页图谱/审计页数据源） */
+export interface KGReadResult {
+  kb_id: string
+  entities: KGEntity[]
+  relationships: KGRelationship[]
+  claims: KGClaim[]
+  counts: { entities: number; relationships: number; claims: number }
 }
 
-/** 决策录入入参（POST /api/semantica/decision） */
-export interface SemanticaDecisionInput {
-  category: string
-  scenario: string
-  reasoning: string
-  outcome: string
-  confidence?: number
-}
-
-/** 决策记录（GET /api/semantica/decisions；worker 防御式归一化，字段可能缺省） */
-export interface SemanticaDecision {
+/** 审计决策留痕（GET/POST /api/audit/decisions；derived_from 指向前置决策构成溯源链） */
+export interface OntoDecision {
   id: string
-  category?: string | null
-  scenario?: string | null
-  outcome?: string | null
-  confidence?: number | null
-  ts?: string | null
+  subject_kind: 'kg' | 'ontology' | 'kb' | 'manual'
+  subject_id: string
+  title: string
+  rationale?: string
+  derived_from?: string
+  meta_json?: string
+  created_at: string
 }
 
-export interface SemanticaDecisionsResponse {
-  decisions: SemanticaDecision[] | null
-}
-
-/** 图规模统计（GET /api/semantica/stats） */
-export interface SemanticaStats {
-  entities: number
-  relationships: number
-  decisions: number
-}
-
-// ---- Semantica 审计/溯源（REQ-101，§4.9.4）----
-
-/** 因果/先例关系类型（POST /api/semantica/causal） */
-export type SemanticaCausalType = 'CAUSED' | 'INFLUENCED' | 'PRECEDENT_FOR'
-
-/** 决策链节点（GET /api/semantica/decision-chain/{id}；worker 防御式归一化） */
-export interface SemanticaChainNode {
-  id: string
-  category?: string | null
-  scenario?: string | null
-  outcome?: string | null
-  confidence?: number | string | null
-  relation?: string | null
-  ts?: string | null
-}
-
-export interface SemanticaDecisionChain {
-  decision_id: string
-  chain: SemanticaChainNode[] | null
-  warnings?: string[] | null
-}
-
-/** PROV-O 溯源条目（GET /api/semantica/lineage/{entity_id}；source/metadata/type 形状不定） */
-export interface SemanticaProvNode {
-  id: string
-  source?: unknown
-  metadata?: unknown
-  type?: unknown
-}
-
-export interface SemanticaLineage {
-  entity_id: string
-  lineage: SemanticaProvNode[] | null
-  warnings?: string[] | null
-}
-
-export interface SemanticaCausalResult {
-  ok: boolean
-  from_id: string
-  to_id: string
-  type: string
+/** 审计决策录入入参（POST /api/audit/decisions；id/subject_kind 缺省由后端补） */
+export interface OntoDecisionInput {
+  subject_kind?: OntoDecision['subject_kind']
+  subject_id?: string
+  title: string
+  rationale?: string
+  derived_from?: string
+  meta_json?: string
 }
 
 // ---- P2 本体增量（REQ-95 版本 diff / REQ-96 CSV 灌装 / REQ-83 fork） ----

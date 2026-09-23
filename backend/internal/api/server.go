@@ -10,8 +10,8 @@ import (
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
-	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontobuild"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
@@ -112,11 +112,18 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/kb/{id}/search-preview", s.previewKBSearch)
 	m.HandleFunc("POST /api/kb/{id}/graphrag-search", s.graphragSearchKB) // M14 D-KB4：GraphRAG 子模块直查
 
-	// O13 由知识库构建本体（D-O14/REQ-108，M15）：精确路由压过 /api/ontologies* /api/semantica* 反代前缀
+	// O13 由知识库构建本体（D-O14/REQ-108，M15）：精确路由压过 /api/ontologies* 反代前缀
 	m.HandleFunc("GET /api/kbs/selectable-for-ontology-build", s.selectableForOntologyBuild)
 	m.HandleFunc("POST /api/ontologies/build-from-kb", s.buildFromKB)
 	m.HandleFunc("POST /api/ontologies/kg-to-spec-json", s.kgToSpecJSON)
-	m.HandleFunc("POST /api/semantica/chunks-to-kg", s.chunksToKG)
+
+	// KG 自存 + 消费/审计（D-O15/REQ-110：去-semantica 化，零外部进程）
+	m.HandleFunc("GET /api/kg/{kbID}", s.kgRead)
+	m.HandleFunc("POST /api/kg/{kbID}/rebuild", s.kgRebuild)
+	m.HandleFunc("GET /api/audit/decisions", s.listDecisions)
+	m.HandleFunc("POST /api/audit/decisions", s.createDecision)
+	m.HandleFunc("GET /api/audit/decisions/{id}/chain", s.decisionChain)
+	m.HandleFunc("GET /api/audit/prov-export", s.provExport)
 
 	m.HandleFunc("GET /api/skills", s.listSkills)
 	m.HandleFunc("POST /api/skills", s.createSkill)
@@ -136,12 +143,8 @@ func (s *Server) routes() {
 		m.Handle("/api/ontochat/", s.Ontology.BuildProxy())
 		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
 		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
-		// Semantica 独立栏（§4.9 D-O10）：剥离前缀反代到 worker，:8093
-		m.Handle("/api/semantica", s.Ontology.SemanticaProxy()) // → SEMANTICA_WORKER_URL(:8093)
-		m.Handle("/api/semantica/", s.Ontology.SemanticaProxy())
-		// Semantica Explorer iframe 嵌入（§4.9.2/§4.9.4）：/semantica/explorer/* → worker /explorer/*（剥离 X-Frame-Options）
-		m.Handle("/semantica/explorer", s.Ontology.SemanticaExplorerProxy())
-		m.Handle("/semantica/explorer/", s.Ontology.SemanticaExplorerProxy())
+		// D-O15：/api/semantica* 与 /semantica/explorer* 反代已随「去-semantica 化」移除，
+		// 消费/审计改走上方自研 /api/kg、/api/audit 端点（§4.9 反转注记）
 	}
 }
 

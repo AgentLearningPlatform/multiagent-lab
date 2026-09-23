@@ -19,18 +19,18 @@ import KbBuildFlow from './BuildFromKBFlow'
 // ---------------------------------------------------------------------------
 // 本体构建（BuildPage，REQ-104 ②）：按构建路径分二级模块（六路径分层标注状态）
 //   自定义构建（可用，现有页面主体 S1~S4）| OntoChat 流程（可用，REQ-103 模式 A 载体）
-//   | 由知识库构建（部分可用，O13/D-O14 REQ-108 独立流程页）| semantica 流程（入口卡）
+//   | 由知识库构建（部分可用，O13/D-O14 REQ-108 独立流程页）| KG 消费流程（入口卡，D-O15 改造）
 //   | OntoExtend 流程（引导卡）| Open Ontologies 流程（引导+回流）
 //   未工程化路径显示引导卡、不做空壳交互（D-O11）
 // ---------------------------------------------------------------------------
 
-type BuildPath = 'custom' | 'ontochat' | 'semantica' | 'ontoextend' | 'oo' | 'kb'
+type BuildPath = 'custom' | 'ontochat' | 'kg' | 'ontoextend' | 'oo' | 'kb'
 
 const PATHS: { key: BuildPath; label: string; state: 'ok' | 'partial' | 'guide'; desc: string }[] = [
   { key: 'custom', label: '自定义构建', state: 'ok', desc: 'S1 来源 → S2 编辑 → S3 校验 → S4 可视化（七阶段前 4 步）' },
   { key: 'ontochat', label: 'OntoChat 流程', state: 'ok', desc: '对话式 CQ 引导 → 逐轮补全 → 草稿入库（REQ-103 模式 A）' },
   { key: 'kb', label: '由知识库构建', state: 'partial', desc: 'KB chunk→LLM / KG→直转 / 混合三策略独立流程页（O13，D-O14/REQ-108）' },
-  { key: 'semantica', label: 'semantica 流程', state: 'guide', desc: '入口卡跳转 semantica 独立栏（D-O10 零侵入不破）' },
+  { key: 'kg', label: 'KG 消费流程', state: 'guide', desc: '入口卡跳转「消费与审计」栏（D-O15 自研 KG，原 semantica 流程改造）' },
   { key: 'ontoextend', label: 'OntoExtend 流程', state: 'guide', desc: '对话式扩展现有本体（引导先行，工程化另行评估）' },
   { key: 'oo', label: 'Open Ontologies 流程', state: 'guide', desc: '双轨引导 + 产物回流（REQ-78 互通后顺畅）' },
 ]
@@ -39,7 +39,7 @@ const STATE_TAG: Record<BuildPath, { color: string; text: string }> = {
   custom: { color: 'green', text: '可用' },
   ontochat: { color: 'green', text: '可用' },
   kb: { color: 'orange', text: '部分可用' },
-  semantica: { color: 'cyan', text: '引导' },
+  kg: { color: 'cyan', text: '引导' },
   ontoextend: { color: 'cyan', text: '引导先行' },
   oo: { color: 'cyan', text: '引导' },
 }
@@ -48,7 +48,9 @@ const ONTO_BUILD_PATH_KEY = 'eino.onto.buildPath'
 
 function readBuildPath(): BuildPath {
   const v = localStorage.getItem(ONTO_BUILD_PATH_KEY)
-  return v === 'ontochat' || v === 'semantica' || v === 'ontoextend' || v === 'oo' || v === 'kb' ? (v as BuildPath) : 'custom'
+  return v === 'ontochat' || v === 'kg' || v === 'semantica' /* 旧值兼容 */ || v === 'ontoextend' || v === 'oo' || v === 'kb'
+    ? (v as BuildPath)
+    : 'custom'
 }
 
 export default function BuildPage() {
@@ -97,7 +99,7 @@ export default function BuildPage() {
       {buildPath === 'custom' && <CustomFlow onGoKbPath={() => select('kb')} />}
       {buildPath === 'ontochat' && <OntoChatFlow onSaved={() => { /* 入库后产物进资产栏；此处留在会话页展示 done 态 */ }} />}
       {buildPath === 'kb' && <KbBuildFlow />}
-      {buildPath === 'semantica' && <SemanticaGuide />}
+      {buildPath === 'kg' && <KgGuide />}
       {buildPath === 'ontoextend' && <OntoExtendGuide />}
       {buildPath === 'oo' && <OoGuide />}
     </div>
@@ -681,37 +683,38 @@ function S3ValidatePane({ ontologyId, onNext }: { ontologyId: string; onNext: ()
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// semantica 流程（入口卡，D-O10 零侵入不破）
+// KG 消费流程（入口卡，D-O15 改造：原 semantica 流程入口，改跳「消费与审计」第五栏）
 // ---------------------------------------------------------------------------
 
-function SemanticaGuide() {
+function KgGuide() {
   return (
     <Card className="work-card" size="small">
       <Alert
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="semantica 流程——KG 构建 / 图谱查询 / GraphRAG（独立栏承载）"
-        description="semantica（MIT，Python）是 AI Agent 的语义层与决策智能层。按 D-O10 零侵入原则，其能力不重收进构建平面：本平台本体导出 TTL → semantica 摄取建库（消费环节）→ GraphRAG 语义问答。"
+        message="KG 消费流程——自研 KG 图谱 / GraphRAG 试查 / 决策溯源（「消费与审计」栏承载）"
+        description="知识库 chunk 语料经 REQ-98 LLM 能力代理抽取为自存 KG（SQLite 实体/关系/claim，D-O15），再消费为 GraphRAG 检索上下文或由 KG 直转本体（策略 B/C）；抽取/构建决策全程留痕可溯源。原 semantica worker 依赖已归档休眠。"
       />
       <div className="onto-sec" style={{ marginTop: 0 }}>
         <span className="onto-sec-title">与主线边界</span>
       </div>
       <ul className="onto-report-list">
         <li>本体建模与校验：归主线构建平面（本栏）</li>
-        <li>KG 建库 / 图谱浏览 / GraphRAG 问答：归 semantica 独立栏</li>
-        <li>数据入口：本体资产栏「TTL 导出」→ semantica「数据摄取」</li>
+        <li>KG 图谱浏览 / GraphRAG 试查 / 决策审计：归「消费与审计」第五栏</li>
+        <li>KG→本体：本栏「由知识库构建」策略 B（kg-direct）/ C（hybrid）直读自存 KG</li>
       </ul>
       <Space style={{ marginTop: 12 }}>
         <Button
           type="primary"
           icon={<ApiOutlined />}
           onClick={() => {
-            // 顶部导航切页：page 状态机经 URL 同步（store/ui PAGE_PATHS）
-            window.location.assign('/semantica')
+            // 栏内切栏：sidebarKey 状态机经 localStorage + 事件同步（OntologyModule）
+            localStorage.setItem('eino.onto.sidebar', 'audit')
+            window.dispatchEvent(new CustomEvent('onto-sidebar-change'))
           }}
         >
-          前往 Semantica 独立栏
+          前往消费与审计栏
         </Button>
       </Space>
     </Card>

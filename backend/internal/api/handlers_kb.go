@@ -166,8 +166,8 @@ func (s *Server) previewKBSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"kb_id": k.ID, "mode": mode, "hits": hits, "degraded": degraded})
 }
 
-// graphragSearchKB GraphRAG 子模块直查（M14 ③：POST /api/kbs/{id}/graphrag-search → worker /query）。
-// worker 不可达时 200 + degraded:true（M14 ⑥ 非阻断降级语义，供 UI 友好提示）。
+// graphragSearchKB GraphRAG 子模块直查（M14 ③ 建制；D-O15 起自研：向量命中 → KG 一跳扩展）。
+// KG 未就绪/无命中时 200 + degraded:true（M14 ⑥ 非阻断降级语义保留，供 UI 友好提示）。
 func (s *Server) graphragSearchKB(w http.ResponseWriter, r *http.Request) {
 	k, err := s.Store.GetKnowledgeBase(r.PathValue("id"))
 	if err != nil {
@@ -190,7 +190,7 @@ func (s *Server) graphragSearchKB(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"kb_id": k.ID, "mode": "graphrag", "degraded": true,
-			"error": "semantica worker 不可达，GraphRAG 检索降级: " + err.Error(),
+			"error": "KG 无命中，已按向量检索口径降级（该库可先导入文档或重建 KG）: " + err.Error(),
 			"hits":  []kb.RetrievalHit{},
 		})
 		return
@@ -210,8 +210,9 @@ func truncateTitle(s string) string {
 }
 
 // ---- O13（D-O14/REQ-108）：由知识库构建本体——构建栏第六路径 4 端点 ----
-// 路由用「方法 + 精确路径」注册在反代前缀（/api/ontologies*、/api/semantica*）之上，
-// ServeMux 最长优先匹配会选中这里的精确模式，构建平面/worker 零侵入（04 §3.7）。
+// 路由用「方法 + 精确路径」注册在反代前缀（/api/ontologies*）之上，
+// ServeMux 最长优先匹配会选中这里的精确模式，构建平面零侵入（04 §3.7）。
+// D-O15 注：/api/semantica/chunks-to-kg 已随「去-semantica 化」退役 → POST /api/kg/{id}/rebuild。
 
 // selectableForOntologyBuild GET /api/kbs/selectable-for-ontology-build
 // KB 选择器：mode 徽标 + chunk 数 / KG 实体关系数预览。
@@ -255,31 +256,24 @@ func (s *Server) buildFromKB(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// chunksToKG POST /api/semantica/chunks-to-kg
-// {kb_id} → 把该 KB 的 chunk 池推给 semantica worker /graphrag/ingest 建 KG
-// （graphrag 模式导入时已自动；此处供 rag 模式 KB / 显式重建，M15 ④ 薄封装）。
-func (s *Server) chunksToKG(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		KBID string `json:"kb_id"`
-	}
-	if err := decodeJSON(r, &in); err != nil {
+// chunksToKG POST /api/kg/{id}/rebuild（D-O15 改挂自研 KG；原 /api/semantica/chunks-to-kg 退役）。
+// 显式重建该 KB 的自存 KG（graphrag 模式导入时已自动；此处供重建/强制刷新场景）。
+func (s *Server) kgRebuild(w http.ResponseWriter, r *http.Request) {
+	kbID := r.PathValue("kbID")
+	if _, err := s.Store.GetKnowledgeBase(kbID); err != nil {
 		writeErr(w, err)
 		return
 	}
-	if strings.TrimSpace(in.KBID) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kb_id is required"})
-		return
-	}
-	info, n, err := s.OntoBuild.ChunksToKG(r.Context(), in.KBID)
+	info, n, err := s.OntoBuild.ChunksToKG(r.Context(), kbID)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kb_id": in.KBID, "chunks": n, "graphrag": info})
+	writeJSON(w, http.StatusOK, map[string]any{"kb_id": kbID, "chunks": n, "graphrag": info})
 }
 
 // kgToSpecJSON POST /api/ontologies/kg-to-spec-json
-// {kb_id} → 回读 worker KG 做薄映射（entity→Concept / relation→Relation / HAS→具有），
+// {kb_id} → 读自存 KG 做薄映射（entity→Concept / relation→Relation / HAS→具有），
 // 不做语义抽取（04 §3.7 <300 行约定）；策略 B 的独立入口（策略 C 走 build-from-kb）。
 func (s *Server) kgToSpecJSON(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -300,11 +294,11 @@ func (s *Server) kgToSpecJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	kg, err := s.OntoBuild.KB.GraphragKG(r.Context(), in.KBID)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "KG 回读失败（semantica worker 不可达或该库无 KG）: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "KG 读取失败（自存表异常）: " + err.Error()})
 		return
 	}
 	if len(kg.Entities) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该知识库尚无 KG（可先 POST /api/semantica/chunks-to-kg 构建）"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该知识库尚无 KG（可先 POST /api/kg/" + in.KBID + "/rebuild 构建）"})
 		return
 	}
 	spec := ontobuild.MapKGToSpec(kg, k.Name)
