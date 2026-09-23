@@ -112,6 +112,13 @@ export default function ProjectModal({
         </Form.Item>
 
         <Section>本地目录（可选）</Section>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 8 }}
+          message="绑定即授权"
+          description="保存后，项目对话中的智能体即获得该目录范围内的文件读写权限（list_files / read_file / save_file + Git 只读展示）；路径越界由系统强制防护（无法访问目录之外）。请仅绑定可信目录。"
+        />
         <Form.Item
           label="本地目录（绝对路径）"
           extra="支持 Windows 盘符路径（C:\Users\…）与 POSIX 路径；绑定后，对话生成的文档（save_file）与文件列表将落在该目录；留空表示不绑定。"
