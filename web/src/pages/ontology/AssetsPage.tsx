@@ -31,6 +31,7 @@ import type { ArtifactMeta, Ontology, RuntimeProfile, Spec, ValidationError } fr
 import { useUI } from '../../store/ui'
 import { ERR_COLUMNS, ReloadHintAlert, sourceTag, stageDoneFlags, ontoStatus, type ValidationState } from './shared'
 import SpecGraph from './components/SpecGraph'
+import GraphEditor from './components/GraphEditor'
 import SourceView from './components/SourceView'
 import CsvIngestPane from './components/CsvIngestPane'
 
@@ -320,6 +321,13 @@ export default function AssetsPage() {
                   key: 'graph',
                   label: '可视化',
                   children: <SpecGraph spec={spec} />,
+                },
+                {
+                  key: 'graph-edit',
+                  label: '图形编辑',
+                  children: (
+                    <GraphEditor ontologyId={active.id} spec={spec} onSpecSaved={refreshAfterSave} />
+                  ),
                 },
                 {
                   key: 'export',
