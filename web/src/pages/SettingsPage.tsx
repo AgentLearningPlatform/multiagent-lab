@@ -3,6 +3,7 @@ import { Alert, Button, Checkbox, DatePicker, Form, Input, Menu, Modal, Popconfi
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import { api } from '../api/client'
+import { PROVIDER_PRESETS } from '../api/providerPresets'
 import type { InferenceBackendStatus, ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -310,7 +311,7 @@ export default function SettingsPage() {
               <div className="settings-head">
                 <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>模型管理</Typography.Title>
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                  提供商按 Base URL 聚合（同一 Base URL 下的多个模型共享提供商身份）；chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。
+                  提供商按 Base URL 聚合（同一 Base URL 下的多个模型共享提供商身份）；chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。添加提供商可从厂商预设（DeepSeek / 百炼 / 千帆 / 智谱 / Kimi / 硅基流动 / MiniMax / 星火）快速填充；已预置「百度千帆（预置）」embeddings-v1 向量连接候选——填入 Key 并启用即为默认向量连接。
                 </Typography.Paragraph>
               </div>
 
@@ -358,7 +359,16 @@ export default function SettingsPage() {
             group={providerModal}
             conns={conns}
             onClose={() => setProviderModal(undefined)}
-            onSaved={() => { setProviderModal(undefined); reload() }}
+            onSaved={(providerKey) => {
+              setProviderModal(undefined)
+              reload()
+              // REQ-106 串联 REQ-48：从预设/表单新建提供商后，展开该分组并挂自动发现面板，
+              // 可直接拉取该厂商可用模型批量建连（面板失败仍有手动添加降级）。
+              if (providerKey) {
+                setExpandedKeys((prev) => (prev.includes(providerKey) ? prev : [...prev, providerKey]))
+                setDiscoverKey(providerKey)
+              }
+            }}
           />
         )}
         {modelModal !== undefined && (
@@ -693,14 +703,27 @@ function StatsView() {
 /**
  * 提供商表单：
  * - 新建：后端无独立提供商实体，添加提供商将同时创建其首个模型连接（含模型名/类型）；
+ *   顶部「厂商预设」快速填充协议与 Base URL（REQ-106），仅需补 API Key 与模型名；
+ *   保存成功后返回新建分组的 key，由父级展开该行并挂自动发现面板（串联 REQ-48）。
  * - 编辑：名称/协议/Base URL/API Key/启用 批量应用到组内全部连接（名称按约定重生成）；API Key 留空 = 各连接保留已存 Key。
  */
-function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGroup | 'new'; conns: ModelConnection[]; onClose: () => void; onSaved: () => void }) {
+function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGroup | 'new'; conns: ModelConnection[]; onClose: () => void; onSaved: (providerKey?: string) => void }) {
   const { showToast } = useUI()
   const [form] = Form.useForm()
   const [busy, setBusy] = useState(false)
   const editGroup = group === 'new' ? null : group
   const keyMember = editGroup?.members.find((m) => m.has_key)
+  // 选中的厂商预设（REQ-106；仅新建态）
+  const [presetKey, setPresetKey] = useState<string | undefined>(undefined)
+  const preset = PROVIDER_PRESETS.find((p) => p.key === presetKey)
+
+  const applyPreset = (key?: string) => {
+    setPresetKey(key)
+    const p = PROVIDER_PRESETS.find((x) => x.key === key)
+    if (p) {
+      form.setFieldsValue({ name: p.name, protocol: 'openai_compat', base_url: p.baseUrl, model_name: p.defaultModel, conn_type: p.connType })
+    }
+  }
 
   useEffect(() => {
     if (editGroup) {
@@ -741,6 +764,10 @@ function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGrou
           enabled: v.enabled ?? true,
           is_default: false,
         })
+        // 新建成功：把分组 key 交回父级——展开该行并挂自动发现面板（REQ-106 串联 REQ-48）
+        showToast('已保存')
+        onSaved(`${v.protocol}::${v.base_url}`)
+        return
       }
       showToast('已保存')
       onSaved()
@@ -784,6 +811,29 @@ function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGrou
       }
     >
       <Form form={form} layout="vertical" requiredMark={false}>
+        {!editGroup && (
+          <Form.Item
+            label="从厂商预设快速填充"
+            extra={
+              preset?.console ? (
+                <>
+                  已自动填充协议与 Base URL，仅需补 API Key 与模型名；Key 申请：
+                  <Typography.Link href={preset.console} target="_blank" rel="noreferrer">{preset.console}</Typography.Link>
+                </>
+              ) : (
+                '选择厂商自动填充协议与 Base URL（REQ-105 预设清单）；也可留空手动填写'
+              )
+            }
+          >
+            <Select
+              placeholder="选择厂商预设（DeepSeek / 百炼 / 千帆 / 智谱 / Kimi / 硅基流动 / MiniMax / 星火）"
+              allowClear
+              value={presetKey}
+              onChange={applyPreset}
+              options={PROVIDER_PRESETS.map((p) => ({ value: p.key, label: `${p.name} · ${p.baseUrl}` }))}
+            />
+          </Form.Item>
+        )}
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]} extra={editGroup ? '改名将按「名称·模型名」重生成该提供商下全部连接名' : undefined}>
           <Input placeholder="DeepSeek 官方" />
         </Form.Item>
@@ -919,6 +969,15 @@ function ModelModal({ conn, groups, conns, initialProvider, onClose, onSaved }: 
       }
     >
       <Form form={form} layout="vertical" requiredMark={false}>
+        {!editConn && groups.length === 0 && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="尚无提供商"
+            description="请先关闭本弹窗，用「＋ 添加提供商」从厂商预设快速填充访问配置（仅需补 API Key）。"
+          />
+        )}
         <Form.Item name="provider" label="所属提供商" rules={[{ required: true, message: '请选择提供商；新提供商请先添加' }]}>
           <Select
             placeholder="选择提供商"
