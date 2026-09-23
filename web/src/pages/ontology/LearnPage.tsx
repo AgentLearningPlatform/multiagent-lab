@@ -10,6 +10,9 @@ import { api } from '../../api/client'
 import { useUI } from '../../store/ui'
 import { STAGE_DEFS } from './shared'
 import PipelinePane from './components/PipelinePane'
+import XMarkdown from '@ant-design/x-markdown'
+// REQ-109 外部资源导航：仓库随版本维护的内容资产（构建期内联，改 md 即生效无需改代码）
+import RESOURCES_MD from '../../../../seeds/learning/external-resources.md?raw'
 
 // ---------------------------------------------------------------------------
 // 学习中心（LearnPage，REQ-104 ①，默认页）：本体模块 = 学习各种本体构建、运行方式的模块
@@ -215,10 +218,10 @@ const BUILD_PATH_CARDS: { key: string; title: string; scene: string; points: str
   {
     key: 'kb',
     title: '由知识库构建',
-    scene: 'KB chunk→LLM 抽取 / GraphRAG KG→直转（KB→本体构建方向）',
-    points: '知识资产复用：语料/图谱 → 语义资产的直接通路（D-O14）',
-    state: { color: 'cyan', text: '引导' },
-    example: '设备故障知识库 → 设备故障本体（第 5 示例，随 O13）',
+    scene: 'KB chunk→LLM 抽取 / KG→直转 / 混合（KB→本体构建方向）',
+    points: '知识资产复用：语料/图谱 → 语义资产的直接通路（D-O14，O13 已工程化）',
+    state: { color: 'orange', text: '部分可用' },
+    example: '设备故障知识库 → 设备故障本体（第 5 示例，样例语料随 seeds/learning）',
   },
   {
     key: 'semantica',
@@ -542,6 +545,24 @@ export default function LearnPage() {
             key: 'pipeline',
             label: '工具链配置',
             children: <PipelinePane />,
+          },
+          {
+            key: 'external-resources',
+            label: '外部资源',
+            children: (
+              <>
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 10 }}
+                  message="可直接访问的平台与典型开源项目导航（REQ-109）"
+                  description="内容由仓库随版本维护的 seeds/learning/external-resources.md 渲染——编辑该文件并提交后即生效（构建期内联，无需改代码）。全局台账与登记状态见 docs/15_开源项目及论文登记簿.md。"
+                />
+                <div className="onto-learn-extres">
+                  <XMarkdown content={RESOURCES_MD} openLinksInNewTab />
+                </div>
+              </>
+            ),
           },
         ]}
         style={{ marginTop: 2 }}

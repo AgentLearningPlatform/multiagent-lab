@@ -21,6 +21,8 @@ export default defineConfig({
   plugins: [react(), stripIEHacks()],
   server: {
     port: 5173,
+    // REQ-109：允许 dev 模式直接 import 仓库根 seeds/learning/ 的内容资产（?raw 内联，单源维护）
+    fs: { allow: ['..'] },
     proxy: {
       '/api': { target: 'http://localhost:8080', changeOrigin: true },
     },
