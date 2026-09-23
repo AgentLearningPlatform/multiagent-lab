@@ -167,6 +167,8 @@ func (s *Server) previewKBSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // graphragSearchKB GraphRAG 子模块直查（M14 ③ 建制；D-O15 起自研：向量命中 → KG 一跳扩展）。
+// M16/REQ-128 增参：entity（实体聚焦，跳过向量命中）、hops（1~2）、relation_types（类型过滤），
+// 返回附命中路径上的 entities/relationships/claims 明细（claims 带 chunk 溯源 doc/seq）。
 // KG 未就绪/无命中时 200 + degraded:true（M14 ⑥ 非阻断降级语义保留，供 UI 友好提示）。
 func (s *Server) graphragSearchKB(w http.ResponseWriter, r *http.Request) {
 	k, err := s.Store.GetKnowledgeBase(r.PathValue("id"))
@@ -175,30 +177,42 @@ func (s *Server) graphragSearchKB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Query      string `json:"query"`
-		MaxResults int    `json:"max_results"`
+		Query      string   `json:"query"`
+		MaxResults int      `json:"max_results"`
+		Entity     string   `json:"entity"`
+		Hops       int      `json:"hops"`
+		RelTypes   []string `json:"relation_types"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, err)
 		return
 	}
-	if strings.TrimSpace(in.Query) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query is required"})
+	if strings.TrimSpace(in.Query) == "" && strings.TrimSpace(in.Entity) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query 或 entity 至少提供一个"})
 		return
 	}
-	hits, err := s.KB.GraphragQuery(r.Context(), k, in.Query, in.MaxResults)
+	detail, mode, degraded, err := s.KB.GraphragQueryWithFallbackDetail(r.Context(), k, in.Query, in.MaxResults, 0, kb.GraphragOpts{
+		Entity: in.Entity, Hops: in.Hops, RelTypes: in.RelTypes, MaxResults: in.MaxResults,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"kb_id": k.ID, "mode": "graphrag", "degraded": true,
+			"kb_id": k.ID, "mode": mode, "degraded": true,
 			"error": "KG 无命中，已按向量检索口径降级（该库可先导入文档或重建 KG）: " + err.Error(),
 			"hits":  []kb.RetrievalHit{},
 		})
 		return
 	}
-	if hits == nil {
-		hits = []kb.RetrievalHit{}
+	if detail == nil {
+		detail = &kb.GraphragDetail{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kb_id": k.ID, "mode": "graphrag", "degraded": false, "hits": hits})
+	if detail.Hits == nil {
+		detail.Hits = []kb.RetrievalHit{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"kb_id": k.ID, "mode": mode, "degraded": degraded,
+		"hits": detail.Hits, "entities": detail.Entities,
+		"relationships": detail.Relationships, "claims": detail.Claims,
+	})
 }
 
 func truncateTitle(s string) string {

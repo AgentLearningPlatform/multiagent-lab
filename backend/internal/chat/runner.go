@@ -793,8 +793,13 @@ func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, runID,
 		s.emitAndRecord(ctx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库加载失败，本次回答未注入知识库内容: " + kerr.Error()}), emit)
 		return histMsgs
 	}
-	// M14 D-KB4：graphrag 模式 KB 走 worker GraphRAG 检索；worker 不可达降级向量检索（不阻断，事件标注 degraded）
-	hits, mode, degraded, serr := s.KB.GraphragQueryWithFallback(ctx, kbcfg, input, conv.TopK, conv.MinScore)
+	// M14 D-KB4：graphrag 模式 KB 走 KG 扩展检索；KG 无命中降级向量检索（不阻断，事件标注 degraded）。
+	// M16/REQ-128：detail 版返回命中路径上的实体/关系/claims 明细，随 retrieval 事件外显（过程可观测）。
+	detail, mode, degraded, serr := s.KB.GraphragQueryWithFallbackDetail(ctx, kbcfg, input, conv.TopK, conv.MinScore, kb.GraphragOpts{})
+	hits := []kb.RetrievalHit{}
+	if detail != nil {
+		hits = detail.Hits
+	}
 	switch {
 	case serr != nil:
 		s.emitAndRecord(ctx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库检索失败，本次回答未注入知识库内容: " + serr.Error()}), emit)
@@ -806,6 +811,11 @@ func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, runID,
 		data := map[string]any{"kb_id": kbcfg.ID, "mode": mode, "hits": hd} // M14 ④：retrieval 事件带 mode
 		if degraded {
 			data["degraded"] = true
+		}
+		if mode == "graphrag" && detail != nil { // M16 ②：实体/关系明细（教学：KG 扩展路径可见）
+			data["entities"] = detail.Entities
+			data["relationships"] = detail.Relationships
+			data["claims"] = detail.Claims
 		}
 		s.emitAndRecord(ctx, conv, runID, newEvent("retrieval", runID, data), emit)
 		if ctxText := kb.RenderContext(kbcfg.Name, hits); ctxText != "" {

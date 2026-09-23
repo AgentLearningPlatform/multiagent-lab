@@ -131,6 +131,10 @@ func (s *Server) routes() {
 	// KG 自存 + 消费/审计（D-O15/REQ-110：去-semantica 化，零外部进程）
 	m.HandleFunc("GET /api/kg/{kbID}", s.kgRead)
 	m.HandleFunc("POST /api/kg/{kbID}/rebuild", s.kgRebuild)
+	// M16 阶段一（REQ-127）：图谱浏览与统计
+	m.HandleFunc("GET /api/kg/{kbID}/stats", s.kgStats)
+	m.HandleFunc("GET /api/kg/{kbID}/entities", s.kgEntitySearch)
+	m.HandleFunc("GET /api/kg/{kbID}/neighborhood", s.kgNeighborhood)
 	m.HandleFunc("GET /api/audit/decisions", s.listDecisions)
 	m.HandleFunc("POST /api/audit/decisions", s.createDecision)
 	m.HandleFunc("GET /api/audit/decisions/{id}/chain", s.decisionChain)

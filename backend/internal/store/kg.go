@@ -328,6 +328,141 @@ func (s *Store) KGEntitiesByNames(kbID string, names []string) (map[string]*KGEn
 	return out, rows.Err()
 }
 
+// ---- M16 阶段一（REQ-127/128）：图谱统计、实体搜索、带溯源 claims ----
+
+// KGClaimTrace 带 chunk 溯源的 claim（doc_id/seq 定位原文片段）。
+type KGClaimTrace struct {
+	KGClaim
+	DocID    string `json:"trace_doc_id,omitempty"`
+	ChunkSeq int    `json:"trace_seq,omitempty"`
+}
+
+// KGStats 图谱统计卡数据（REQ-127）。
+type KGStats struct {
+	Entities       int            `json:"entities"`
+	Relationships  int            `json:"relationships"`
+	Claims         int            `json:"claims"`
+	EntityTypeDist map[string]int `json:"entity_type_dist"`
+	RelTypeDist    map[string]int `json:"rel_type_dist"`
+	DocsTotal      int            `json:"docs_total"`
+	DocsWithKG     int            `json:"docs_with_kg"`
+	DegradedDocs   int            `json:"degraded_docs"`
+}
+
+// KGStatsForKB 统计：三表计数 + 类型分布 + 文档覆盖（无 KG 行的文档即 degraded/未覆盖）。
+func (s *Store) KGStatsForKB(kbID string) (*KGStats, error) {
+	st := &KGStats{EntityTypeDist: map[string]int{}, RelTypeDist: map[string]int{}}
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_entity WHERE kb_id = ?`, kbID).Scan(&st.Entities); err != nil {
+		return nil, err
+	}
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_relationship WHERE kb_id = ?`, kbID).Scan(&st.Relationships); err != nil {
+		return nil, err
+	}
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM kg_claim WHERE kb_id = ?`, kbID).Scan(&st.Claims); err != nil {
+		return nil, err
+	}
+	erows, err := s.DB.Query(`SELECT COALESCE(type,''), COUNT(*) FROM kg_entity WHERE kb_id = ? GROUP BY type`, kbID)
+	if err != nil {
+		return nil, err
+	}
+	defer erows.Close()
+	for erows.Next() {
+		var t string
+		var n int
+		if err := erows.Scan(&t, &n); err != nil {
+			return nil, err
+		}
+		st.EntityTypeDist[t] = n
+	}
+	erows.Err()
+	rrows, err := s.DB.Query(`SELECT COALESCE(rel_type,''), COUNT(*) FROM kg_relationship WHERE kb_id = ? GROUP BY rel_type`, kbID)
+	if err != nil {
+		return nil, err
+	}
+	defer rrows.Close()
+	for rrows.Next() {
+		var t string
+		var n int
+		if err := rrows.Scan(&t, &n); err != nil {
+			return nil, err
+		}
+		st.RelTypeDist[t] = n
+	}
+	rrows.Err()
+	// 文档覆盖：kb_doc 全集 vs kg_entity 出现过的 doc_id
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM knowledge_doc WHERE kb_id = ?`, kbID).Scan(&st.DocsTotal); err != nil {
+		return nil, err
+	}
+	if err := s.DB.QueryRow(`SELECT COUNT(DISTINCT doc_id) FROM kg_entity WHERE kb_id = ? AND doc_id != ''`, kbID).Scan(&st.DocsWithKG); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// KGSearchEntities 实体名模糊搜索（图谱页搜索框；LIKE 转义由调用方保证，%/_ 通配在此转义）。
+func (s *Store) KGSearchEntities(kbID, q string, limit int) ([]*KGEntity, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	q = strings.ReplaceAll(q, "%", "\\%")
+	q = strings.ReplaceAll(q, "_", "\\_")
+	rows, err := s.DB.Query(
+		`SELECT `+kgEntityCols+` FROM kg_entity WHERE kb_id = ? AND name LIKE '%' || ? || '%' ESCAPE '\' ORDER BY name LIMIT ?`,
+		kbID, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*KGEntity{}
+	for rows.Next() {
+		e, err := scanKGEntity(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// KGClaimsWithChunks claims 附 chunk 溯源（doc_id/seq，图谱页点击 claim 定位原文）。
+func (s *Store) KGClaimsWithChunks(kbID string, subjects []string, limit int) ([]*KGClaimTrace, error) {
+	if len(subjects) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 24
+	}
+	q := `SELECT c.id,c.kb_id,c.doc_id,c.chunk_id,c.subject,c.text,c.created_at, COALESCE(ch.doc_id,''), COALESCE(ch.seq,0)
+		FROM kg_claim c
+		LEFT JOIN knowledge_chunk ch ON ch.id = c.chunk_id
+		WHERE c.kb_id = ? AND c.subject IN (` +
+		strings.TrimRight(strings.Repeat("?,", len(subjects)), ",") + `)
+		ORDER BY c.created_at LIMIT ?`
+	args := []any{kbID}
+	for _, n := range subjects {
+		args = append(args, n)
+	}
+	args = append(args, limit)
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*KGClaimTrace{}
+	for rows.Next() {
+		var t KGClaimTrace
+		var doc sql.NullString
+		if err := rows.Scan(&t.ID, &t.KBID, &t.DocID, &t.ChunkID, &t.Subject, &t.Text, &t.CreatedAt, &doc, &t.ChunkSeq); err != nil {
+			return nil, err
+		}
+		if doc.Valid {
+			t.DocID = doc.String
+		}
+		out = append(out, &t)
+	}
+	return out, rows.Err()
+}
+
 // deleteKG 级联删除 KG 行（docID 空 = 整库）。审计决策保留（决策史不随数据删除，教学口径）。
 func (s *Store) deleteKG(kbID, docID string) {
 	if docID == "" {

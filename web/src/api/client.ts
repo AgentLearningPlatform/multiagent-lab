@@ -244,6 +244,17 @@ export const api = {
   // M14 D-KB4：GraphRAG 子模块直查（D-O15 自研：KG 无命中返回 degraded:true，不抛错）
   graphragSearchKB: (kbId: string, q: string, maxResults?: number) =>
     req<KBSearchResult>(`/api/kb/${kbId}/graphrag-search`, { method: 'POST', body: JSON.stringify({ query: q, max_results: maxResults }) }),
+  /** M16/REQ-128：增强检索（实体聚焦/跳数/关系类型过滤，返回附实体/关系/claims 明细） */
+  graphragSearchEnhanced: (kbId: string, body: { query?: string; max_results?: number; entity?: string; hops?: number; relation_types?: string[] }) =>
+    req<any>(`/api/kb/${kbId}/graphrag-search`, { method: 'POST', body: JSON.stringify(body) }),
+  // M16 阶段一（REQ-127）：图谱浏览与统计
+  kgStats: (kbId: string) => req<any>(`/api/kg/${kbId}/stats`),
+  kgEntitySearch: (kbId: string, q: string, limit = 20) =>
+    req<{ entities: any[] }>(`/api/kg/${kbId}/entities?q=${encodeURIComponent(q)}&limit=${limit}`),
+  kgNeighborhood: (kbId: string, entity: string, hops = 1) =>
+    req<{ entities: any[]; relationships: any[]; claims: any[] }>(
+      `/api/kg/${kbId}/neighborhood?entity=${encodeURIComponent(entity)}&hops=${hops}`,
+    ),
 
   // ---- O13 由知识库构建本体（REQ-108；精确路由压过本体反代前缀） ----
   selectableKBsForBuild: () => req<OntoBuildSelectableKB[]>('/api/kbs/selectable-for-ontology-build'),

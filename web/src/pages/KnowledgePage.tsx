@@ -27,6 +27,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import EmptyGuide from '../components/EmptyGuide'
+import KGGraphView from '../components/KGGraphView'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -411,10 +412,11 @@ export default function KnowledgePage() {
                   type="info"
                   showIcon
                   style={{ marginBottom: 12 }}
-                  message="GraphRAG 子模块（M14）"
-                  description="文档索引后自动把 chunks 同步抽取为自存 KG（D-O15 自研抽取：REQ-98 LLM 主路径 + 规则回退，零外部进程）；检索优先 GraphRAG，KG 无命中自动回退向量检索（不阻断）。注意：KG 抽取与 embedding 是两套独立模型，chunk 切分质量直接影响抽取输入。"
+                  message="GraphRAG 子模块（M14；M16 图谱增强已启用）"
+                  description="文档索引后自动把 chunks 同步抽取为自存 KG（D-O15 自研抽取：REQ-98 LLM 主路径 + 规则回退，零外部进程）；检索优先 GraphRAG，KG 无命中自动回退向量检索（不阻断）。下方「图谱视图」支持实体搜索、邻域展开、claims 溯源与聚焦检索（REQ-127/128）。"
                 />
               )}
+              {modeOf(active) === 'graphrag' && <KGGraphView kbID={active.id} />}
               <div className="stat-strip">
                 <StatTile k="文档" v={docs.length} />
                 <StatTile k="Chunks" v={docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0)} />

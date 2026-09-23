@@ -65,6 +65,241 @@ func (s *Service) GraphragIngest(ctx context.Context, kbID string, chunks []*sto
 // errKGEmpty KG 无覆盖（未抽取或实体未命中该问题）→ 回退向量检索的内部信号。
 var errKGEmpty = fmt.Errorf("KG 无命中")
 
+// ---- M16 阶段一（REQ-128）：实体聚焦 / 跳数可配 / 关系类型过滤 / 检索明细 ----
+
+// GraphragOpts 增强检索参数。
+type GraphragOpts struct {
+	Entity     string   `json:"entity,omitempty"`         // 实体聚焦：以该实体为种子跳过向量命中（空 = 原三步管线）
+	Hops       int      `json:"hops,omitempty"`           // 关系扩展跳数：1（默认）~2
+	RelTypes   []string `json:"relation_types,omitempty"` // 关系类型过滤（空 = 不过滤）
+	MaxResults int      `json:"max_results,omitempty"`
+}
+
+// KGClaimDetail 带 chunk 溯源的 claim 明细（定位原文 doc#seq）。
+type KGClaimDetail struct {
+	Subject  string  `json:"subject"`
+	Text     string  `json:"text"`
+	ChunkID  string  `json:"chunk_id,omitempty"`
+	DocID    string  `json:"doc_id,omitempty"`
+	ChunkSeq int     `json:"chunk_seq,omitempty"`
+	Score    float64 `json:"score"`
+}
+
+// GraphragDetail 增强检索结果：hits 之外携带命中路径上的实体/关系/claims 明细
+// （retrieval 事件与图谱页聚焦检索共用）。
+type GraphragDetail struct {
+	Hits          []RetrievalHit          `json:"hits"`
+	Entities      []*store.KGEntity       `json:"entities"`
+	Relationships []*store.KGRelationship `json:"relationships"`
+	Claims        []KGClaimDetail         `json:"claims"`
+}
+
+// GraphragQueryDetail 增强版三步管线：
+//   - Entity 聚焦：种子实体直接指定（跳过向量命中），claims 分数仍沿用出处 chunk 命中分；
+//   - Hops：关系扩展跳数（1~2；2 跳 = 对一跳新实体再扩一轮，两轮 IN 查询近似递归 CTE）；
+//   - RelTypes：关系类型白名单过滤（空 = 全部）；
+//   - 返回值附命中路径上的实体/关系/claims 明细（溯源：claim.chunk_id → doc/seq）。
+func (s *Service) GraphragQueryDetail(ctx context.Context, k *store.KnowledgeBase, query string, opts GraphragOpts) (*GraphragDetail, error) {
+	maxResults := opts.MaxResults
+	if maxResults <= 0 {
+		maxResults = k.TopK
+	}
+	if maxResults <= 0 {
+		maxResults = 4
+	}
+	hops := opts.Hops
+	if hops != 2 {
+		hops = 1
+	}
+	filterRel := func(rels []*store.KGRelationship) []*store.KGRelationship {
+		if len(opts.RelTypes) == 0 {
+			return rels
+		}
+		allow := map[string]bool{}
+		for _, t := range opts.RelTypes {
+			allow[t] = true
+		}
+		out := make([]*store.KGRelationship, 0, len(rels))
+		for _, r := range rels {
+			if allow[r.Type] {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+
+	var (
+		subjects     []string
+		scoreByChunk map[string]float64
+		err          error
+	)
+	if opts.Entity != "" {
+		// 实体聚焦：校验实体存在后直接作种子
+		ents, eerr := s.Store.KGEntitiesByNames(k.ID, []string{opts.Entity})
+		if eerr != nil {
+			return nil, eerr
+		}
+		if ents[opts.Entity] == nil {
+			return nil, errKGEmpty
+		}
+		subjects = []string{opts.Entity}
+		scoreByChunk = map[string]float64{}
+	} else {
+		if query == "" {
+			return nil, fmt.Errorf("query 为空且未指定聚焦实体")
+		}
+		// ① 向量命中（与 rag 共用通道；score 沿用向量相似度）
+		vec, verr := s.embedder().EmbedOne(ctx, query)
+		if verr != nil {
+			return nil, verr
+		}
+		seeds, serr := s.Vector.Search(ctx, k.ID, vec, maxResults, 0)
+		if serr != nil {
+			return nil, serr
+		}
+		if len(seeds) == 0 {
+			return &GraphragDetail{Hits: []RetrievalHit{}, Entities: []*store.KGEntity{}, Relationships: []*store.KGRelationship{}, Claims: []KGClaimDetail{}}, nil
+		}
+		chunkIDs := make([]string, 0, len(seeds))
+		scoreByChunk = map[string]float64{}
+		for _, h := range seeds {
+			chunkIDs = append(chunkIDs, h.ChunkID)
+			scoreByChunk[h.ChunkID] = h.Score
+		}
+		// ② 命中 chunk → 提及实体
+		subjects, err = s.Store.KGSubjectsByChunks(k.ID, chunkIDs)
+		if err != nil {
+			return nil, err
+		}
+		if len(subjects) == 0 {
+			return nil, errKGEmpty
+		}
+	}
+
+	// ③ 关系扩展（1~2 跳；每轮以新实体为前沿，类型过滤后进入下一轮）
+	allRels := []*store.KGRelationship{}
+	seenRel := map[string]bool{}
+	frontier := subjects
+	entitySet := map[string]bool{}
+	for _, n := range frontier {
+		entitySet[n] = true
+	}
+	for hop := 0; hop < hops; hop++ {
+		rels, rerr := s.Store.KGNeighbors(k.ID, frontier)
+		if rerr != nil {
+			return nil, rerr
+		}
+		rels = filterRel(rels)
+		next := []string{}
+		for _, r := range rels {
+			if !seenRel[r.ID] {
+				seenRel[r.ID] = true
+				allRels = append(allRels, r)
+			}
+			for _, n := range []string{r.Source, r.Target} {
+				if !entitySet[n] {
+					entitySet[n] = true
+					next = append(next, n)
+				}
+			}
+		}
+		if len(next) == 0 {
+			break
+		}
+		frontier = next
+	}
+
+	names := make([]string, 0, len(entitySet))
+	for n := range entitySet {
+		names = append(names, n)
+	}
+	entities, err := s.Store.KGEntitiesByNames(k.ID, names)
+	if err != nil {
+		return nil, err
+	}
+	rawClaims, err := s.Store.KGClaimsWithChunks(k.ID, names, maxResults*6)
+	if err != nil {
+		return nil, err
+	}
+	claims := make([]KGClaimDetail, 0, len(rawClaims))
+	for _, c := range rawClaims {
+		claims = append(claims, KGClaimDetail{
+			Subject: c.Subject, Text: c.Text, ChunkID: c.ChunkID, DocID: c.DocID, ChunkSeq: c.ChunkSeq,
+			Score: claimScore(scoreByChunk, c.ChunkID),
+		})
+	}
+
+	// ④ hits 组装（与原管线同语义：实体描述在前，claims 随后）
+	subjectSet := map[string]bool{}
+	for _, n := range subjects {
+		subjectSet[n] = true
+	}
+	type expansion struct {
+		name  string
+		score float64
+	}
+	expansions := []expansion{}
+	seenName := map[string]bool{}
+	for _, r := range allRels {
+		for _, n := range []string{r.Source, r.Target} {
+			if seenName[n] {
+				continue
+			}
+			seenName[n] = true
+			sc := 0.6
+			if subjectSet[n] {
+				sc = 1.0
+			}
+			expansions = append(expansions, expansion{name: n, score: sc})
+		}
+	}
+	sort.Slice(expansions, func(i, j int) bool { return expansions[i].score > expansions[j].score })
+	hits := make([]RetrievalHit, 0, maxResults)
+	for _, e := range expansions {
+		if len(hits) >= maxResults {
+			break
+		}
+		excerpt := "(未填写描述)"
+		if ent := entities[e.name]; ent != nil && ent.Description != "" {
+			excerpt = truncateRunes(ent.Description, 200)
+		}
+		hits = append(hits, RetrievalHit{Doc: k.Name + " · " + e.name, Seq: len(hits), Score: e.score, Excerpt: excerpt})
+	}
+	for _, c := range claims {
+		if len(hits) >= maxResults {
+			break
+		}
+		hits = append(hits, RetrievalHit{Doc: k.Name + " · " + c.Subject, Seq: len(hits),
+			Score: c.Score, Excerpt: truncateRunes(c.Text, 200)})
+	}
+	entList := make([]*store.KGEntity, 0, len(entities))
+	for _, n := range names {
+		if e := entities[n]; e != nil {
+			entList = append(entList, e)
+		}
+	}
+	return &GraphragDetail{Hits: hits, Entities: entList, Relationships: allRels, Claims: claims}, nil
+}
+
+// GraphragQueryWithFallbackDetail 带 KG 明细的降级封装（recallKB / graphrag-search 直查共用）。
+func (s *Service) GraphragQueryWithFallbackDetail(ctx context.Context, k *store.KnowledgeBase, query string, maxResults int, minScore float64, opts GraphragOpts) (*GraphragDetail, string, bool, error) {
+	if k.Mode != "graphrag" {
+		hits, err := s.Search(ctx, k, query, maxResults, minScore)
+		return &GraphragDetail{Hits: hits}, "rag", false, err
+	}
+	detail, err := s.GraphragQueryDetail(ctx, k, query, opts)
+	if err == nil && detail != nil && len(detail.Hits) > 0 {
+		return detail, "graphrag", false, nil
+	}
+	if err != nil {
+		log.Printf("[kb] graphrag query degraded (kb=%s): %v → 回退向量检索", k.ID, err)
+	} else {
+		log.Printf("[kb] graphrag query 无命中 (kb=%s) → 回退向量检索", k.ID)
+	}
+	fb, ferr := s.Search(ctx, k, query, maxResults, minScore)
+	return &GraphragDetail{Hits: fb}, "rag", true, ferr
+}
+
 // GraphragQuery 自研 GraphRAG 检索（D-O15 三步：向量命中 → KG 一跳扩展 → 拼上下文）。
 func (s *Service) GraphragQuery(ctx context.Context, k *store.KnowledgeBase, query string, maxResults int) ([]RetrievalHit, error) {
 	if query == "" {
