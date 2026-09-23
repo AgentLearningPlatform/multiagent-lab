@@ -32,7 +32,8 @@ func (s *Service) embedder() *Embedder { return &Embedder{Store: s.Store, Box: s
 
 // Import 粘贴文本导入并同步索引（学习平台数据量小，同步完成；状态机 pending→indexing→success|failed）。
 func (s *Service) Import(ctx context.Context, kbID, title, content string) (*store.KnowledgeDoc, error) {
-	if _, err := s.Store.GetKnowledgeBase(kbID); err != nil {
+	kbcfg, err := s.Store.GetKnowledgeBase(kbID)
+	if err != nil {
 		return nil, err
 	}
 	pieces := SplitText(content)
@@ -43,15 +44,27 @@ func (s *Service) Import(ctx context.Context, kbID, title, content string) (*sto
 	if err != nil {
 		return nil, err
 	}
-	if err := s.indexDoc(ctx, kbID, doc, pieces); err != nil {
+	chunks, err := s.indexDoc(ctx, kbID, doc, pieces)
+	if err != nil {
 		s.Store.UpdateKnowledgeDocStatus(doc.ID, "failed", 0, err.Error())
 		return nil, fmt.Errorf("索引失败: %w", err)
 	}
-	return s.Store.GetKnowledgeDoc(doc.ID)
+	out, err := s.Store.GetKnowledgeDoc(doc.ID)
+	if err != nil {
+		return nil, err
+	}
+	if kbcfg.Mode == "graphrag" {
+		out.Graphrag = s.GraphragIngest(ctx, kbID, chunks) // M14 ②：chunks → worker KG 抽取（降级不阻断）
+	}
+	return out, nil
 }
 
 // Reindex 重建文档索引（先清旧向量与 chunks）。
 func (s *Service) Reindex(ctx context.Context, kbID, docID string) (*store.KnowledgeDoc, error) {
+	kbcfg, err := s.Store.GetKnowledgeBase(kbID)
+	if err != nil {
+		return nil, err
+	}
 	doc, err := s.Store.GetKnowledgeDoc(docID)
 	if err != nil {
 		return nil, err
@@ -81,33 +94,41 @@ func (s *Service) Reindex(ctx context.Context, kbID, docID string) (*store.Knowl
 		return nil, err
 	}
 	s.Store.UpdateKnowledgeDocStatus(docID, "indexing", 0, "")
-	if err := s.indexDoc(ctx, kbID, doc, SplitText(sb.String())); err != nil {
+	chunks, err := s.indexDoc(ctx, kbID, doc, SplitText(sb.String()))
+	if err != nil {
 		s.Store.UpdateKnowledgeDocStatus(docID, "failed", 0, err.Error())
 		return nil, fmt.Errorf("索引失败: %w", err)
 	}
-	return s.Store.GetKnowledgeDoc(docID)
+	out, err := s.Store.GetKnowledgeDoc(doc.ID)
+	if err != nil {
+		return nil, err
+	}
+	if kbcfg.Mode == "graphrag" {
+		out.Graphrag = s.GraphragIngest(ctx, kbID, chunks) // M14 ②：重建后同步重抽 KG（降级不阻断）
+	}
+	return out, nil
 }
 
-// indexDoc 切分→embed→写入向量库与 chunks→状态回写。
-func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.KnowledgeDoc, pieces []string) error {
+// indexDoc 切分→embed→写入向量库与 chunks→状态回写（返回落库 chunks 供 graphrag 联动）。
+func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.KnowledgeDoc, pieces []string) ([]*store.KnowledgeChunk, error) {
 	start := time.Now()
 	vecs, err := s.embedder().EmbedTexts(ctx, pieces)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(vecs) != len(pieces) {
-		return fmt.Errorf("embedding 数量不匹配: %d/%d", len(vecs), len(pieces))
+		return nil, fmt.Errorf("embedding 数量不匹配: %d/%d", len(vecs), len(pieces))
 	}
 	dim := len(vecs[0])
 	if dim == 0 {
-		return fmt.Errorf("embedding 维度为 0")
+		return nil, fmt.Errorf("embedding 维度为 0")
 	}
 	// Qdrant 路径：确保集合（以首个向量维度建）+ Upsert 向量 + chunks 存正文/vector_ref
 	// SQLite 路径：向量 BLOB 随 chunk 落库
 	backend := s.backendName()
 	if backend == "qdrant" {
 		if err := s.Vector.EnsureCollection(ctx, kbID, dim); err != nil {
-			return fmt.Errorf("qdrant collection: %w", err)
+			return nil, fmt.Errorf("qdrant collection: %w", err)
 		}
 	}
 	chunks := make([]*store.KnowledgeChunk, 0, len(pieces))
@@ -131,17 +152,17 @@ func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.Knowledg
 	}
 	if backend == "qdrant" {
 		if err := s.Vector.Upsert(ctx, kbID, pts); err != nil {
-			return fmt.Errorf("qdrant upsert: %w", err)
+			return nil, fmt.Errorf("qdrant upsert: %w", err)
 		}
 	}
 	if err := s.Store.InsertKnowledgeChunks(chunks); err != nil {
-		return fmt.Errorf("save chunks: %w", err)
+		return nil, fmt.Errorf("save chunks: %w", err)
 	}
 	if err := s.Store.UpdateKnowledgeDocStatus(doc.ID, "success", len(pieces), ""); err != nil {
-		return err
+		return nil, err
 	}
 	log.Printf("[kb] doc %q indexed: %d chunks, dim=%d, %s", doc.Title, len(pieces), dim, time.Since(start).Round(time.Millisecond))
-	return nil
+	return chunks, nil
 }
 
 // DeleteDoc 删除文档：向量库级联清理 + chunks + doc。

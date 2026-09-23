@@ -154,6 +154,8 @@ export interface KnowledgeBase {
   id: string
   name: string
   description?: string
+  /** M14 D-KB4 双子模块：rag | graphrag（老数据缺省 = rag） */
+  mode?: 'rag' | 'graphrag'
   /** @deprecated 后端已移除该字段，仅新建表单兼容保留 */
   store_backend?: 'qdrant' | 'sqlite'
   top_k: number
@@ -164,6 +166,18 @@ export interface KnowledgeBase {
   updated_at: string
 }
 
+/** graphrag 文档索引后的 worker 联动结果（M14 ②⑥：degraded = worker 不可达，非阻断） */
+export interface KBGraphragInfo {
+  ok?: boolean
+  method?: 'semantica' | 'lightweight'
+  chunks?: number
+  entities?: number
+  relationships?: number
+  degraded?: boolean
+  error?: string
+  warnings?: string[]
+}
+
 export interface KBDoc {
   id: string
   kb_id: string
@@ -171,6 +185,7 @@ export interface KBDoc {
   chunk_count?: number
   status: 'pending' | 'indexing' | 'success' | 'failed'
   error?: string
+  graphrag?: KBGraphragInfo
   created_at: string
 }
 
@@ -180,6 +195,15 @@ export interface KBHit {
   seq: number
   score: number
   excerpt: string
+}
+
+/** 检索响应（M14 ③④：mode = 实际生效的检索路径；degraded = worker 不可达回退） */
+export interface KBSearchResult {
+  kb_id: string
+  mode?: 'rag' | 'graphrag'
+  degraded?: boolean
+  error?: string
+  hits: KBHit[]
 }
 
 // ---- M7 技能（02 文档 §5.2 skill DDL / §6.12） ----

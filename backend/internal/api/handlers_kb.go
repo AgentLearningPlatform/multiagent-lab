@@ -130,7 +130,7 @@ func (s *Server) reindexKBDoc(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
-// previewKBSearch 检索试运行（§490：TopK/得分回显）。
+// previewKBSearch 检索试运行（§490：TopK/得分回显；M14 ④：按 KB mode 走 GraphRAG/向量，降级标注）。
 func (s *Server) previewKBSearch(w http.ResponseWriter, r *http.Request) {
 	k, err := s.Store.GetKnowledgeBase(r.PathValue("id"))
 	if err != nil {
@@ -154,7 +154,7 @@ func (s *Server) previewKBSearch(w http.ResponseWriter, r *http.Request) {
 	if in.MinScore != nil {
 		minScore = *in.MinScore
 	}
-	hits, err := s.KB.Search(r.Context(), k, in.Query, in.TopK, minScore)
+	hits, mode, degraded, err := s.KB.GraphragQueryWithFallback(r.Context(), k, in.Query, in.TopK, minScore)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -162,7 +162,42 @@ func (s *Server) previewKBSearch(w http.ResponseWriter, r *http.Request) {
 	if hits == nil {
 		hits = []kb.RetrievalHit{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kb_id": k.ID, "hits": hits})
+	writeJSON(w, http.StatusOK, map[string]any{"kb_id": k.ID, "mode": mode, "hits": hits, "degraded": degraded})
+}
+
+// graphragSearchKB GraphRAG 子模块直查（M14 ③：POST /api/kbs/{id}/graphrag-search → worker /query）。
+// worker 不可达时 200 + degraded:true（M14 ⑥ 非阻断降级语义，供 UI 友好提示）。
+func (s *Server) graphragSearchKB(w http.ResponseWriter, r *http.Request) {
+	k, err := s.Store.GetKnowledgeBase(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in struct {
+		Query      string `json:"query"`
+		MaxResults int    `json:"max_results"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if strings.TrimSpace(in.Query) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query is required"})
+		return
+	}
+	hits, err := s.KB.GraphragQuery(r.Context(), k, in.Query, in.MaxResults)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"kb_id": k.ID, "mode": "graphrag", "degraded": true,
+			"error": "semantica worker 不可达，GraphRAG 检索降级: " + err.Error(),
+			"hits":  []kb.RetrievalHit{},
+		})
+		return
+	}
+	if hits == nil {
+		hits = []kb.RetrievalHit{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"kb_id": k.ID, "mode": "graphrag", "degraded": false, "hits": hits})
 }
 
 func truncateTitle(s string) string {

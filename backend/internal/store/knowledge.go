@@ -16,6 +16,7 @@ type KnowledgeBase struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
+	Mode        string  `json:"mode"` // rag | graphrag（M14 D-KB4 双子模块；老数据 = 'rag'）
 	TopK        int     `json:"top_k"`
 	MinScore    float64 `json:"min_score"`
 	CreatedAt   string  `json:"created_at"`
@@ -33,6 +34,21 @@ type KnowledgeDoc struct {
 	Source     string `json:"source"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
+	// Graphrag M14 D-KB4：graphrag 模式文档索引后的 worker 联动结果
+	// （非落库字段，仅当次接口回显；nil = rag 模式或老数据）。
+	Graphrag *GraphragInfo `json:"graphrag,omitempty"`
+}
+
+// GraphragInfo graphrag 文档与 semantica worker 的联动结果（M14 ②⑥：worker 不可达 = degraded 不阻断）。
+type GraphragInfo struct {
+	OK            bool     `json:"ok"`
+	Method        string   `json:"method,omitempty"` // semantica | lightweight
+	Chunks        int      `json:"chunks,omitempty"`
+	Entities      int      `json:"entities,omitempty"`
+	Relationships int      `json:"relationships,omitempty"`
+	Degraded      bool     `json:"degraded,omitempty"`
+	Error         string   `json:"error,omitempty"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 
 // KnowledgeChunk 知识片段。
@@ -49,14 +65,17 @@ type KnowledgeChunk struct {
 	CreatedAt    string `json:"created_at"`
 }
 
-const kbCols = `id,name,description,top_k,min_score,created_at,updated_at`
+const kbCols = `id,name,description,mode,top_k,min_score,created_at,updated_at`
 const kdocCols = `id,kb_id,title,status,chunk_count,error,source,created_at,updated_at`
 const kchunkCols = `id,kb_id,doc_id,seq,content,vector,vector_ref,store_backend,created_at`
 
 func scanKB(row interface{ Scan(...any) error }) (*KnowledgeBase, error) {
 	var k KnowledgeBase
-	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.TopK, &k.MinScore, &k.CreatedAt, &k.UpdatedAt); err != nil {
+	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.Mode, &k.TopK, &k.MinScore, &k.CreatedAt, &k.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if k.Mode == "" {
+		k.Mode = "rag" // 迁移前的老行（008 未跑时列不存在不会走到这；防御默认）
 	}
 	return &k, nil
 }
@@ -115,8 +134,11 @@ func (s *Store) CreateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	if k.TopK <= 0 {
 		k.TopK = 4
 	}
-	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?)`,
-		k.ID, k.Name, k.Description, k.TopK, k.MinScore, now(), now())
+	if k.Mode != "graphrag" {
+		k.Mode = "rag"
+	}
+	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?,?)`,
+		k.ID, k.Name, k.Description, k.Mode, k.TopK, k.MinScore, now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -128,8 +150,11 @@ func (s *Store) CreateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 
 // UpdateKnowledgeBase 全量更新。
 func (s *Store) UpdateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
-	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,top_k=?,min_score=?,updated_at=? WHERE id=?`,
-		k.Name, k.Description, k.TopK, k.MinScore, now(), k.ID)
+	if k.Mode != "graphrag" {
+		k.Mode = "rag"
+	}
+	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,mode=?,top_k=?,min_score=?,updated_at=? WHERE id=?`,
+		k.Name, k.Description, k.Mode, k.TopK, k.MinScore, now(), k.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict

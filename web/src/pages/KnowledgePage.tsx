@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -15,6 +16,7 @@ import {
   Space,
   Splitter,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -44,6 +46,14 @@ function fmtScore(v: unknown): string {
   return Number.isFinite(n) ? n.toFixed(3) : '—'
 }
 
+/** KB 双子模块（M14 D-KB4）：rag | graphrag（老数据缺省 = rag） */
+type KBMode = 'rag' | 'graphrag'
+const modeOf = (k?: KnowledgeBase | null): KBMode => (k?.mode === 'graphrag' ? 'graphrag' : 'rag')
+const MODE_TAG: Record<KBMode, { color: string; text: string }> = {
+  rag: { color: 'blue', text: 'RAG' },
+  graphrag: { color: 'purple', text: 'GraphRAG' },
+}
+
 /**
  * 知识库视图（原型 06 §3.4 / 02 文档 §10）：
  * 左栏库列表（名称 / 文档·chunk 计数）→ 右栏库详情
@@ -62,11 +72,14 @@ export default function KnowledgePage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
 
+  const [modeTab, setModeTab] = useState<KBMode>('rag') // M14 ⑤：双子页签
+
   const [query, setQuery] = useState('')
   const [topK, setTopK] = useState<number | null>(4)
   const [minScore, setMinScore] = useState<number | null>(0)
   const [searching, setSearching] = useState(false)
   const [hits, setHits] = useState<KBHit[] | null>(null)
+  const [searchMeta, setSearchMeta] = useState<{ mode?: string; degraded?: boolean; error?: string } | null>(null)
   const [savingCfg, setSavingCfg] = useState(false)
 
   const active = useMemo(() => kbs.find((k) => k.id === activeId) ?? null, [kbs, activeId])
@@ -95,6 +108,15 @@ export default function KnowledgePage() {
   }
 
   useEffect(reloadKBs, [])
+
+  // M14 ⑤：双子页签切换 → 选中该模式下的第一个库（当前库不属该模式时）
+  useEffect(() => {
+    const inTab = kbs.filter((k) => modeOf(k) === modeTab)
+    if (active && modeOf(active) !== modeTab) {
+      setActiveId(inTab[0]?.id ?? null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeTab])
 
   // 切换库：重置检索态，载入文档，并以库当前检索参数预填配置
   useEffect(() => {
@@ -139,7 +161,29 @@ export default function KnowledgePage() {
     setSearching(true)
     try {
       const r = await api.searchPreview(active.id, q, topK ?? undefined, minScore ?? undefined)
+      setSearchMeta({ mode: r.mode, degraded: r.degraded, error: r.error })
       setHits(r.hits ?? [])
+    } catch (e: any) {
+      showToast(e.message, 'err')
+      setHits(null)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const graphragSearch = async () => {
+    if (!active) return
+    const q = query.trim()
+    if (!q) {
+      showToast('请输入检索词', 'err')
+      return
+    }
+    setSearching(true)
+    try {
+      const r = await api.graphragSearchKB(active.id, q, topK ?? undefined)
+      setSearchMeta({ mode: r.mode, degraded: r.degraded, error: r.error })
+      setHits(r.hits ?? [])
+      if (r.degraded) showToast('semantica worker 不可达，GraphRAG 检索降级', 'err')
     } catch (e: any) {
       showToast(e.message, 'err')
       setHits(null)
@@ -206,7 +250,24 @@ export default function KnowledgePage() {
       render: (_, d: KBDoc) => {
         const st = docStatusOf(d.status)
         const badge = <Badge status={st.status} text={st.text} />
-        return d.status === 'failed' && d.error ? <Tooltip title={d.error}>{badge}</Tooltip> : badge
+        const tip = [d.status === 'failed' ? d.error : '', d.graphrag?.degraded ? `KG 抽取降级：${d.graphrag.error ?? 'worker 不可达'}` : ''].filter(Boolean).join('；')
+        const withGr = d.graphrag && (
+          <span style={{ marginInlineStart: 6 }}>
+            {d.graphrag.degraded ? (
+              <Tag color="warning" style={{ margin: 0, fontSize: 11 }}>KG 降级</Tag>
+            ) : (
+              <Tooltip title={`KG 抽取完成（${d.graphrag.method ?? 'semantica'}：实体 ${d.graphrag.entities ?? 0} / 关系 ${d.graphrag.relationships ?? 0}）`}>
+                <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>KG ✓</Tag>
+              </Tooltip>
+            )}
+          </span>
+        )
+        return (
+          <span>
+            {tip ? <Tooltip title={tip}>{badge}</Tooltip> : badge}
+            {withGr}
+          </span>
+        )
       },
     },
     {
@@ -246,13 +307,23 @@ export default function KnowledgePage() {
             <span className="side-title">知识库</span>
             <span className="side-count">{kbs.length}</span>
           </div>
+          <Tabs
+            size="small"
+            activeKey={modeTab}
+            onChange={(k) => setModeTab(k as KBMode)}
+            style={{ margin: '0 12px' }}
+            items={[
+              { key: 'rag', label: `RAG ${kbs.filter((k) => modeOf(k) === 'rag').length}` },
+              { key: 'graphrag', label: `GraphRAG ${kbs.filter((k) => modeOf(k) === 'graphrag').length}` },
+            ]}
+          />
           <div className="side-actions">
             <Button type="primary" block icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
               新建库
             </Button>
           </div>
           <div className="side-list">
-            {kbs.map((k) => (
+            {kbs.filter((k) => modeOf(k) === modeTab).map((k) => (
               <div key={k.id} className={`side-item${k.id === activeId ? ' active' : ''}`} onClick={() => setActiveId(k.id)}>
                 <div className="side-item-top">
                   <span className="side-item-name" title={k.name}>
@@ -260,6 +331,9 @@ export default function KnowledgePage() {
                   </span>
                 </div>
                 <div className="side-item-meta">
+                  <Tag color={MODE_TAG[modeOf(k)].color} style={{ margin: 0, fontSize: 11, lineHeight: '16px' }}>
+                    {MODE_TAG[modeOf(k)].text}
+                  </Tag>
                   <span>文档 {k.doc_count ?? '—'}</span>
                   <span className="dot">·</span>
                   <span>chunks {k.chunk_count ?? '—'}</span>
@@ -297,6 +371,9 @@ export default function KnowledgePage() {
                   <div className="work-head-title">
                     <Typography.Title level={4} style={{ margin: 0 }}>
                       {active.name}
+                      <Tag color={MODE_TAG[modeOf(active)].color} style={{ marginInlineStart: 8, verticalAlign: 'middle' }}>
+                        {MODE_TAG[modeOf(active)].text}
+                      </Tag>
                     </Typography.Title>
                   </div>
                   <p className="work-head-desc">{active.description || '未填写描述'}</p>
@@ -313,6 +390,15 @@ export default function KnowledgePage() {
                 </Popconfirm>
               </div>
 
+              {modeOf(active) === 'graphrag' && (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="GraphRAG 子模块（M14）"
+                  description="文档索引后自动把 chunks 同步抽取为 KG（semantica worker :8093 /graphrag/ingest）；检索优先 GraphRAG，worker 不可达自动回退向量检索（不阻断）。注意：KG 抽取与 embedding 是两套独立模型，chunk 切分质量直接影响抽取输入。"
+                />
+              )}
               <div className="stat-strip">
                 <StatTile k="文档" v={docs.length} />
                 <StatTile k="Chunks" v={docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0)} />
@@ -382,9 +468,17 @@ export default function KnowledgePage() {
                 title="检索试运行"
                 extra={
                   hasReady ? (
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      命中按相似度排序
-                    </Typography.Text>
+                    <Space size={6}>
+                      {modeOf(active) === 'graphrag' && (
+                        <Button size="small" loading={searching} onClick={graphragSearch}>
+                          GraphRAG 直查
+                        </Button>
+                      )}
+                      {searchMeta?.mode && <Tag color={searchMeta.mode === 'graphrag' ? 'purple' : 'blue'} style={{ margin: 0 }}>{searchMeta.mode}</Tag>}
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        命中按相似度排序
+                      </Typography.Text>
+                    </Space>
                   ) : (
                     <Tag color="warning" style={{ margin: 0 }}>
                       索引未就绪，暂不可检索
@@ -416,6 +510,15 @@ export default function KnowledgePage() {
                   </Button>
                 </div>
 
+                {searchMeta?.degraded && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginTop: 12 }}
+                    message="GraphRAG worker 不可达，本次结果来自向量检索回退（降级不阻断）"
+                    description={searchMeta.error}
+                  />
+                )}
                 {hits && hits.length === 0 && (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无命中（可尝试降低 min_score 或补充文档）" style={{ marginTop: 16 }} />
                 )}
@@ -487,6 +590,7 @@ function CreateKBModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [form] = Form.useForm()
   const [busy, setBusy] = useState(false)
 
+  const mode = Form.useWatch('mode', form) ?? 'rag'
   const save = async () => {
     let v: any
     try {
@@ -496,7 +600,7 @@ function CreateKBModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     }
     setBusy(true)
     try {
-      const kb = await api.createKB({ name: v.name, description: v.description ?? '', store_backend: v.store_backend })
+      const kb = await api.createKB({ name: v.name, description: v.description ?? '', mode: v.mode, store_backend: v.store_backend })
       showToast('知识库已创建')
       onCreated(kb)
     } catch (e: any) {
@@ -522,9 +626,25 @@ function CreateKBModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         </Space>
       }
     >
-      <Form form={form} layout="vertical" requiredMark={false} initialValues={{ store_backend: 'qdrant', description: '' }}>
+      <Form form={form} layout="vertical" requiredMark={false} initialValues={{ store_backend: 'qdrant', description: '', mode: 'rag' }}>
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]}>
           <Input placeholder="如：K8s 运维手册" maxLength={60} />
+        </Form.Item>
+        <Form.Item
+          name="mode"
+          label="子模块模式（M14 D-KB4）"
+          extra={
+            mode === 'graphrag'
+              ? 'GraphRAG：chunks 额外抽取为 KG（依赖 semantica worker :8093）；KG 抽取与 embedding 是两套独立模型，切分质量影响抽取输入；worker 不可达自动回退向量检索。'
+              : 'RAG：向量检索（默认）。GraphRAG 模式额外构建 KG，适合关系型问答。'
+          }
+        >
+          <Select
+            options={[
+              { value: 'rag', label: 'RAG（向量检索）' },
+              { value: 'graphrag', label: 'GraphRAG（KG + 向量，需 semantica worker）' },
+            ]}
+          />
         </Form.Item>
         <Form.Item name="description" label="描述">
           <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="用途说明（可选）" />

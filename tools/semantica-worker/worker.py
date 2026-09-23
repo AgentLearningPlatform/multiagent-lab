@@ -152,6 +152,79 @@ def _normalize_claims(result):
              "source_node": _pick(c, "source_node", "source", "node", "provenance"),
              "score": _pick(c, "score", "similarity", "confidence")} for c in _as_list(raw)]
 
+def _lightweight_extract(chunks: list[dict]):
+    """内置轻量 KG 抽取（semantica 抽取器不可用时的降级管线，M14 ⑥ 语义）。
+
+    规则：中英文名词短语为实体（去停用词）；「A 的 B」「A 是/属于 B」「A 包括 B」为关系。
+    返回 (entities, relationships)，形态与 GraphBuilder 产物对齐（id/name/type + source/target）。
+    """
+    import re
+    ents: dict[str, dict] = {}
+    rels: list[dict] = []
+    stop = set("的 是 在 和 与 或 及 我们 你们 他们 它 这 那 一个 一些 该 此 其 被 把 对 从 向 于 上下 左右".split())
+    pat_of = re.compile(r"([\u4e00-\u9fa5A-Za-z0-9_]{2,12})的([\u4e00-\u9fa5A-Za-z0-9_]{2,12})")
+    pat_is = re.compile(r"([\u4e00-\u9fa5A-Za-z0-9_]{2,12})(?:是|属于|包括|包含)([\u4e00-\u9fa5A-Za-z0-9_]{2,12})")
+    for ch in chunks:
+        text = str(ch.get("content") or "")
+        if not text.strip():
+            continue
+        src = f"kb:{ch.get('doc_id', '')}:{ch.get('seq', '')}"
+        for m in pat_of.finditer(text):
+            a, b = m.group(1), m.group(2)
+            if a in stop or b in stop:
+                continue
+            ents.setdefault(a, {"id": a, "name": a, "type": "entity"})
+            ents.setdefault(b, {"id": b, "name": b, "type": "entity"})
+            rels.append({"source": a, "target": b, "type": "HAS", "provenance": src})
+        for m in pat_is.finditer(text):
+            a, b = m.group(1), m.group(2)
+            if a in stop or b in stop:
+                continue
+            ents.setdefault(a, {"id": a, "name": a, "type": "entity"})
+            ents.setdefault(b, {"id": b, "name": b, "type": "entity"})
+            rels.append({"source": a, "target": b, "type": "IS_A", "provenance": src})
+    return list(ents.values()), rels
+
+def _graphrag_ingest_chunks(req: "GraphragIngestReq"):
+    g = _ensure_graph()
+    chunks = [c for c in (req.chunks or []) if str(c.get("content") or "").strip()]
+    if not chunks:
+        return JSONResponse(status_code=400, content={"error": "chunks 为空（需含 content 字段）"})
+    ents: list = []
+    rels: list = []
+    warns: list[str] = []
+    method = "lightweight"
+    try:  # 优先 semantica 原生抽取器
+        from semantica.ingest import TextIngestor  # noqa: F401
+        from semantica.kg import GraphBuilder
+        texts = [str(c.get("content")) for c in chunks]
+        ing = TextIngestor().ingest_text(texts) if hasattr(TextIngestor(), "ingest_text") else None
+        if ing is not None:
+            built = GraphBuilder(merge_entities=True).build(_pick(ing, "data", default=ing))
+            ents = _as_list(_pick(built, "entities", "nodes", default=[]))
+            rels = _as_list(_pick(built, "relationships", "edges", default=[]))
+            method = "semantica"
+    except Exception as e:  # noqa: BLE001
+        warns.append(f"semantica 抽取器不可用，降级轻量规则抽取: {e}")
+    if method == "lightweight":
+        ents, rels = _lightweight_extract(chunks)
+    with _lock:
+        _apply(g, ents, "entity", warns)
+        _apply(g, rels, "relationship", warns)
+        try:  # chunk 原文进向量索引（GraphRAG 检索的文本侧）
+            text = " ".join(str(c.get("content")) for c in chunks)[:8000]
+            if text.strip():
+                ctx = _ensure_context()
+                try:
+                    ctx.store(text, conversation_id=f"kb:{req.kb_id}")
+                except TypeError:
+                    ctx.store(text)
+        except Exception as e:  # noqa: BLE001
+            warns.append(f"向量索引写入失败（GraphRAG 检索可能降级）: {e}")
+        _save_graph()
+    return {"kb_id": req.kb_id, "method": method, "chunks": len(chunks),
+            "entities": len(ents), "relationships": len(rels), "warnings": warns + _warnings}
+
 # ---- 审计/溯源（REQ-101，§4.9.4）：决策链 + PROV-O lineage/export + Explorer 惰性挂载 ----
 def _normalize_node(x):
     """归一化决策链/图节点（dict 或对象；标量退化为 {id}）。"""
@@ -379,6 +452,16 @@ class IngestReq(BaseModel):
 class QueryReq(BaseModel):
     q: str
     max_results: int = 5
+
+class GraphragIngestReq(BaseModel):
+    """M14/KB-O4：KB chunk 集合 → KG 抽取（D-O14 策略 B 数据源；02 v0.25）。
+
+    chunks: [{id, doc_id, seq, content}]；kb_id 仅作 provenance 标注。
+    抽取管线：semantica TextIngestor/KGBuilder 可用则用之；否则内置轻量规则抽取
+    （名词短语实体 + 「A 的 B」「A 是 B」关系），保证链路在无重依赖环境可演示。
+    """
+    kb_id: str = ""
+    chunks: list[dict] = []
 class DecisionReq(BaseModel):
     category: str
     scenario: str
@@ -438,6 +521,10 @@ def query(req: QueryReq):
     except Exception as e:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"error": f"GraphRAG 检索失败: {e}"})
     return {"claims": _normalize_claims(result), "query": req.q}
+
+@app.post("/graphrag/ingest")
+def graphrag_ingest(req: GraphragIngestReq):
+    return _graphrag_ingest_chunks(req)
 
 @app.post("/decision")
 def decision(req: DecisionReq):

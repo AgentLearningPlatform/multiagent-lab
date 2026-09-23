@@ -105,6 +105,7 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/kb/{id}/docs/{did}", s.deleteKBDoc)
 	m.HandleFunc("POST /api/kb/{id}/docs/{did}/reindex", s.reindexKBDoc)
 	m.HandleFunc("POST /api/kb/{id}/search-preview", s.previewKBSearch)
+	m.HandleFunc("POST /api/kb/{id}/graphrag-search", s.graphragSearchKB) // M14 D-KB4：GraphRAG 子模块直查
 
 	m.HandleFunc("GET /api/skills", s.listSkills)
 	m.HandleFunc("POST /api/skills", s.createSkill)

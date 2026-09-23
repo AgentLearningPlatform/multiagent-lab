@@ -11,8 +11,8 @@ import type {
   ForkOntologyInput,
   GuideResponse,
   ImportReport,
-  KBHit,
   KBDoc,
+  KBSearchResult,
   KnowledgeBase,
   LearningExample,
   PipelineCatalogResponse,
@@ -198,7 +198,10 @@ export const api = {
   deleteKBDoc: (kbId: string, docId: string) => req<{ deleted: string }>(`/api/kb/${kbId}/docs/${docId}`, { method: 'DELETE' }),
   reindexKBDoc: (kbId: string, docId: string) => req<KBDoc>(`/api/kb/${kbId}/docs/${docId}/reindex`, { method: 'POST' }),
   searchPreview: (kbId: string, q: string, topK?: number, minScore?: number) =>
-    req<{ hits: KBHit[] }>(`/api/kb/${kbId}/search-preview`, { method: 'POST', body: JSON.stringify({ query: q, top_k: topK, min_score: minScore }) }),
+    req<KBSearchResult>(`/api/kb/${kbId}/search-preview`, { method: 'POST', body: JSON.stringify({ query: q, top_k: topK, min_score: minScore }) }),
+  // M14 D-KB4：GraphRAG 子模块直查（worker 不可达返回 degraded:true，不抛错）
+  graphragSearchKB: (kbId: string, q: string, maxResults?: number) =>
+    req<KBSearchResult>(`/api/kb/${kbId}/graphrag-search`, { method: 'POST', body: JSON.stringify({ query: q, max_results: maxResults }) }),
 
   // ---- M7 技能（§8：/api/skills 系列 + 注入预览） ----
   listSkills: () => req<Skill[]>('/api/skills'),

@@ -164,7 +164,8 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		if kerr != nil {
 			s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库加载失败，本次回答未注入知识库内容: " + kerr.Error()}), emit)
 		} else {
-			hits, serr := s.KB.Search(runCtx, kbcfg, input, conv.TopK, conv.MinScore)
+			// M14 D-KB4：graphrag 模式 KB 走 worker GraphRAG 检索；worker 不可达降级向量检索（不阻断，事件标注 degraded）
+			hits, mode, degraded, serr := s.KB.GraphragQueryWithFallback(runCtx, kbcfg, input, conv.TopK, conv.MinScore)
 			switch {
 			case serr != nil:
 				s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "知识库检索失败，本次回答未注入知识库内容: " + serr.Error()}), emit)
@@ -173,7 +174,11 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 				for _, h := range hits {
 					hd = append(hd, map[string]any{"doc": h.Doc, "seq": h.Seq, "score": h.Score, "excerpt": h.Excerpt})
 				}
-				s.emitAndRecord(runCtx, conv, runID, newEvent("retrieval", runID, map[string]any{"kb_id": kbcfg.ID, "hits": hd}), emit)
+				data := map[string]any{"kb_id": kbcfg.ID, "mode": mode, "hits": hd} // M14 ④：retrieval 事件带 mode
+				if degraded {
+					data["degraded"] = true
+				}
+				s.emitAndRecord(runCtx, conv, runID, newEvent("retrieval", runID, data), emit)
 				if ctxText := kb.RenderContext(kbcfg.Name, hits); ctxText != "" {
 					histMsgs = append(histMsgs, schema.SystemMessage(ctxText))
 				}
