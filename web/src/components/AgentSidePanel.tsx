@@ -128,6 +128,9 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   const [toolsErr, setToolsErr] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // MCP servers 实时值（预设挂载态判重用）。必须在组件顶层调用——Form.List 渲染槽内是
+  // rc Field 类组件的 render 上下文，在其中调 useWatch 属非法 hook 调用，会整页白屏。
+  const mcpWatched = (Form.useWatch('mcp_servers', form) ?? []) as { name?: string; url?: string }[]
 
   useEffect(() => {
     form.setFieldsValue(agent)
@@ -284,8 +287,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   添加 Server
                 </Button>
                 {MCP_PRESETS.map((p) => {
-                  const cur: { name?: string; url?: string }[] = Form.useWatch('mcp_servers', form) ?? []
-                  const mounted = cur.some((s) => s?.name === p.name || s?.url === p.url)
+                  const mounted = mcpWatched.some((s) => s?.name === p.name || s?.url === p.url)
                   return (
                     <Button
                       key={p.name}
