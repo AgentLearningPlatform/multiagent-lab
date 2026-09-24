@@ -165,3 +165,15 @@ func boolInt(b bool) int {
 	}
 	return 0
 }
+
+// SetConversationTitle 更新对话标题（REQ-136 对话自动命名：异步提炼后回写；手动改名走 UpdateConversation）。
+func (s *Store) SetConversationTitle(id, title string) error {
+	res, err := s.DB.Exec(`UPDATE conversation SET title=?,updated_at=? WHERE id=?`, title, now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

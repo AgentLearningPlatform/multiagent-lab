@@ -186,6 +186,9 @@ export const api = {
   updateConversation: (id: string, c: Partial<Conversation>) => req<Conversation>(`/api/conversations/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
   deleteConversation: (id: string) => req<{ deleted: string }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   listMessages: (id: string) => req<Message[]>(`/api/conversations/${id}/messages`),
+  /** REQ-136：对话自动命名（首轮用户输入提炼短标题；后台异步，失败回退默认名） */
+  autoNameConversation: (id: string, input: string) =>
+    req<{ started: boolean; reason?: string }>('/api/conversations/' + id + '/auto-name', { method: 'POST', body: JSON.stringify({ input }) }),
   /** REQ-113①：对话导出 Markdown（events=1 附过程事件附录） */
   exportConversation: (id: string, events = false) =>
     reqText(`/api/conversations/${id}/export${events ? '?events=1' : ''}`),
