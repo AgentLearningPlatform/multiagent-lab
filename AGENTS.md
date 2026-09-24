@@ -44,10 +44,11 @@
 6. **活文档**：已确认需求不删除，变更标注 `（已变更/已废弃，见 vX.X）`；文档正文与实现不符时，以实现为准并回修文档。
 7. **知识同步**：需求/方案档发生**语义级变更**（新增/变更 REQ 行、新增/反转 D-* 决策、口径退役）的同一轮交付里，必须同步更新 `sources` 命中的 `seeds/learning/reference/*.md`（每篇头部有源指针 frontmatter）；纯笔误/版本递增不触发。知识分层职责见 17 §1.4，页面渲染检查在 20 号冒烟清单 S1。
 
-## 当前状态（2026-09-24，由协作 Agent 维护）
+## 当前状态（2026-09-25，由协作 Agent 维护）
 
-- **M18 WIP 已提交待续（b5de3ac，REQ-131/132/134）**：/mcp 端点链（initialize→tools/list 通、Bearer 401/200）+ AgentSidePanel 四分类页签 + Modal 分级已交付；**阻塞：工具执行环回归**（tool_calls 轮后不再续跑，普通对话同样复现，疑 c48599c 引入，须先修）；REQ-134 pro-components 未引入；/mcp tools/call 成功路径待回归。
+- **M18 WIP 已提交待续（b5de3ac，REQ-131/132/134）**：/mcp 端点链（initialize→tools/list 通、Bearer 401/200）+ AgentSidePanel 四分类页签 + Modal 分级已交付；~~阻塞：工具执行环回归~~（**2026-09-25 核验：HEAD 复测未复现**——tool.call→tool.result→二轮续跑→completed，疑为其提交前中途 WIP 态，见 02 v0.55，阻塞解除）；REQ-134 pro-components 未引入；/mcp tools/call 成功路径待回归。
 - **本会话已转为文档线**（方案/需求文档修改），不再承担开发任务。
+- **REQ-146/147 本体运行平面增强已交付（824b063，2026-09-25，03 v0.26/04 v0.22/14 v0.17/20 v1.6 S4.5/S4.6）**：①引擎自检与一键安装——GET /api/engines（oxigraph 候选序 OXIGRAPH_BIN→PATH→data/bin→tools/bin；fuseki 仅手动指引）+ POST install 异步任务（官方 release pin v0.5.11 按 GOOS/GOARCH 映射；downloadTo 原子落盘；oxigraph Start 动态解析装后免重启 runtimed）；运行页引擎缺失显红 Tag + 预检 Alert + 一键安装按钮 + 方案卡缺失标记；②方案停止态编辑——stopped/created/error 方案卡「编辑」改名称与本体集合（既有 PUT 前端入口补齐），running 置灰，引擎/端口只读。环境注：GLM 默认连接 429 余额不足首轮即 run.error（勿误判回归，测试绑可用连接）；沙箱 CDN 受限致 oxigraph 真实下载未在本机走通（机制经 httptest 单测 + 桩二进制动态解析验证），真机可用。
 - **REQ-19e/19f 对话对比模式已实现交付（2026-09-24，01 v0.37/02 v0.54）**：P1 基座补齐——头部「对比」开关 + 2~4 列等分窗格 + 窗格独立配置（模型/知识库/运行方案，空=继承）+ 一次提问 N 路（用户消息组级单条/历史快照共享/独立 runID 装配/助手消息 meta）/组级停止；SSE 契约不变；边界：docker/外部 CLI 后端不支持对比。**勘误：02 §6.19 前提"已实现"系误记，实至今日交付**。M19（REQ-143/144）自此有基座可增量开发。
 - **18 号 v1.13 治理**：REQ-131 双分配修复——NFR-O-6 前端体验优化改配 REQ-145（131 唯一语义 = Agent 对外 MCP 服务化，M18）。
 - **REQ-135~142「方案 only」批次已实现交付（2026-09-24，主人授权转入开发；01 v0.35）**：REQ-135 配置分级/REQ-136 自动命名/REQ-137 logo/REQ-139 卡片优化/REQ-140 文档查看（代码）；REQ-141 调研（21 号）/REQ-142 研究（22 号）文档落档；REQ-143/144（对话对比扩展）已排期 M19（02 v0.53）。
