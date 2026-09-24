@@ -1,25 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Drawer, DrawerProps, Progress, Slider, Spin, Tag, Typography } from 'antd'
+import { Alert, Button, Drawer, DrawerProps, Progress, Slider, Spin, Tag, Typography } from 'antd'
 import { CaretRightOutlined, PauseOutlined, StepForwardOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { RunEventDTO } from '../api/types'
-import { describeEvent } from './ChatWindow'
+import { describeEvent, levelGated } from './ChatWindow'
 
 /**
  * 事件流重放视图（M17 阶段二：M17 行"事件流导出与重放"，合并需求池「事件流重放视图」）：
  * 拉取会话全量 run_events，按发生顺序步进/自动播放/跳转，逐步还原过程时间线——
  * 演示与教学"逐步重放"辅助。模型对话文本随 assistant.delta 累积渲染。
+ * REQ-149：回放按会话当前展示级别过滤（简洁档隐藏 model.step 等调试细节），
+ * 且对"未记录调试细节/入库截断"诚实标注而非静默留白。
  */
 
 
 export default function EventReplayDrawer({
   conversationId,
   title,
+  level = 0,
   open,
   onClose,
 }: {
   conversationId: string
   title: string
+  /** REQ-149：会话当前展示级别（0 简洁 / 1 详细 / 2 调试）——过滤调试细节事件 */
+  level?: number
   open: boolean
   onClose: () => void
 } & Pick<DrawerProps, 'open' | 'onClose'>) {
@@ -46,9 +51,15 @@ export default function EventReplayDrawer({
       .finally(() => setLoading(false))
   }, [open, conversationId])
 
+  // REQ-149①：按当前展示级别过滤渲染（简洁档隐藏调试细节事件）
+  const gated = useMemo(() => events.filter((e) => !levelGated(e.type, level)), [events, level])
+  // REQ-149③：诚实标注数据源——原始事件里是否有过调试细节（与过滤无关，取决于入库时的设置）
+  const hasDebugRecorded = useMemo(() => events.some((e) => e.type === 'model.step'), [events])
+  const truncated = useMemo(() => events.some((e) => e.type === 'model.step' && (e.data ?? '').includes('截断')), [events])
+
   const step = useCallback(() => {
-    setCursor((c) => Math.min(c + 1, events.length))
-  }, [events.length])
+    setCursor((c) => Math.min(c + 1, gated.length))
+  }, [gated.length])
 
   // 自动播放：interval 推进（速度 = 每 400ms 推进 speed 条）
   useEffect(() => {
@@ -61,9 +72,9 @@ export default function EventReplayDrawer({
     return () => {
       if (timer.current) clearInterval(timer.current)
     }
-  }, [playing, cursor, events.length, speed, step])
+  }, [playing, cursor, gated.length, speed, step])
 
-  const visible = useMemo(() => events.slice(0, cursor), [events, cursor])
+  const visible = useMemo(() => gated.slice(0, cursor), [gated, cursor])
   // 助手消息累积（message.delta 拼接，模拟打字机重放）
   const assistantText = useMemo(
     () =>
@@ -79,7 +90,7 @@ export default function EventReplayDrawer({
         .join(''),
     [visible],
   )
-  const percent = events.length ? Math.round((cursor / events.length) * 100) : 0
+  const percent = gated.length ? Math.round((cursor / gated.length) * 100) : 0
 
   return (
     <Drawer open={open} onClose={onClose} width={680} title={`事件流重放 · ${title}`} destroyOnHidden>
@@ -87,6 +98,8 @@ export default function EventReplayDrawer({
         <Spin size="small" />
       ) : events.length === 0 ? (
         <Typography.Text type="secondary">该会话暂无过程事件。</Typography.Text>
+      ) : gated.length === 0 ? (
+        <Typography.Text type="secondary">简洁档隐藏了全部 {events.length} 条调试细节事件；切换到详细/调试档后重放可见。</Typography.Text>
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -112,6 +125,30 @@ export default function EventReplayDrawer({
             </Button>
           </div>
           <Progress percent={percent} size="small" showInfo={false} />
+
+          {/* REQ-149③ 诚实标注：过滤来源与数据前提，避免静默留白 */}
+          {level < 1 && hasDebugRecorded && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ margin: '8px 0' }}
+              message={`简洁档：已隐藏 ${events.length - gated.length} 条调试细节事件（模型调用链路/装配快照）；切到详细/调试档可完整回放`}
+            />
+          )}
+          {level >= 1 && !hasDebugRecorded && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ margin: '8px 0' }}
+              message="该会话历史未记录调试细节"
+              description="运行时未开启「调试事件入库」，或该会话早于该功能——存量运行不可追溯；在「过程展示」中开启后，之后的运行将留存。"
+            />
+          )}
+          {hasDebugRecorded && truncated && (
+            <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', margin: '4px 0 8px' }}>
+              注：模型输入全文在入库时已截断（约 4000 字），超长部分不可完整回放。
+            </Typography.Text>
+          )}
 
           {/* 助手文本累积视图（重放核心画面） */}
           <pre

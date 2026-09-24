@@ -112,9 +112,10 @@ func (d *debugRecorder) step(agent string, dur time.Duration, input []*schema.Me
 	}
 	ev := newEvent("model.step", d.runID, data)
 	if d.record != nil {
-		d.record(ev) // 入库开关（REQ-117 阶段二）
-	}
-	if d.emit != nil {
+		// 入库开关开启：emitAndRecord 同时承担实时透传与落库（此前再走 d.emit 会致 SSE 重复发送同一事件，
+		// REQ-149 核验时发现修复）；未开启：仅实时透传
+		d.record(ev)
+	} else if d.emit != nil {
 		d.emit(ev)
 	}
 }

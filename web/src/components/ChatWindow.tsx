@@ -154,6 +154,11 @@ function eventSource(evType: string | undefined, evData: any): EventSource {
   return 'builtin'
 }
 
+/** REQ-149① 展示级别门控：简洁档（level 0）隐藏调试细节事件（model.step 等），详细/调试档展开 */
+export function levelGated(type: string, level: number): boolean {
+  return level < 1 && (type === 'model.step' || type === 'debug.cli')
+}
+
 /** 会话挂起中断卡数据（run.interrupted payload → 组件状态；实时与对比窗格共用） */
 function toInterruptState(payload: any) {
   return {
@@ -357,6 +362,10 @@ export default function ChatWindow({
   const changeDebugLevel = (lv: number) => {
     setDebugLevel(lv)
     if (conversation?.id) localStorage.setItem(`eino.debug.${conversation.id}`, String(lv))
+    // REQ-149②：数据前提联动——级别≥1 而入库关闭时，明确提示历史生效范围
+    if (lv >= 1 && !debugPersist) {
+      showToast('详细/调试档仅影响之后的运行；未开启「调试事件入库」，调试细节不会留存到历史')
+    }
   }
   // REQ-135②：对话级过程展示配置（粒度/深度思考），localStorage 按会话记忆，切会话回填
   const convCfgKey = `eino.convcfg.${conversation?.id}`
@@ -365,12 +374,16 @@ export default function ChatWindow({
       const cfg = JSON.parse(localStorage.getItem(convCfgKey) || '{}')
       setGranularity(cfg.granularity ?? 'all')
       setShowReasoning(cfg.showReasoning ?? true)
+      setDebugPersist(cfg.debugPersist ?? false)
     } catch {
       setGranularity('all')
       setShowReasoning(true)
+      setDebugPersist(false)
     }
   }, [convCfgKey])
-  const patchConvCfg = (patch: { granularity?: 'all' | 'key' | 'off'; showReasoning?: boolean }) => {
+  // REQ-149②：调试事件入库开关（对话级记忆；级别≥1 时产生 model.step/装配快照落库）
+  const [debugPersist, setDebugPersist] = useState(false)
+  const patchConvCfg = (patch: { granularity?: 'all' | 'key' | 'off'; showReasoning?: boolean; debugPersist?: boolean }) => {
     if (!conversation?.id) return
     let cfg: any = {}
     try {
@@ -379,6 +392,7 @@ export default function ChatWindow({
     localStorage.setItem(convCfgKey, JSON.stringify({ ...cfg, ...patch }))
     if (patch.granularity) setGranularity(patch.granularity)
     if (patch.showReasoning !== undefined) setShowReasoning(patch.showReasoning)
+    if (patch.debugPersist !== undefined) setDebugPersist(patch.debugPersist)
   }
   // 深度思考卡的展开状态（按稳定 evKey 记录，独立于 items，历史重载不丢失）：
   // 无记录时默认「流式中展开、结束后收起」，用户手动开合后以用户选择为准
@@ -751,7 +765,7 @@ export default function ChatWindow({
   // Bubble.List 数据（消息走 user/ai 角色，事件卡为无边框自定义内容）
   const listItems = useMemo(
     () =>
-      withSubDepth(items).map((it, i) => {
+      withSubDepth(items.filter((it) => !(it.evType && levelGated(it.evType, debugLevel)))).map((it, i) => {
         if (it.kind === 'msg') {
           return {
             key: `m${i}`,
@@ -767,7 +781,7 @@ export default function ChatWindow({
           content: renderEventCard(it, i),
         }
       }),
-    [items, showRaw, reasoningOpen, granularity, showReasoning],
+    [items, showRaw, reasoningOpen, granularity, showReasoning, debugLevel],
   )
 
   // REQ-19e 窗格消息流条目（与单路 listItems 同构映射：消息走角色、事件卡无边框）
@@ -860,7 +874,7 @@ export default function ChatWindow({
     }
     runKeyRef.current = `run-${Date.now()}`
     setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
-    await streamStart((handler) => runConversation(conversation.id, text, debugLevel, handler))
+    await streamStart((handler) => runConversation(conversation.id, text, debugLevel, handler, undefined, debugPersist))
   }
 
   // REQ-19e/19f 对比发送：共用输入框一次提问 → N 路并行；meta 建窗格 run_id 映射，事件按 run_id 路由
@@ -878,7 +892,7 @@ export default function ChatWindow({
       ]),
     )
     setRunning(true)
-    const aborter = runConversation(conversation.id, text, debugLevel, handleCompareEvent, panesPayload)
+    const aborter = runConversation(conversation.id, text, debugLevel, handleCompareEvent, panesPayload, debugPersist)
     runRef.current = aborter
     try {
       await aborter.done
@@ -930,7 +944,7 @@ export default function ChatWindow({
           : text,
       },
     ])
-    await streamStart((handler) => resumeConversation(conversation.id, text, debugLevel, handler))
+    await streamStart((handler) => resumeConversation(conversation.id, text, debugLevel, handler, debugPersist))
   }
 
   // M17 阶段二：事件流导出（JSON 全量，供归档/外部重放）
@@ -1065,6 +1079,23 @@ export default function ChatWindow({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Typography.Text style={{ fontSize: 12 }}>原始事件 JSON</Typography.Text>
                   <Switch size="small" checked={showRaw} onChange={setShowRaw} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography.Text style={{ fontSize: 12 }}>调试事件入库</Typography.Text>
+                    <Switch size="small" checked={debugPersist} onChange={(v) => patchConvCfg({ debugPersist: v })} />
+                  </div>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    开启后调试档细节（模型调用链路/装配快照）随运行落库，供历史与回放查看（级别≥详细时产生）
+                  </Typography.Text>
+                  {debugLevel >= 1 && !debugPersist && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginTop: 6 }}
+                      message="当前级别≥详细，但入库关闭：调试细节不会留存到历史（REQ-149）"
+                    />
+                  )}
                 </div>
                 <div>
                   <Typography.Text style={{ fontSize: 12 }}>工具调用审批</Typography.Text>
@@ -1341,6 +1372,7 @@ export default function ChatWindow({
         <EventReplayDrawer
           conversationId={conversation.id}
           title={conversation.title || subjectName || '对话'}
+          level={debugLevel}
           open={replayOpen}
           onClose={() => setReplayOpen(false)}
         />
