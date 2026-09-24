@@ -64,12 +64,6 @@ export default function ProjectsPage() {
     setPanelView('config')
   }
 
-  /** ChatWindow「配置」→ 打开当前项目侧边栏配置视图 */
-  const openSidePanelConfig = () => {
-    setSidePanelOpen(true)
-    setPanelView('config')
-  }
-
   const onProjectCreated = (id: string) => {
     setCreateOpen(false)
     reload()
@@ -110,8 +104,6 @@ export default function ProjectsPage() {
                 conversation={currentConv}
                 agents={agents}
                 projects={projects}
-                onOpenAgentDrawer={() => {}}
-                onOpenProjectDrawer={openSidePanelConfig}
                 onConversationUpdated={reload}
                 sidePanelOpen={sidePanelOpen}
                 onToggleSidePanel={() => setSidePanelOpen((o) => !o)}

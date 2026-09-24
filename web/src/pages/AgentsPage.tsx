@@ -61,7 +61,6 @@ export default function AgentsPage() {
   }
 
   /** ChatWindow「配置」→ 打开当前智能体侧边栏配置视图 */
-  const openSidePanelConfig = () => setSidePanelOpen(true)
 
   const onAgentCreated = (id: string) => {
     setCreateOpen(false)
@@ -102,8 +101,6 @@ export default function AgentsPage() {
                 conversation={currentConv}
                 agents={agents}
                 projects={[]}
-                onOpenAgentDrawer={openSidePanelConfig}
-                onOpenProjectDrawer={() => {}}
                 onConversationUpdated={reload}
                 sidePanelOpen={sidePanelOpen}
                 onToggleSidePanel={() => setSidePanelOpen((o) => !o)}

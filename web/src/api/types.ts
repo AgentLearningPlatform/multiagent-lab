@@ -143,6 +143,8 @@ export interface Conversation {
   enable_skills?: boolean
   /** 中断挂起信息 JSON（M11 收尾：ask_human 等待答复；空 = 无挂起） */
   interrupt_state?: string | null
+  /** REQ-135②：对话级工具审批覆盖（空=跟随智能体级 | on | off） */
+  tool_approval?: string | null
   top_k: number
   min_score: number
   created_at: string

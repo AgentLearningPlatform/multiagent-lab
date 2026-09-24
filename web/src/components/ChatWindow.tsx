@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Avatar, Alert, Button, Collapse, Dropdown, Input, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Avatar, Alert, Button, Collapse, Dropdown, Input, Popover, Segmented, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
@@ -220,8 +220,6 @@ export default function ChatWindow({
   conversation,
   agents,
   projects,
-  onOpenAgentDrawer,
-  onOpenProjectDrawer,
   onConversationUpdated,
   sidePanelOpen,
   onToggleSidePanel,
@@ -229,8 +227,6 @@ export default function ChatWindow({
   conversation: Conversation
   agents: Agent[]
   projects: Project[]
-  onOpenAgentDrawer: () => void
-  onOpenProjectDrawer: () => void
   onConversationUpdated: () => void
   /** REQ-102：项目侧边栏开合（仅 project scope 提供；由页面持有状态与面板） */
   sidePanelOpen?: boolean
@@ -253,7 +249,10 @@ export default function ChatWindow({
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
-  const [showRaw, setShowRaw] = useState(false) // 原始事件 JSON 调试开关
+  const [showRaw, setShowRaw] = useState(false) // 原始事件 JSON 调试开关（并入过程展示面板）
+  // REQ-135②③：对话级过程展示配置——粒度 all|key|off + 深度思考显隐（localStorage 按会话记忆）
+  const [granularity, setGranularity] = useState<'all' | 'key' | 'off'>('all')
+  const [showReasoning, setShowReasoning] = useState(true)
   // REQ-117/M17 三档观测级别：0 简洁 / 1 详细 / 2 调试（每会话记忆；仅影响之后的运行）
   const [debugLevel, setDebugLevel] = useState(() => Number(localStorage.getItem(`eino.debug.${conversation?.id}`)) || 0)
   useEffect(() => {
@@ -262,6 +261,28 @@ export default function ChatWindow({
   const changeDebugLevel = (lv: number) => {
     setDebugLevel(lv)
     if (conversation?.id) localStorage.setItem(`eino.debug.${conversation.id}`, String(lv))
+  }
+  // REQ-135②：对话级过程展示配置（粒度/深度思考），localStorage 按会话记忆，切会话回填
+  const convCfgKey = `eino.convcfg.${conversation?.id}`
+  useEffect(() => {
+    try {
+      const cfg = JSON.parse(localStorage.getItem(convCfgKey) || '{}')
+      setGranularity(cfg.granularity ?? 'all')
+      setShowReasoning(cfg.showReasoning ?? true)
+    } catch {
+      setGranularity('all')
+      setShowReasoning(true)
+    }
+  }, [convCfgKey])
+  const patchConvCfg = (patch: { granularity?: 'all' | 'key' | 'off'; showReasoning?: boolean }) => {
+    if (!conversation?.id) return
+    let cfg: any = {}
+    try {
+      cfg = JSON.parse(localStorage.getItem(convCfgKey) || '{}')
+    } catch { /* 忽略坏数据 */ }
+    localStorage.setItem(convCfgKey, JSON.stringify({ ...cfg, ...patch }))
+    if (patch.granularity) setGranularity(patch.granularity)
+    if (patch.showReasoning !== undefined) setShowReasoning(patch.showReasoning)
   }
   // 深度思考卡的展开状态（按稳定 evKey 记录，独立于 items，历史重载不丢失）：
   // 无记录时默认「流式中展开、结束后收起」，用户手动开合后以用户选择为准
@@ -599,7 +620,7 @@ export default function ChatWindow({
           content: renderEventCard(it, i),
         }
       }),
-    [items, showRaw, reasoningOpen],
+    [items, showRaw, reasoningOpen, granularity, showReasoning],
   )
 
   // 中断恢复（M11 收尾 + REQ-14 审批）：会话挂起的 ask_human 提问 / 工具审批（随会话数据同步）
@@ -860,6 +881,60 @@ export default function ChatWindow({
             <Button size="small">导出</Button>
           </Dropdown>
           <Button size="small" onClick={() => setReplayOpen(true)}>重放</Button>
+          {/* REQ-135②：对话级过程展示面板（默认收起）——粒度/深度思考/原始 JSON/审批覆盖 */}
+          <Popover
+            trigger={"click"}
+            placement="bottomRight"
+            content={
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 250 }}>
+                <div>
+                  <Typography.Text style={{ fontSize: 12 }}>过程事件粒度</Typography.Text>
+                  <div style={{ marginTop: 4 }}>
+                    <Segmented
+                      size="small"
+                      value={granularity}
+                      onChange={(v) => patchConvCfg({ granularity: v as 'all' | 'key' | 'off' })}
+                      options={[
+                        { value: 'all', label: '全部' },
+                        { value: 'key', label: '关键' },
+                        { value: 'off', label: '精简' },
+                      ]}
+                    />
+                  </div>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    关键=工具调用与运行状态；精简=仅消息与结论
+                  </Typography.Text>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography.Text style={{ fontSize: 12 }}>深度思考过程</Typography.Text>
+                  <Switch size="small" checked={showReasoning} onChange={(v) => patchConvCfg({ showReasoning: v })} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography.Text style={{ fontSize: 12 }}>原始事件 JSON</Typography.Text>
+                  <Switch size="small" checked={showRaw} onChange={setShowRaw} />
+                </div>
+                <div>
+                  <Typography.Text style={{ fontSize: 12 }}>工具调用审批</Typography.Text>
+                  <Select
+                    size="small"
+                    style={{ width: '100%', marginTop: 4 }}
+                    value={conversation.tool_approval === 'on' || conversation.tool_approval === 'off' ? conversation.tool_approval : ''}
+                    onChange={(v) => patchConv({ tool_approval: v as string })}
+                    options={[
+                      { value: '', label: '跟随智能体配置' },
+                      { value: 'on', label: '本对话强制开启审批' },
+                      { value: 'off', label: '本对话关闭审批' },
+                    ]}
+                  />
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    合并顺序：对话级 &gt; 智能体级（REQ-135②）
+                  </Typography.Text>
+                </div>
+              </div>
+            }
+          >
+            <Button size="small">过程展示</Button>
+          </Popover>
           <Dropdown
             trigger={["click"]}
             menu={{
@@ -881,13 +956,7 @@ export default function ChatWindow({
           <Tooltip title="显示事件原始 JSON">
             <Switch size="small" checked={showRaw} onChange={setShowRaw} />
           </Tooltip>
-          <Button
-            size="small"
-            onClick={isProjectScope ? onOpenProjectDrawer : onOpenAgentDrawer}
-            disabled={isProjectScope ? !project : !agent}
-          >
-            配置
-          </Button>
+          {/* REQ-135①：配置入口并入右侧边栏收放按钮（原独立「配置」按钮移除） */}
           {onToggleSidePanel && ((isProjectScope && project) || (!isProjectScope && agent)) && (
             <Tooltip
               title={

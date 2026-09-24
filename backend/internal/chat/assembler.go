@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -28,13 +28,13 @@ const mcpFetchTimeout = 10 * time.Second
 
 // Assembler 从平台配置装配 Eino Agent。
 type Assembler struct {
-	Store     *store.Store
-	Box       *secrets.Box
-	Tools     *tool.Registry
-	Composer  *skill.Composer   // M9：技能注入（nil 时技能不生效）
-	Ontology  *ontology.Service // M8：本体对接（nil 时本体不生效）
-	FilesRoot string            // M11：项目文件根目录（空=save_file 不启用），如 ./data/projects
-	CheckPoints CheckPoints     // M11 收尾：中断检查点存储（nil=中断不持久化、无法恢复）
+	Store       *store.Store
+	Box         *secrets.Box
+	Tools       *tool.Registry
+	Composer    *skill.Composer   // M9：技能注入（nil 时技能不生效）
+	Ontology    *ontology.Service // M8：本体对接（nil 时本体不生效）
+	FilesRoot   string            // M11：项目文件根目录（空=save_file 不启用），如 ./data/projects
+	CheckPoints CheckPoints       // M11 收尾：中断检查点存储（nil=中断不持久化、无法恢复）
 }
 
 // BuildResult 装配产物。
@@ -56,10 +56,11 @@ type Runtime = BuildResult
 // Assemble 按会话归属装配 Runner：agent 直聊单 Agent；项目会话按 collab_mode 装配多 Agent（§6.4）。
 // assembleScope 装配期会话范围（M8 mount + M11 项目文件上下文）。
 type assembleScope struct {
-	Mount          string // 本体运行方案 profile id（空=未挂载）
-	ProjectID      string // 项目文件目录归属（M11；空=agent 会话）
-	ConversationID string // 产物归属会话
-	SkillsDisabled bool   // 会话级技能开关：enable_skills=false 时本次装配不注入技能
+	Mount                string // 本体运行方案 profile id（空=未挂载）
+	ProjectID            string // 项目文件目录归属（M11；空=agent 会话）
+	ConversationID       string // 产物归属会话
+	SkillsDisabled       bool   // 会话级技能开关：enable_skills=false 时本次装配不注入技能
+	ToolApprovalOverride string // REQ-135②：对话级工具审批覆盖（''=跟随 Agent 级 | on | off）
 }
 
 func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *store.Conversation) (*BuildResult, error) {
@@ -77,6 +78,9 @@ func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *stor
 		// 会话级技能开关（§6.12）：false 时本次装配剥离 Skills（单点生效，覆盖指令注入 + 工具白名单 + skill.loaded）
 		if conv.EnableSkills != nil && !*conv.EnableSkills {
 			sc.SkillsDisabled = true
+		}
+		if conv.ToolApproval != nil { // REQ-135②：对话级审批覆盖（合并顺序 = 对话级 > Agent 级）
+			sc.ToolApprovalOverride = *conv.ToolApproval
 		}
 	}
 	if conv == nil || conv.Scope != "project" {
@@ -472,7 +476,13 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 	// 6) 工具调用人工审批（REQ-14 恢复② / LG-8：Agent 开启 tool_approval=all 时，
 	// 本 Agent 的全部工具调用前挂起等待批准/拒绝，恢复数据 approve/deny 定向续跑。
 	// 注意：本列表天然不含成员智能体 AgentTool——它们在外层装配函数追加、协作编排非外部副作用）
-	if ag.ToolApproval == "all" {
+	approval := ag.ToolApproval
+	if sc.ToolApprovalOverride == "on" {
+		approval = "all"
+	} else if sc.ToolApprovalOverride == "off" {
+		approval = ""
+	}
+	if approval == "all" {
 		for i, bt := range tb.Tools {
 			ti, ierr := bt.Info(ctx)
 			if ierr != nil || ti == nil || ti.Name == "" {
@@ -543,7 +553,7 @@ type agentBuild struct {
 type agentMeta struct {
 	ModelLabel      string
 	ConnID          string
-	Instruction     string          // REQ-117：最终系统提示词（技能/guide/约束注入后），调试档随装配快照透出
+	Instruction     string // REQ-117：最终系统提示词（技能/guide/约束注入后），调试档随装配快照透出
 	SourceOf        map[string]string
 	Warnings        []string
 	LoadedSkills    []*store.Skill
