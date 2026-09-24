@@ -498,10 +498,13 @@ export function runConversation(
   debugLevel: number,
   onEvent: (ev: { event: string; data: any }) => void,
   panes?: ComparePaneConfig[],
+  debugPersist?: boolean,
 ): { abort: () => void; done: Promise<void> } {
   const body: Record<string, unknown> = { input, debug_level: debugLevel }
   // REQ-19e/19f 对比模式：≥2 窗格一次提问 N 路（meta 事件回传窗格 run_id 映射）
   if (panes && panes.length >= 2) body.panes = panes
+  // REQ-149②：调试事件入库开关（级别≥1 时产生 model.step/装配快照，供历史与回放）
+  if (debugPersist) body.debug_persist = true
   return streamRun(`/api/conversations/${conversationId}/runs`, body, onEvent)
 }
 
@@ -513,8 +516,9 @@ export function resumeConversation(
   answer: string,
   debugLevel: number,
   onEvent: (ev: { event: string; data: any }) => void,
+  debugPersist?: boolean,
 ): { abort: () => void; done: Promise<void> } {
-  return streamRun(`/api/conversations/${conversationId}/resume`, { input: answer, debug_level: debugLevel }, onEvent)
+  return streamRun(`/api/conversations/${conversationId}/resume`, { input: answer, debug_level: debugLevel, ...(debugPersist ? { debug_persist: true } : {}) }, onEvent)
 }
 
 /** SSE over fetch 公共流（运行 / 恢复共用；POST JSON → 逐事件回调）。 */
