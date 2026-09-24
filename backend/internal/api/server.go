@@ -114,6 +114,10 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/model-connections/{id}/default", s.setDefaultConnection)
 	m.HandleFunc("POST /api/model-connections/test", s.testConnection)
 	m.HandleFunc("POST /api/model-connections/{id}/list-models", s.listConnectionModels)
+	// REQ-148 供应商分组：同一供应商可多实例（分组标识与 BaseURL 解耦）+ 别名（展示层）
+	m.HandleFunc("GET /api/provider-groups", s.listProviderGroups)
+	m.HandleFunc("POST /api/provider-groups", s.createProviderGroup)
+	m.HandleFunc("PUT /api/provider-groups/{id}", s.updateProviderGroup)
 	// M13/D-O13 §6.16：推理后端探测清单
 	m.HandleFunc("GET /api/inference-backends", s.listInferenceBackends)
 	m.HandleFunc("POST /api/inference-backends/reprobe", s.reprobeInferenceBackends)

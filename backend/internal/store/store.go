@@ -43,6 +43,11 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// REQ-148：老连接按 (protocol, base_url) 幂等回填供应商分组（存量行为不变，新建连接可拆多实例）
+	if err := s.BackfillProviderGroups(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("backfill provider groups: %w", err)
+	}
 	return s, nil
 }
 

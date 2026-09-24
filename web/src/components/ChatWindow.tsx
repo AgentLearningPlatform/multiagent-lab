@@ -5,7 +5,7 @@ import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutli
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
-import { api, resumeConversation, runConversation } from '../api/client'
+import { api, connDisplayName, resumeConversation, runConversation } from '../api/client'
 import type { ComparePaneConfig } from '../api/client'
 import EventReplayDrawer from './EventReplayDrawer'
 import { AgentLogo } from './AgentLogo'
@@ -1178,7 +1178,7 @@ export default function ChatWindow({
                       size="small" allowClear disabled={running}
                       placeholder="模型 · 继承" value={sel.model || undefined}
                       onChange={(v) => setPaneSel(i, 'model', v ?? '')}
-                      options={conns.map((c) => ({ value: c.id, label: c.name }))}
+                      options={conns.map((c) => ({ value: c.id, label: connDisplayName(c) }))}
                     />
                     <Select
                       size="small" allowClear disabled={running}

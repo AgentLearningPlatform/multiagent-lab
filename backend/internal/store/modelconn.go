@@ -13,7 +13,7 @@ func scanConn(row interface{ Scan(...any) error }) (*ModelConnection, error) {
 	var c ModelConnection
 	var enc []byte
 	var enabled, isDefault int
-	err := row.Scan(&c.ID, &c.Name, &c.ConnType, &c.Protocol, &c.BaseURL, &c.ModelName, &enc, &c.APIKeyHint, &enabled, &isDefault, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Name, &c.ConnType, &c.Protocol, &c.BaseURL, &c.ModelName, &enc, &c.APIKeyHint, &enabled, &isDefault, &c.ProviderGroupID, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -23,10 +23,14 @@ func scanConn(row interface{ Scan(...any) error }) (*ModelConnection, error) {
 	return &c, nil
 }
 
-const connCols = `id,name,conn_type,protocol,base_url,model_name,api_key_enc,api_key_hint,enabled,is_default,created_at,updated_at`
+const connCols = `id,name,conn_type,protocol,base_url,model_name,api_key_enc,api_key_hint,enabled,is_default,provider_group_id,created_at,updated_at`
 
-// ListConnections 返回全部连接。
+// ListConnections 返回全部连接（含组别名快照 provider_alias，REQ-148 展示层用）。
 func (s *Store) ListConnections() ([]*ModelConnection, error) {
+	aliases, err := s.providerAliases()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.DB.Query(`SELECT ` + connCols + ` FROM model_connection ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
@@ -38,9 +42,28 @@ func (s *Store) ListConnections() ([]*ModelConnection, error) {
 		if err != nil {
 			return nil, err
 		}
+		c.ProviderAlias = aliases[c.ProviderGroupID]
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// providerAliases 组 ID → 别名映射（别名展示快照的联查来源）。
+func (s *Store) providerAliases() (map[string]string, error) {
+	rows, err := s.DB.Query(`SELECT id, alias FROM provider_group`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]string{}
+	for rows.Next() {
+		var id, alias string
+		if err := rows.Scan(&id, &alias); err != nil {
+			return nil, err
+		}
+		m[id] = alias
+	}
+	return m, rows.Err()
 }
 
 // GetConnection 按 ID 查询。
@@ -65,7 +88,7 @@ func (s *Store) GetConnectionRecord(id string) (*ConnectionRecord, error) {
 	var enc []byte
 	var enabled, isDefault int
 	row := s.DB.QueryRow(`SELECT `+connCols+` FROM model_connection WHERE id = ?`, id)
-	err := row.Scan(&c.ID, &c.Name, &c.ConnType, &c.Protocol, &c.BaseURL, &c.ModelName, &enc, &c.APIKeyHint, &enabled, &isDefault, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Name, &c.ConnType, &c.Protocol, &c.BaseURL, &c.ModelName, &enc, &c.APIKeyHint, &enabled, &isDefault, &c.ProviderGroupID, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -88,8 +111,8 @@ func (s *Store) CreateConnection(c *ModelConnection, enc []byte) (*ModelConnecti
 	if c.Protocol == "" {
 		c.Protocol = "openai_compat"
 	}
-	_, err := s.DB.Exec(`INSERT INTO model_connection (`+connCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-		c.ID, c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, enc, c.APIKeyHint, boolInt(c.Enabled), boolInt(c.IsDefault), now(), now())
+	_, err := s.DB.Exec(`INSERT INTO model_connection (`+connCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.ID, c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, enc, c.APIKeyHint, boolInt(c.Enabled), boolInt(c.IsDefault), c.ProviderGroupID, now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -106,11 +129,11 @@ func (s *Store) UpdateConnection(c *ModelConnection, apiKeyEnc []byte) (*ModelCo
 		err error
 	)
 	if apiKeyEnc != nil {
-		res, err = s.DB.Exec(`UPDATE model_connection SET name=?,conn_type=?,protocol=?,base_url=?,model_name=?,api_key_enc=?,api_key_hint=?,enabled=?,is_default=?,updated_at=? WHERE id=?`,
-			c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, apiKeyEnc, c.APIKeyHint, boolInt(c.Enabled), boolInt(c.IsDefault), now(), c.ID)
+		res, err = s.DB.Exec(`UPDATE model_connection SET name=?,conn_type=?,protocol=?,base_url=?,model_name=?,api_key_enc=?,api_key_hint=?,enabled=?,is_default=?,provider_group_id=?,updated_at=? WHERE id=?`,
+			c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, apiKeyEnc, c.APIKeyHint, boolInt(c.Enabled), boolInt(c.IsDefault), c.ProviderGroupID, now(), c.ID)
 	} else {
-		res, err = s.DB.Exec(`UPDATE model_connection SET name=?,conn_type=?,protocol=?,base_url=?,model_name=?,enabled=?,is_default=?,updated_at=? WHERE id=?`,
-			c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, boolInt(c.Enabled), boolInt(c.IsDefault), now(), c.ID)
+		res, err = s.DB.Exec(`UPDATE model_connection SET name=?,conn_type=?,protocol=?,base_url=?,model_name=?,enabled=?,is_default=?,provider_group_id=?,updated_at=? WHERE id=?`,
+			c.Name, c.ConnType, c.Protocol, c.BaseURL, c.ModelName, boolInt(c.Enabled), boolInt(c.IsDefault), c.ProviderGroupID, now(), c.ID)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {

@@ -3,6 +3,7 @@ import { Alert, Button, Checkbox, DatePicker, Form, Input, Menu, Modal, Popconfi
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import { api } from '../api/client'
+import type { ProviderGroupMeta } from '../api/client'
 import { PROVIDER_PRESETS } from '../api/providerPresets'
 import type { InferenceBackendStatus, ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
 import { useUI } from '../store/ui'
@@ -12,16 +13,19 @@ type Category = 'models' | 'stats' | 'inference' | 'global' | 'security'
 type StatsDimension = 'model' | 'supplier' | 'agent' | 'project'
 
 /**
- * 提供商分组：后端为扁平 model_connection（无独立提供商实体），
- * 前端按 base_url(+protocol) 聚合出「提供商」——同一 Base URL 的连接视为同一提供商下的多个模型。
+ * 提供商分组（REQ-148 起分组标识与 BaseURL 解耦）：
+ * 后端 model_connection 带 provider_group_id（provider_group 表，含展示别名），同一供应商可多实例
+ * （同 BaseURL 不同账号/Key）。老数据由后端按 (protocol, base_url) 幂等回填，存量行为不变。
  * - 连接命名约定：`{提供商名}·{模型名}`（间隔符 U+00B7），保证 name 的 UNIQUE 约束不冲突；
- * - 提供商展示名 = 连接名中第一个 · 之前的部分（老数据无 · 则取整名），从锚点派生；
- * - 提供商改名 = 按新前缀批量重生成组内全部连接名；重名时追加 ` (n)`；
+ * - 提供商展示名 = 组别名（仅展示层）> 连接名中第一个 · 之前的部分（锚点派生）；
+ * - 提供商改名（真名变更）= 按新前缀批量重生成组内全部连接名；别名 = 仅展示层，两者语义分离；
  * - 合并列表：提供商为可展开行（聚合行），其模型直接嵌套在展开区（明细行）。
  */
 interface ProviderGroup {
-  key: string // `${protocol}::${base_url}`
-  name: string // 提供商展示名（派生）
+  key: string // `pg:${provider_group_id}`（空 id 回退 `${protocol}::${base_url}`，兼容未回填数据）
+  id: string // provider_group_id（空 = 回退分组）
+  alias: string // 组别名（展示层）
+  name: string // 提供商展示名（别名优先，缺省从锚点派生）
   baseUrl: string
   protocol: string
   anchor: ModelConnection
@@ -29,7 +33,7 @@ interface ProviderGroup {
 }
 
 function groupOf(c: ModelConnection): string {
-  return `${c.protocol}::${c.base_url}`
+  return c.provider_group_id ? `pg:${c.provider_group_id}` : `${c.protocol}::${c.base_url}`
 }
 
 const NAME_SEP = '·'
@@ -72,23 +76,29 @@ export default function SettingsPage() {
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
   const [discoverKey, setDiscoverKey] = useState<string | null>(null)
 
-  const reload = () => { api.listConnections().then(setConns).catch(() => setConns([])) }
+  const [groupMetas, setGroupMetas] = useState<ProviderGroupMeta[]>([])
+  const reload = () => {
+    api.listConnections().then(setConns).catch(() => setConns([]))
+    api.listProviderGroups().then(setGroupMetas).catch(() => setGroupMetas([]))
+  }
   useEffect(reload, [])
 
-  // 按创建顺序聚合（后端 ORDER BY created_at，id）：组内首个成员即锚点；展示名从锚点名派生
+  // 按创建顺序聚合（后端 ORDER BY created_at，id）：组内首个成员即锚点；展示名别名优先、缺省从锚点派生
   const groups = useMemo<ProviderGroup[]>(() => {
+    const aliasOf = new Map(groupMetas.map((g) => [g.id, g.alias]))
     const map = new Map<string, ProviderGroup>()
     for (const c of conns) {
       const key = groupOf(c)
       let g = map.get(key)
       if (!g) {
-        g = { key, name: providerOfName(c.name), baseUrl: c.base_url, protocol: c.protocol, anchor: c, members: [] }
+        const alias = c.provider_group_id ? aliasOf.get(c.provider_group_id) ?? '' : ''
+        g = { key, id: c.provider_group_id ?? '', alias, name: alias || providerOfName(c.name), baseUrl: c.base_url, protocol: c.protocol, anchor: c, members: [] }
         map.set(key, g)
       }
       g.members.push(c)
     }
     return [...map.values()]
-  }, [conns])
+  }, [conns, groupMetas])
 
   const hasChat = conns.some((c) => c.conn_type === 'chat' && c.has_key && c.enabled)
 
@@ -446,6 +456,7 @@ function DiscoverPanel({ group, conns, onManualAdd, onClose, onAdded }: {
           base_url: group.baseUrl,
           model_name: m,
           conn_type: connType,
+          provider_group_id: group.id, // REQ-148：归属该实例分组
           copy_key_from: group.anchor.id, // Key 归属提供商：与锚点共享同一份密文
           enabled: true,
           is_default: false,
@@ -538,14 +549,17 @@ const UNMATCHED_PROVIDER = '未匹配供应商'
  * - 将 group_by=model 的统计行按提供商累加 calls / tokens；
  * - 未匹配到任何连接的模型归入「未匹配供应商」（恒排末位），其余按总 tokens 降序。
  */
-function aggregateByProvider(rows: UsageRow[], conns: ModelConnection[]): UsageRow[] {
-  const modelToProvider = new Map<string, string>()
+function aggregateByProvider(rows: UsageRow[], conns: ModelConnection[], groupAliasOf: (c: ModelConnection) => string): UsageRow[] {
+  // run.started 的 model 标签 = `{连接名}@{模型名}`（assembler.buildModel），按该键映射供应商展示名；
+  // 兼容更早版本只以模型名为 label 的存量统计行（同模型名多实例时映射取先到者）
+  const labelToProvider = new Map<string, string>()
   for (const c of conns) {
-    if (!modelToProvider.has(c.model_name)) modelToProvider.set(c.model_name, providerOfName(c.name))
+    labelToProvider.set(`${c.name}@${c.model_name}`, groupAliasOf(c))
+    if (!labelToProvider.has(c.model_name)) labelToProvider.set(c.model_name, groupAliasOf(c))
   }
   const acc = new Map<string, UsageRow>()
   for (const r of rows) {
-    const label = modelToProvider.get(r.label) ?? UNMATCHED_PROVIDER
+    const label = labelToProvider.get(r.label) ?? UNMATCHED_PROVIDER
     const key = `provider::${label}`
     let a = acc.get(key)
     if (!a) {
@@ -605,7 +619,13 @@ function StatsView() {
     return () => { alive = false }
   }, [dimension, tick])
 
-  const list = dimension === 'supplier' ? aggregateByProvider(rows ?? [], conns) : (rows ?? [])
+  const groupAliasOf = (c: ModelConnection) =>
+    c.provider_alias
+      ? c.name.includes('·')
+        ? `${c.provider_alias}·${c.name.slice(c.name.indexOf('·') + 1)}`
+        : `${c.provider_alias}·${c.model_name}`
+      : providerOfName(c.name)
+  const list = dimension === 'supplier' ? aggregateByProvider(rows ?? [], conns, groupAliasOf) : (rows ?? [])
   const totalCalls = list.reduce((s, r) => s + (r.calls || 0), 0)
   const totalTokens = list.reduce((s, r) => s + (r.total_tokens || 0), 0)
   const maxTotal = Math.max(1, ...list.map((r) => r.total_tokens || 0))
@@ -729,7 +749,8 @@ function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGrou
 
   useEffect(() => {
     if (editGroup) {
-      form.setFieldsValue({ name: editGroup.name, protocol: editGroup.protocol, base_url: editGroup.baseUrl, api_key: '', enabled: editGroup.members.every((m) => m.enabled) })
+      // 名称（真名前缀）从锚点连接名派生；别名仅展示层——两者语义分离（REQ-148）
+      form.setFieldsValue({ name: providerOfName(editGroup.anchor.name), alias: editGroup.alias, protocol: editGroup.protocol, base_url: editGroup.baseUrl, api_key: '', enabled: editGroup.members.every((m) => m.enabled) })
     } else {
       form.setFieldsValue({ name: '', protocol: 'openai_compat', base_url: 'https://api.deepseek.com/v1', model_name: 'deepseek-chat', conn_type: 'chat', api_key: '', enabled: true })
     }
@@ -755,20 +776,27 @@ function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGrou
           if (v.api_key) payload.api_key = v.api_key
           await api.updateConnection(m.id, payload)
         }
+        // 别名（REQ-148）：仅展示层；变化时独立保存，不影响真名
+        if (editGroup.id && (v.alias ?? '') !== editGroup.alias) {
+          await api.updateProviderGroupAlias(editGroup.id, v.alias ?? '')
+        }
       } else {
+        // REQ-148：先建供应商分组（别名缺省 = 名称），连接归属该组——同 BaseURL 可再次添加为独立实例
+        const g = await api.createProviderGroup((v.alias ?? '').trim() || v.name.trim())
         await api.createConnection({
           name: uniqueConnName(v.name, v.model_name, new Set(conns.map((c) => c.name))),
           protocol: v.protocol,
           base_url: v.base_url,
           model_name: v.model_name,
           conn_type: v.conn_type,
+          provider_group_id: g.id,
           api_key: v.api_key ?? '',
           enabled: v.enabled ?? true,
           is_default: false,
         })
         // 新建成功：把分组 key 交回父级——展开该行并挂自动发现面板（REQ-106 串联 REQ-48）
         showToast('已保存')
-        onSaved(`${v.protocol}::${v.base_url}`)
+        onSaved(`pg:${g.id}`)
         return
       }
       showToast('已保存')
@@ -839,10 +867,13 @@ function ProviderModal({ group, conns, onClose, onSaved }: { group: ProviderGrou
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]} extra={editGroup ? '改名将按「名称·模型名」重生成该提供商下全部连接名' : undefined}>
           <Input placeholder="DeepSeek 官方" />
         </Form.Item>
+        <Form.Item name="alias" label="显示别名（可选）" extra="仅展示层：列表/模型下拉显示别名·模型名；不改连接真名，真名变更用上方「名称」（REQ-148）">
+          <Input placeholder="如：DeepSeek 工作号" />
+        </Form.Item>
         <Form.Item name="protocol" label="协议">
           <Select options={[{ value: 'openai_compat', label: 'openai_compat（OpenAI 兼容）' }]} />
         </Form.Item>
-        <Form.Item name="base_url" label="Base URL（OpenAI 兼容）" rules={[{ required: true, message: 'Base URL 必填' }]} extra={editGroup ? '修改后该组将按新 Base URL 重新聚合' : undefined}>
+        <Form.Item name="base_url" label="Base URL（OpenAI 兼容）" rules={[{ required: true, message: 'Base URL 必填' }]} extra={editGroup ? '修改本实例的接入点（分组身份独立于 Base URL，不影响其他同名供应商实例）' : '同一供应商可再次添加为独立实例（不同账号/Key）'}>
           <Input placeholder="https://api.deepseek.com/v1" />
         </Form.Item>
         <Form.Item
@@ -926,7 +957,7 @@ function ModelModal({ conn, groups, conns, initialProvider, onClose, onSaved }: 
             : editConn.name
         await api.updateConnection(editConn.id, {
           ...editConn,
-          ...(target ? { protocol: target.protocol, base_url: target.baseUrl, copy_key_from: target.anchor.id } : {}),
+          ...(target ? { protocol: target.protocol, base_url: target.baseUrl, copy_key_from: target.anchor.id, provider_group_id: target.id } : {}),
           name,
           model_name: v.model_name,
           conn_type: v.conn_type,
@@ -941,6 +972,7 @@ function ModelModal({ conn, groups, conns, initialProvider, onClose, onSaved }: 
           base_url: providerGroup.baseUrl,
           model_name: v.model_name,
           conn_type: v.conn_type,
+          provider_group_id: providerGroup.id, // REQ-148：归属所选实例分组
           copy_key_from: providerGroup.anchor.id, // Key 归属提供商：与组锚点共享同一份密文
           enabled: true,
           is_default: false,

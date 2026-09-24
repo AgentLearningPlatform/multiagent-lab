@@ -185,6 +185,10 @@ export interface ModelConnection {
   has_key: boolean
   enabled: boolean
   is_default: boolean
+  /** REQ-148 供应商分组 ID（分组标识与 BaseURL 解耦，同供应商可多实例） */
+  provider_group_id?: string
+  /** REQ-148 组别名快照（List/Get 联查返回，展示层用；仅显示不改真名） */
+  provider_alias?: string
   created_at: string
   updated_at: string
 }

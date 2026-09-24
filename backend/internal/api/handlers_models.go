@@ -34,6 +34,13 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// REQ-148：连接可归属供应商分组（provider_group_id）；携带时校验分组存在
+	if c.ProviderGroupID != "" {
+		if _, err := s.Store.GetProviderGroup(c.ProviderGroupID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider_group_id 不存在: " + c.ProviderGroupID})
+			return
+		}
+	}
 	enc, err := s.resolveConnKey(&c)
 	if err != nil {
 		writeErr(w, err)
@@ -45,6 +52,57 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+// listProviderGroups 供应商分组列表（REQ-148）。
+func (s *Server) listProviderGroups(w http.ResponseWriter, r *http.Request) {
+	groups, err := s.Store.ListProviderGroups()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if groups == nil {
+		groups = []*store.ProviderGroup{}
+	}
+	writeJSON(w, http.StatusOK, groups)
+}
+
+// createProviderGroup 新建供应商分组（alias 可空 = 展示名从锚点连接名派生）。
+func (s *Server) createProviderGroup(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Alias string `json:"alias"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	g, err := s.Store.CreateProviderGroup(in.Alias)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, g)
+}
+
+// updateProviderGroup 更新分组别名（别名仅展示层，不改连接真名——与改名语义分离）。
+func (s *Server) updateProviderGroup(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Alias string `json:"alias"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.Store.UpdateProviderGroup(r.PathValue("id"), in.Alias); err != nil {
+		writeErr(w, err)
+		return
+	}
+	g, err := s.Store.GetProviderGroup(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
 }
 
 // resolveConnKey 解析连接写入的 Key 密文：

@@ -120,6 +120,10 @@ type ModelConnection struct {
 	HasKey     bool   `json:"has_key"`      // 是否已存 key（不回传明文）
 	Enabled    bool   `json:"enabled"`
 	IsDefault  bool   `json:"is_default"`
+	// ProviderGroupID 供应商分组（REQ-148）：分组标识与 BaseURL 解耦，同一供应商可多实例
+	ProviderGroupID string `json:"provider_group_id,omitempty"`
+	// ProviderAlias 组别名的连接级快照（List/Get 联查 provider_group 计算返回，展示层用；请求携带会被忽略）
+	ProviderAlias string `json:"provider_alias,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
 	// 请求体携带、不落库不回显

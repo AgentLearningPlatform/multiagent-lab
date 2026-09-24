@@ -12,13 +12,14 @@ import {
   ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
-import { api } from '../api/client'
+import { api, connDisplayName } from '../api/client'
 import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
 
 /** 连接名已按 `{提供商}·{模型}` 约定时直接展示，否则补上模型名（兼容老数据） */
-const connLabel = (c: ModelConnection) => (c.name.endsWith(`·${c.model_name}`) ? c.name : `${c.name} · ${c.model_name}`)
+/** REQ-148：连接展示名（组别名优先替换提供商前缀，别名仅展示层） */
+const connLabel = (c: ModelConnection) => connDisplayName(c)
 
 /** 模型身份展示用：连接名按 `{提供商}·{模型}` 约定时取提供商前缀，否则取整名 */
 const providerOfConn = (c: ModelConnection) => {

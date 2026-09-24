@@ -373,6 +373,13 @@ export const api = {
 
   // ---- M8 运行平面 :8090 /api/runtime-profiles* ----
   listRuntimeProfiles: () => req<RuntimeProfile[]>('/api/runtime-profiles'),
+  // ---- REQ-148 供应商分组：多实例与别名（分组标识与 BaseURL 解耦） ----
+  listProviderGroups: () => req<ProviderGroupMeta[]>('/api/provider-groups'),
+  createProviderGroup: (alias: string) =>
+    req<ProviderGroupMeta>('/api/provider-groups', { method: 'POST', body: JSON.stringify({ alias }) }),
+  updateProviderGroupAlias: (id: string, alias: string) =>
+    req<ProviderGroupMeta>(`/api/provider-groups/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ alias }) }),
+
   /** REQ-146 引擎自检：oxigraph/fuseki 全量呈现（未注册也返回 + 指引） */
   listEngines: () => req<{ engines: EngineStatus[] }>('/api/engines'),
   /** REQ-146 一键安装（仅 oxigraph；202 异步任务，结果轮询 listEngines） */
@@ -561,6 +568,24 @@ function streamRun(
     }
   })()
   return { abort: () => ctrl.abort(), done }
+}
+
+/** REQ-148 供应商分组元数据（分组 ID + 展示别名；成员连接经 provider_group_id 归属） */
+export interface ProviderGroupMeta {
+  id: string
+  alias: string
+  created_at?: string
+  updated_at?: string
+}
+
+/** REQ-148 连接展示名：有组别名时以别名替换真名的提供商前缀（别名仅展示层，不改真名） */
+export function connDisplayName(c: ModelConnection): string {
+  if (c.provider_alias) {
+    const i = c.name.indexOf('·')
+    const model = i > 0 ? c.name.slice(i + 1) : c.model_name
+    return `${c.provider_alias}·${model}`
+  }
+  return c.name.endsWith(`·${c.model_name}`) ? c.name : `${c.name} · ${c.model_name}`
 }
 
 /** REQ-146 引擎自检结果（运行平面 GET /api/engines；与后端 engine.EngineStatus 对齐） */
