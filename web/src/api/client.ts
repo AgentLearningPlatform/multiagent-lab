@@ -1,6 +1,7 @@
 import type {
   Agent,
   AiDraftResult,
+  McpServeInfo,
   ArtifactMeta,
   Conversation,
   CsvIngestApplyResult,
@@ -137,6 +138,10 @@ export const api = {
   createAgent: (a: Partial<Agent>) => req<Agent>('/api/agents', { method: 'POST', body: JSON.stringify(a) }),
   updateAgent: (id: string, a: Partial<Agent>) => req<Agent>(`/api/agents/${id}`, { method: 'PUT', body: JSON.stringify(a) }),
   deleteAgent: (id: string) => req<{ deleted: string }>(`/api/agents/${id}`, { method: 'DELETE' }),
+  /** REQ-131/M18：对外 MCP 服务化——端点/工具名/调用示例（Token 掩码） */
+  getAgentMcpServe: (id: string) => req<McpServeInfo>(`/api/agents/${id}/mcp-serve`),
+  /** REQ-131/M18：重置对外服务 Token */
+  resetAgentMcpToken: (id: string) => req<{ token_mask: string }>(`/api/agents/${id}/mcp-serve/reset`, { method: 'POST' }),
 
   // projects
   listProjects: () => req<Project[]>('/api/projects'),
