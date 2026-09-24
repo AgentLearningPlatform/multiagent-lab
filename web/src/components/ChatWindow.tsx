@@ -6,6 +6,7 @@ import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
 import { api, resumeConversation, runConversation } from '../api/client'
+import EventReplayDrawer from './EventReplayDrawer'
 import type {
   Agent,
   Conversation,
@@ -40,8 +41,9 @@ function subagentName(d: any): string {
   return String(d?.name ?? d?.agent_name ?? d?.sub_agent ?? d?.agent ?? '').trim()
 }
 
-// 事件卡文案（实时流与历史回放共用：新增事件必须在此登记，两条路径才一致）
-function describeEvent(type: string, d: any): { text: string; err?: boolean; warn?: boolean } {
+// 事件卡文案（实时流与历史回放共用：新增事件必须在此登记，两条路径才一致）。
+// 导出供事件重放视图（M17 阶段二 EventReplayDrawer）复用同一文案源。
+export function describeEvent(type: string, d: any): { text: string; err?: boolean; warn?: boolean } {
   switch (type) {
     case 'run.started':
       return { text: `▶ 运行开始 · ${d?.agent_name ?? ''} · ${d?.model ?? ''}`.replace(/ ·\s*$/, '') }
@@ -609,6 +611,7 @@ export default function ChatWindow({
     arguments: string
   } | null>(null)
   const [answer, setAnswer] = useState('')
+  const [replayOpen, setReplayOpen] = useState(false)
   useEffect(() => {
     try {
       const st = conversation.interrupt_state ? JSON.parse(conversation.interrupt_state) : null
@@ -776,6 +779,21 @@ export default function ChatWindow({
     await streamStart((handler) => resumeConversation(conversation.id, text, debugLevel, handler))
   }
 
+  // M17 阶段二：事件流导出（JSON 全量，供归档/外部重放）
+  const exportEventsJSON = async () => {
+    try {
+      const evs = await api.listEvents(conversation.id)
+      const blob = new Blob([JSON.stringify(evs, null, 2)], { type: 'application/json;charset=utf-8' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `(conversation.title || '对话').replace(/[\/:*?"<>|]/g, '_') + '-events.json'`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e: any) {
+      showToast(e?.message ?? '导出失败', 'err')
+    }
+  }
+
   const stop = () => {
     runRef.current?.abort()
     api.stopConversation(conversation.id).catch(() => {})
@@ -830,13 +848,18 @@ export default function ChatWindow({
               items: [
                 { key: 'msg', label: '导出 Markdown（仅消息）' },
                 { key: 'full', label: '导出 Markdown（含过程事件）' },
+                { key: 'events-json', label: '导出事件流（JSON）' },
               ],
-              onClick: ({ key }) => exportMarkdown(key === 'full'),
+              onClick: ({ key }) => {
+                if (key === 'events-json') exportEventsJSON()
+                else exportMarkdown(key === 'full')
+              },
             }}
             disabled={!conversation.id}
           >
             <Button size="small">导出</Button>
           </Dropdown>
+          <Button size="small" onClick={() => setReplayOpen(true)}>重放</Button>
           <Dropdown
             trigger={["click"]}
             menu={{
@@ -1027,6 +1050,15 @@ export default function ChatWindow({
           />
         </div>
       </div>
+
+      {replayOpen && (
+        <EventReplayDrawer
+          conversationId={conversation.id}
+          title={conversation.title || subjectName || '对话'}
+          open={replayOpen}
+          onClose={() => setReplayOpen(false)}
+        />
+      )}
     </div>
   )
 }

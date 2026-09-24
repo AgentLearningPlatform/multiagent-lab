@@ -42,6 +42,7 @@ type RunRequest struct {
 	UserInput string            // 原始用户输入（事件展示用）
 	Cwd       string            // 子进程工作目录（空 = 继承）
 	Env       map[string]string // 额外环境变量
+	Debug     int               // M17 阶段二：≥2 时原始 stdout 行透出 debug.cli 事件（仅透传不入库）
 }
 
 // Event 后端事件（与 chat.Event 同形；chat 层转译 SSE）。

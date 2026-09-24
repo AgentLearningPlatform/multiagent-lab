@@ -118,12 +118,19 @@ func (c *cliAdapter) Run(ctx context.Context, req *RunRequest, emit func(Event))
 		_ = cmd.Wait()
 		if text := strings.TrimSpace(string(buf)); text != "" {
 			emit(Event{Type: "message.delta", Data: map[string]any{"delta": text}})
+			if req.Debug >= 2 { // M17 阶段二：整段原始输出透出
+				emit(Event{Type: "debug.cli", Data: map[string]any{"raw": text}})
+			}
 		}
 	} else {
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 		for sc.Scan() {
-			c.parseLine(sc.Text(), emit)
+			line := sc.Text()
+			if req.Debug >= 2 { // M17 阶段二：原始行透出（调试档）
+				emit(Event{Type: "debug.cli", Data: map[string]any{"line": line}})
+			}
+			c.parseLine(line, emit)
 		}
 		_ = cmd.Wait()
 	}

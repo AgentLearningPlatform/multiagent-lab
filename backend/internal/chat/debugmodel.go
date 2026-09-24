@@ -27,10 +27,11 @@ const (
 )
 
 type debugRecorder struct {
-	level DebugLevel
-	runID string
-	emit  EmitFn
-	seq   atomic.Int64
+	level  DebugLevel
+	runID  string
+	emit   EmitFn // 实时透传
+	record func(*Event) // M17 阶段二：入库开关开启时同步落 run_events（nil = 仅透传）
+	seq    atomic.Int64
 }
 
 type debugCtxKey struct{}
@@ -48,9 +49,9 @@ func debugFrom(ctx context.Context) *debugRecorder {
 	return rec
 }
 
-// step 输出一次模型调用事件（仅 emit 不入库）。
+// step 输出一次模型调用事件（M17 阶段二：persist 开启时同步落库，否则仅透传）。
 func (d *debugRecorder) step(agent string, dur time.Duration, input []*schema.Message, tools []*schema.ToolInfo, usage *schema.TokenUsage, finish string, runErr string) {
-	if d == nil || d.emit == nil {
+	if d == nil || (d.emit == nil && d.record == nil) {
 		return
 	}
 	seq := d.seq.Add(1)
@@ -109,7 +110,13 @@ func (d *debugRecorder) step(agent string, dur time.Duration, input []*schema.Me
 		}
 		data["tools"] = toolInfos
 	}
-	d.emit(newEvent("model.step", d.runID, data))
+	ev := newEvent("model.step", d.runID, data)
+	if d.record != nil {
+		d.record(ev) // 入库开关（REQ-117 阶段二）
+	}
+	if d.emit != nil {
+		d.emit(ev)
+	}
 }
 
 func sumChars(input []*schema.Message) int {

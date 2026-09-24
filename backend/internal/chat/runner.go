@@ -70,8 +70,9 @@ func newEvent(typ, runID string, data any) *Event {
 
 // RunInput 用户输入。
 type RunInput struct {
-	Input      string `json:"input"`
-	DebugLevel int    `json:"debug_level"` // REQ-117：观测级别 0 简洁 / 1 详细 / 2 调试
+	Input        string `json:"input"`
+	DebugLevel   int    `json:"debug_level"`   // REQ-117：观测级别 0 简洁 / 1 详细 / 2 调试
+	DebugPersist bool   `json:"debug_persist"` // M17 阶段二：调试事件入库开关（model.step 等落 run_events）
 }
 
 // RunResult 运行结果摘要。
@@ -82,7 +83,7 @@ type RunResult struct {
 }
 
 // Run 执行一次对话运行：持久化用户消息 → 装配（M4：单 Agent / 项目多 Agent）→ 流式执行 → 翻译事件 → 持久化。
-func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, debug int, emit EmitFn) (*RunResult, error) {
+func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, debug int, debugPersist bool, emit EmitFn) (*RunResult, error) {
 	if emit == nil {
 		emit = func(*Event) {}
 	}
@@ -101,12 +102,16 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 
 	// M13/D-O13 §6.16：推理后端分发——外部 CLI 后端（非 eino-adk）走适配器路径（能力降级见 §6.16.4）
 	if conv.Scope == "agent" && agent != nil && s.Inference != nil && s.Inference.IsExternal(agent.InferenceBackend) {
-		return s.runExternal(ctx, conv, agent, runID, input, emit)
+		return s.runExternal(ctx, conv, agent, runID, input, debug, emit)
 	}
 
 	// REQ-117/M17 调试模式：注入模型调用链路采集器（装饰器在模型调用期读取）
 	if debug > 0 {
-		ctx = withDebug(ctx, &debugRecorder{level: DebugLevel(debug), runID: runID, emit: emit})
+		rec := &debugRecorder{level: DebugLevel(debug), runID: runID, emit: emit}
+		if debugPersist { // M17 阶段二：调试事件入库开关（model.step 同步落 run_events）
+			rec.record = func(ev *Event) { s.emitAndRecord(ctx, conv, runID, ev, emit) }
+		}
+		ctx = withDebug(ctx, rec)
 	}
 
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
@@ -505,7 +510,7 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 
 // Resume 恢复挂起的中断（M11 收尾）：以用户答复按 InterruptCtx.ID 定向恢复 ask_human 中断点，
 // 复用 Run 的事件翻译管线；恢复过程若再次中断（如连环提问），照常落新的挂起状态。
-func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, answer string, debug int, emit EmitFn) (*RunResult, error) {
+func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, answer string, debug int, debugPersist bool, emit EmitFn) (*RunResult, error) {
 	if emit == nil {
 		emit = func(*Event) {}
 	}
@@ -514,7 +519,11 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 		return nil, errors.New("该会话没有挂起的中断提问")
 	}
 	if debug > 0 {
-		ctx = withDebug(ctx, &debugRecorder{level: DebugLevel(debug), runID: runID, emit: emit})
+		rec := &debugRecorder{level: DebugLevel(debug), runID: runID, emit: emit}
+		if debugPersist { // M17 阶段二：调试事件入库开关（model.step 同步落 run_events）
+			rec.record = func(ev *Event) { s.emitAndRecord(ctx, conv, runID, ev, emit) }
+		}
+		ctx = withDebug(ctx, rec)
 	}
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
 	if err != nil {
@@ -700,6 +709,8 @@ func (s *Service) Stop(conversationID string) bool {
 type agentdRunRequest struct {
 	Input            string          `json:"input"`
 	RunID            string          `json:"run_id"`
+	DebugLevel       int             `json:"debug_level,omitempty"` // M17 阶段二：调试档经沙箱请求透传
+	DebugPersist     bool            `json:"debug_persist,omitempty"`
 	History          []store.Message `json:"history,omitempty"` // 不含最后一条 user（沙箱 Run 会存 input）
 	RuntimeProfileID *string         `json:"runtime_profile_id,omitempty"`
 	OntologyEnabled  bool            `json:"ontology_enabled,omitempty"`

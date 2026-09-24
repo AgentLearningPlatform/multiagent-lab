@@ -56,6 +56,8 @@ type runRequest struct {
 	History          []store.Message `json:"history,omitempty"` // 不含最后一条 user（agentd 端 Run 会存 input）
 	RuntimeProfileID *string         `json:"runtime_profile_id,omitempty"`
 	OntologyEnabled  bool            `json:"ontology_enabled,omitempty"`
+	DebugLevel       int             `json:"debug_level,omitempty"` // M17 阶段二：调试档经沙箱请求透传
+	DebugPersist     bool            `json:"debug_persist,omitempty"`
 }
 
 type agentd struct {
@@ -193,7 +195,7 @@ func (a *agentd) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	res, rerr := a.svc.Run(ctx, conv, a.agent, runID, req.Input, 0, emit) // 沙箱通道暂不透出调试档（M17 阶段二）
+	res, rerr := a.svc.Run(ctx, conv, a.agent, runID, req.Input, req.DebugLevel, req.DebugPersist, emit) // M17 阶段二：调试档与入库开关经沙箱请求透传
 	if rerr != nil {
 		_ = sw("event", chat.NewErrorEvent(runID, "run_failed", rerr.Error()))
 	}

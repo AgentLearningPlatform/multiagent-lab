@@ -28,7 +28,7 @@ import (
 const historyLimit = 10
 
 // runExternal 外部推理后端一次运行的完整编排（镜像 Run 的 inprocess 路径骨架）。
-func (s *Service) runExternal(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, input string, emit EmitFn) (*RunResult, error) {
+func (s *Service) runExternal(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, input string, debug int, emit EmitFn) (*RunResult, error) {
 	name := agent.InferenceBackend
 	b := s.Inference.Get(name)
 	if b == nil {
@@ -108,7 +108,7 @@ func (s *Service) runExternal(ctx context.Context, conv *store.Conversation, age
 		}
 		s.emitAndRecord(runCtx, conv, runID, newEvent(ev.Type, runID, ev.Data), emit)
 	}
-	err = b.Run(runCtx, &inference.RunRequest{Prompt: prompt, UserInput: input}, adaptEmit)
+	err = b.Run(runCtx, &inference.RunRequest{Prompt: prompt, UserInput: input, Debug: debug}, adaptEmit)
 
 	// 6) 收尾：取消/错误/正常 → assistant 落库 + run.finished/run.error
 	if err != nil {
