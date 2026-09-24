@@ -73,6 +73,15 @@ type RunInput struct {
 	Input        string `json:"input"`
 	DebugLevel   int    `json:"debug_level"`   // REQ-117：观测级别 0 简洁 / 1 详细 / 2 调试
 	DebugPersist bool   `json:"debug_persist"` // M17 阶段二：调试事件入库开关（model.step 等落 run_events）
+	// Panes 对比模式窗格配置（REQ-19e/19f）：≥2 时一次提问 N 路并行；nil/1 = 单路（现状）
+	Panes []PaneConfig `json:"panes,omitempty"`
+}
+
+// PaneConfig 对比窗格单项覆盖（REQ-19f）：模型连接 / 知识库 / 本体运行方案；空 = 继承对话当前配置。
+type PaneConfig struct {
+	ModelConnID      string `json:"model_conn_id,omitempty"`
+	KBID             string `json:"kb_id,omitempty"`
+	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
 }
 
 // RunResult 运行结果摘要。
@@ -92,6 +101,8 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		return nil, errors.New("conversation is not bound to an agent")
 	}
 
+	// REQ-19e/19f 对比模式由 API 层按 RunInput.Panes 分发到 RunCompare（SSE 契约与单路一致）
+
 	// M10 §6.3：执行后端分发——docker 沙箱 → Start + /run SSE 透传；inprocess → 进程内装配执行
 	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend == "docker" {
 		if s.Runtime != nil {
@@ -105,6 +116,36 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		return s.runExternal(ctx, conv, agent, runID, input, debug, emit)
 	}
 
+	// 可取消 ctx（单路注册；对比模式在 RunCompare 组级注册一处）
+	runCtx, cancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.cancels[conv.ID] = cancel
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.cancels, conv.ID)
+		s.mu.Unlock()
+		cancel()
+	}()
+
+	return s.runOnce(runCtx, conv, agent, runID, input, debug, debugPersist, emit, runOpts{})
+}
+
+// runOpts 单路 inprocess 管线选项（REQ-19e/19f 对比窗格复用管线时的差异点）。
+type runOpts struct {
+	// HistMsgs 外部注入的历史快照（对比组级共享一次——先完成窗格的答案不进入其他窗格上下文）；
+	// nil = 管线内自行加载。注入时按路复制，窗格各自追加召回 System 消息互不影响。
+	HistMsgs []*schema.Message
+	// SkipUserMessage 用户消息已由对比组级落库（共享提问仅存一条）
+	SkipUserMessage bool
+	// AssistantMeta 助手消息 meta JSON（对比窗格记录 pane 序号与单项覆盖，回放可溯源）
+	AssistantMeta string
+}
+
+// runOnce 单路 inprocess 运行管线（Run 单路 / RunCompare 每窗格共用）：
+// 装配 → 用户消息 → 历史组装 → run.started/技能/本体降级/召回 → 执行 → 助手消息 → 终态。
+// 可取消 ctx 的注册由调用方负责（单路=Run；对比=RunCompare 组级一处，stop 整组终止）。
+func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, debug int, debugPersist bool, emit EmitFn, opts runOpts) (*RunResult, error) {
 	// REQ-117/M17 调试模式：注入模型调用链路采集器（装饰器在模型调用期读取）
 	if debug > 0 {
 		rec := &debugRecorder{level: DebugLevel(debug), runID: runID, emit: emit}
@@ -121,30 +162,27 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 
 	res := &RunResult{}
 
-	// 1) 持久化用户消息（多轮记忆来源）
-	userMsg := &store.Message{ConversationID: conv.ID, Role: "user", Content: input}
-	if _, err := s.Store.InsertMessage(userMsg); err != nil {
-		return nil, fmt.Errorf("save user message: %w", err)
+	// 1) 持久化用户消息（多轮记忆来源；对比模式组级已落库，各窗格跳过）
+	if !opts.SkipUserMessage {
+		userMsg := &store.Message{ConversationID: conv.ID, Role: "user", Content: input}
+		if _, err := s.Store.InsertMessage(userMsg); err != nil {
+			return nil, fmt.Errorf("save user message: %w", err)
+		}
 	}
 
-	// 2) 组装输入：历史（含刚落库的用户消息）
-	history, err := s.Store.ListMessages(conv.ID)
-	if err != nil {
-		return nil, err
+	// 2) 组装输入：历史（含刚落库的用户消息；对比窗格用组级共享快照的按路副本）
+	var histMsgs []*schema.Message
+	if opts.HistMsgs != nil {
+		histMsgs = append([]*schema.Message(nil), opts.HistMsgs...)
+	} else {
+		history, err := s.Store.ListMessages(conv.ID)
+		if err != nil {
+			return nil, err
+		}
+		histMsgs = BuildHistoryMessages(history)
 	}
-	histMsgs := BuildHistoryMessages(history)
 
-	// 3) 可取消 ctx
-	runCtx, cancel := context.WithCancel(ctx)
-	s.mu.Lock()
-	s.cancels[conv.ID] = cancel
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		delete(s.cancels, conv.ID)
-		s.mu.Unlock()
-		cancel()
-	}()
+	runCtx := ctx
 
 	// run.started（M4：backend 标注 + 装配期告警）
 	start := time.Now()
@@ -197,9 +235,9 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	rc.consume(rt.Runner.Run(runCtx, histMsgs, adk.WithCheckPointID(checkPointIDOf(runID))))
 	rc.subagentLeave(rc.lastAgent)
 
-	// 4) 持久化助手消息
+	// 4) 持久化助手消息（对比窗格：meta 记录 pane 序号与单项覆盖）
 	if len(rc.buf) > 0 {
-		asg := &store.Message{ConversationID: conv.ID, Role: "assistant", Content: string(rc.buf)}
+		asg := &store.Message{ConversationID: conv.ID, Role: "assistant", Content: string(rc.buf), Meta: opts.AssistantMeta}
 		if m, err := s.Store.InsertMessage(asg); err == nil {
 			res.AssistantMessageID = m.ID
 		} else {
@@ -238,6 +276,128 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
 	}
 	return res, nil
+}
+
+// RunCompare 对比模式运行（REQ-19e/19f）：一次提问 → N 路（2~4 窗格）并行，事件经同一 SSE 流
+// 以窗格 run_id 区分（契约与单路一致）。语义：
+//  1. 用户消息组级仅落一条（共享提问）；
+//  2. 历史快照组级取一次再按路复制——先完成窗格的答案不进入其他窗格上下文（对照实验隔离）；
+//  3. 每窗格独立 runID 独立装配（单项覆盖见 PaneConfig，未设置项继承对话/智能体当前配置）；
+//  4. 停止为整组（cancels[convID] 组级一处注册，stop 终止全部 N 路，已生成内容保留落库）；
+//  5. 助手消息按窗格落库，meta 记录 pane/覆盖配置（回放可溯源）。
+//
+// 边界：docker 沙箱与外部 CLI 推理后端暂不支持对比（单项覆盖在这两类后端不可保证），整组报错不运行；
+// 窗格内 ask_human/审批中断仍走会话级单槽 interrupt_state（多窗格同时中断时以最后写入为准，学习尺度可接受）。
+func (s *Service) RunCompare(ctx context.Context, conv *store.Conversation, agent *store.Agent, groupRunID string, paneRunIDs []string, in RunInput, emit EmitFn) (*RunResult, error) {
+	if emit == nil {
+		emit = func(*Event) {}
+	}
+	groupErr := func(code, msg string) (*RunResult, error) {
+		emit(newEvent("run.error", groupRunID, map[string]any{"code": code, "message": msg}))
+		return nil, errors.New(msg)
+	}
+	if np := len(in.Panes); np < 2 || np > 4 || np != len(paneRunIDs) {
+		return groupErr("compare_invalid_panes", fmt.Sprintf("对比窗格数须为 2~4 且与 run_id 数对齐（got %d/%d）", len(in.Panes), len(paneRunIDs)))
+	}
+	if agent == nil {
+		return groupErr("agent_missing", "conversation has no agent to run")
+	}
+	if conv.Scope == "agent" && agent.RuntimeBackend == "docker" {
+		return groupErr("compare_backend_unsupported", "对比模式暂不支持 docker 沙箱执行后端，请将该智能体切回 inprocess 后再试")
+	}
+	if s.Inference != nil && s.Inference.IsExternal(agent.InferenceBackend) {
+		return groupErr("compare_backend_unsupported", "对比模式暂不支持外部 CLI 推理后端（"+agent.InferenceBackend+"）")
+	}
+
+	// 挂起中断组级统一放弃一次（窗格内 conv 副本已清空 InterruptState，不再重复告警/清库）
+	if conv.InterruptState != "" {
+		s.abandonInterrupt(ctx, conv, groupRunID, emit)
+		conv.InterruptState = ""
+	}
+
+	// 1) 共享用户消息（仅一条）
+	if _, err := s.Store.InsertMessage(&store.Message{ConversationID: conv.ID, Role: "user", Content: in.Input}); err != nil {
+		return nil, fmt.Errorf("save user message: %w", err)
+	}
+
+	// 2) 组级历史快照（含刚落库的提问）
+	history, err := s.Store.ListMessages(conv.ID)
+	if err != nil {
+		return nil, err
+	}
+	histMsgs := BuildHistoryMessages(history)
+
+	// 3) 组级取消注册（stop 整组终止）
+	runCtx, cancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.cancels[conv.ID] = cancel
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.cancels, conv.ID)
+		s.mu.Unlock()
+		cancel()
+	}()
+
+	// 4) 每窗格独立管线（克隆 conv/agent 应用单项覆盖；装配/执行失败各路独立报错不互相阻断）
+	var wg sync.WaitGroup
+	for i := range in.Panes {
+		pc, runID := in.Panes[i], paneRunIDs[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = s.runOnce(runCtx, paneConversation(conv, pc), paneAgent(agent, pc), runID,
+				in.Input, in.DebugLevel, in.DebugPersist, emit,
+				runOpts{HistMsgs: histMsgs, SkipUserMessage: true, AssistantMeta: paneMetaJSON(i, runID, pc)})
+		}()
+	}
+	wg.Wait()
+	return &RunResult{}, nil
+}
+
+// paneConversation 应用窗格知识库/本体运行方案覆盖（空 = 继承对话配置，含继承「未开启」状态）。
+func paneConversation(conv *store.Conversation, pc PaneConfig) *store.Conversation {
+	if pc.KBID == "" && pc.RuntimeProfileID == "" {
+		return conv
+	}
+	cp := *conv
+	cp.InterruptState = "" // 组级已处理，窗格内不再触发
+	if pc.KBID != "" {
+		id := pc.KBID
+		cp.KBID = &id
+		cp.EnableKB = true
+	}
+	if pc.RuntimeProfileID != "" {
+		id := pc.RuntimeProfileID
+		cp.RuntimeProfileID = &id
+		cp.OntologyEnabled = true
+	}
+	return &cp
+}
+
+// paneAgent 应用窗格模型覆盖（空 = 继承智能体配置；无效连接由装配层报错，与单路一致）。
+func paneAgent(ag *store.Agent, pc PaneConfig) *store.Agent {
+	if ag == nil || pc.ModelConnID == "" {
+		return ag
+	}
+	cp := *ag
+	id := pc.ModelConnID
+	cp.ModelConnID = &id
+	return &cp
+}
+
+// paneMetaJSON 窗格助手消息 meta（对照记录：pane 序号 + run_id + 单项覆盖）。
+func paneMetaJSON(idx int, runID string, pc PaneConfig) string {
+	b, err := json.Marshal(map[string]any{
+		"compare": true, "pane": idx, "run_id": runID,
+		"overrides": map[string]any{
+			"model_conn_id": pc.ModelConnID, "kb_id": pc.KBID, "runtime_profile_id": pc.RuntimeProfileID,
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // checkPointIDOf 运行 → 中断检查点 ID（Run 传入 WithCheckPointID 与中断落库共用）。

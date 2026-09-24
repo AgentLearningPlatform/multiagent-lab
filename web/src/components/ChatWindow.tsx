@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Avatar, Alert, Button, Collapse, Dropdown, Input, Popover, Segmented, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
 import { api, resumeConversation, runConversation } from '../api/client'
+import type { ComparePaneConfig } from '../api/client'
 import EventReplayDrawer from './EventReplayDrawer'
 import { AgentLogo } from './AgentLogo'
 import type {
@@ -14,6 +15,7 @@ import type {
   KBHit,
   KnowledgeBase,
   Message,
+  ModelConnection,
   Project,
   RuntimeProfile,
 } from '../api/types'
@@ -35,6 +37,13 @@ interface ChatItem {
   evKey?: string // 稳定卡片键（深度思考展开状态按它记录，历史/实时各自生成）
   streamKey?: string // 运行中的 reasoning 卡合并键；运行结束置空收起
   subDepth?: number // REQ-117：子智能体嵌套深度（缩进渲染）
+}
+
+// REQ-19f 对比窗格单项覆盖（UI 本地形态：''= 继承对话当前配置；提交时映射 ComparePaneConfig）
+interface PaneSel {
+  model: string
+  kb: string
+  profile: string
 }
 
 // 子 Agent 名（§6.5 subagent.enter/exit payload = 子 Agent 名；字段名做兼容取值）
@@ -143,6 +152,92 @@ function eventSource(evType: string | undefined, evData: any): EventSource {
   if (name.startsWith('onto_')) return 'onto'
   if (name.startsWith('mcp_') || name.includes('__')) return 'mcp'
   return 'builtin'
+}
+
+/** 会话挂起中断卡数据（run.interrupted payload → 组件状态；实时与对比窗格共用） */
+function toInterruptState(payload: any) {
+  return {
+    kind: (payload.kind === 'approval' || (!payload.question && payload.tool_name) ? 'approval' : 'ask_human') as 'approval' | 'ask_human',
+    question: payload.question ?? '',
+    choices: Array.isArray(payload.choices) ? payload.choices : [],
+    toolName: payload.tool_name ?? '',
+    arguments: payload.arguments ?? '',
+  }
+}
+
+/**
+ * 单路事件流归约（REQ-19e/19f：单路消息区与对比窗格共用同一事件→条目翻译）。
+ * runKey 为本次流的自定义合并键（reasoning 卡按它合并增量）。
+ */
+function applyRunEvent(prev: ChatItem[], event: string, payload: any, runKey: string): ChatItem[] {
+  switch (event) {
+    case 'run.started':
+    case 'run.finished': {
+      const desc = describeEvent(event, payload)
+      const next = [...prev]
+      if (event === 'run.finished') {
+        const last = next[next.length - 1]
+        if (last && last.kind === 'msg' && last.streaming) {
+          last.streaming = false
+          if (!last.content) {
+            last.content =
+              payload.reason === 'stopped' ? '（已停止生成）' : payload.reason === 'interrupted' ? '（已暂停，等待你的答复）' : ''
+          }
+        }
+      }
+      const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
+      next.splice(next.length - 1, 0, ev)
+      return next
+    }
+    case 'run.interrupted': {
+      const desc = describeEvent(event, payload)
+      const next = [...prev]
+      const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
+      next.splice(next.length - 1, 0, ev)
+      return next
+    }
+    case 'reasoning.delta': {
+      const next = [...prev]
+      for (let i = next.length - 1; i >= 0; i--) {
+        if (next[i].evType === 'reasoning' && next[i].streamKey === runKey) {
+          next[i] = { ...next[i], reasoning: (next[i].reasoning ?? '') + (payload.delta ?? '') }
+          return next
+        }
+      }
+      const card: ChatItem = { kind: 'event', evType: 'reasoning', reasoning: payload.delta ?? '', streamKey: runKey, evKey: runKey }
+      next.splice(Math.max(next.length - 1, 0), 0, card)
+      return next
+    }
+    case 'message.delta': {
+      const next = [...prev]
+      const last = next[next.length - 1]
+      if (last && last.kind === 'msg' && last.streaming) last.content += payload.delta ?? ''
+      return next
+    }
+    case 'run.error': {
+      const msg = payload.message ?? '运行失败'
+      const next = [...prev]
+      const last = next[next.length - 1]
+      if (last && last.kind === 'msg' && last.streaming && !last.content) next.pop()
+      const ev: ChatItem = { kind: 'event', evType: 'run.error', eventErr: true, eventText: `⚠ ${msg}`, evData: payload }
+      return [...next, ev]
+    }
+    default:
+      // 过程类事件（工具/技能/子智能体/知识召回/本体）：统一插到流式助手消息之前
+      if (
+        event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded' ||
+        event === 'subagent.enter' || event === 'subagent.exit' ||
+        event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable' ||
+        event === 'run.warning' || event === 'model.step'
+      ) {
+        const desc = describeEvent(event, payload)
+        const next = [...prev]
+        const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, eventErr: desc.err, eventWarn: desc.warn, evData: payload }
+        next.splice(next.length - 1, 0, ev) // 流式助手消息存在时插到其前
+        return next
+      }
+      return prev
+  }
 }
 
 /** 会话配置 chip（渲染在 Sender footer 内）：ON = 品牌填充，OFF = 浅色描边；禁用置灰 + Tooltip 说明 */
@@ -353,8 +448,59 @@ export default function ChatWindow({
   const loadCfgOptions = () => {
     api.listRuntimeProfiles().then((ps) => { setProfiles(ps); setProfilesErr(false) }).catch(() => setProfilesErr(true))
     api.listKBs().then((ks) => { setKbs(ks); setKbsErr(false) }).catch(() => setKbsErr(true))
+    // REQ-19f 窗格模型覆盖候选：已启用的对话模型连接
+    api.listConnections().then((cs) => setConns(cs.filter((c) => c.enabled && c.conn_type === 'chat'))).catch(() => {})
   }
   useEffect(loadCfgOptions, [])
+  const [conns, setConns] = useState<ModelConnection[]>([])
+
+  // ---- REQ-19e/19f 对话对比模式：开关 + 2~4 窗格 + 每窗格单项覆盖（''= 继承对话当前配置）----
+  const cmpKey = `eino.compare.${conversation?.id}`
+  const [cmp, setCmp] = useState<{ on: boolean; panes: PaneSel[] }>({ on: false, panes: [{ model: '', kb: '', profile: '' }, { model: '', kb: '', profile: '' }] })
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(cmpKey) || 'null')
+      if (saved && typeof saved.on === 'boolean' && Array.isArray(saved.panes) && saved.panes.length >= 2 && saved.panes.length <= 4) {
+        setCmp({ on: saved.on, panes: saved.panes.map((p: any) => ({ model: p?.model ?? '', kb: p?.kb ?? '', profile: p?.profile ?? '' })) })
+        return
+      }
+    } catch { /* 忽略坏数据 */ }
+    setCmp({ on: false, panes: [{ model: '', kb: '', profile: '' }, { model: '', kb: '', profile: '' }] })
+  }, [cmpKey])
+  const patchCmp = (patch: Partial<{ on: boolean; panes: PaneSel[] }>) => {
+    setCmp((prev) => {
+      const next = { ...prev, ...patch }
+      try { localStorage.setItem(cmpKey, JSON.stringify(next)) } catch { /* 忽略配额 */ }
+      return next
+    })
+  }
+  const setPaneSel = (i: number, field: keyof PaneSel, value: string) => {
+    setCmp((prev) => {
+      if (!prev.on) return prev
+      const panes = prev.panes.map((p, j) => (j === i ? { ...p, [field]: value } : p))
+      const next = { ...prev, panes }
+      try { localStorage.setItem(cmpKey, JSON.stringify(next)) } catch { /* 忽略配额 */ }
+      return next
+    })
+  }
+  const resizePanes = (panes: PaneSel[], n: number): PaneSel[] => {
+    const blank = { model: '', kb: '', profile: '' }
+    return Array.from({ length: n }, (_, i) => panes[i] ?? { ...blank })
+  }
+
+  // 窗格消息流（会话内累计；切会话清空；窗格数变化对齐长度）
+  const [paneItems, setPaneItems] = useState<ChatItem[][]>([[], []])
+  const paneRunMapRef = useRef<Record<string, number>>({})
+  useEffect(() => {
+    setPaneItems((prev) => prev.map(() => []))
+    paneRunMapRef.current = {}
+  }, [conversation?.id])
+  useEffect(() => {
+    setPaneItems((prev) => (prev.length === cmp.panes.length ? prev : Array.from({ length: cmp.panes.length }, (_, i) => prev[i] ?? [])))
+  }, [cmp.panes.length])
+  const updatePane = (i: number, updater: (prev: ChatItem[]) => ChatItem[]) => {
+    setPaneItems((prev) => prev.map((p, j) => (j === i ? updater(p) : p)))
+  }
 
   // 对话级配置落库（M8）：后端 PUT 为 full-replace，必须合并当前会话字段，避免重置 title/kb_id/top_k 等
   const patchConv = async (patch: Partial<Conversation>) => {
@@ -624,6 +770,25 @@ export default function ChatWindow({
     [items, showRaw, reasoningOpen, granularity, showReasoning],
   )
 
+  // REQ-19e 窗格消息流条目（与单路 listItems 同构映射：消息走角色、事件卡无边框）
+  const paneListItems = (i: number) =>
+    withSubDepth(paneItems[i] ?? []).map((it, j) => {
+      if (it.kind === 'msg') {
+        return {
+          key: `p${i}m${j}`,
+          role: it.role === 'user' ? 'user' : 'ai',
+          content: it.content ?? '',
+          loading: !!it.streaming && !it.content,
+          extraInfo: { streaming: !!it.streaming },
+        }
+      }
+      return {
+        key: `p${i}e${j}`,
+        role: 'event',
+        content: renderEventCard(it, j),
+      }
+    })
+
   // 中断恢复（M11 收尾 + REQ-14 审批）：会话挂起的 ask_human 提问 / 工具审批（随会话数据同步）
   const [interrupt, setInterrupt] = useState<{
     kind: 'ask_human' | 'approval'
@@ -653,98 +818,11 @@ export default function ChatWindow({
     }
   }, [conversation.id, conversation.interrupt_state])
 
-  // 运行/恢复共用的事件翻译（send 与 resume 的 SSE 处理一致）
+  // 运行/恢复共用的事件翻译（send 与 resume 的 SSE 处理一致；归约见模块级 applyRunEvent）
   const handleRunEvent = ({ event, data }: { event: string; data: any }) => {
     const payload = data?.data ?? {}
-    switch (event) {
-      case 'run.started':
-      case 'run.finished': {
-        const desc = describeEvent(event, payload)
-        setItems((prev) => {
-          const next = [...prev]
-          if (event === 'run.finished') {
-            const last = next[next.length - 1]
-            if (last && last.kind === 'msg' && last.streaming) {
-              last.streaming = false
-              if (!last.content) {
-                last.content =
-                  payload.reason === 'stopped' ? '（已停止生成）' : payload.reason === 'interrupted' ? '（已暂停，等待你的答复）' : ''
-              }
-            }
-          }
-          const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
-          next.splice(next.length - 1, 0, ev)
-          return next
-        })
-        break
-      }
-      case 'run.interrupted': {
-        const desc = describeEvent(event, payload)
-        setInterrupt({
-          kind: payload.kind === 'approval' || (!payload.question && payload.tool_name) ? 'approval' : 'ask_human',
-          question: payload.question ?? '',
-          choices: Array.isArray(payload.choices) ? payload.choices : [],
-          toolName: payload.tool_name ?? '',
-          arguments: payload.arguments ?? '',
-        })
-        setItems((prev) => {
-          const next = [...prev]
-          const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, evData: payload }
-          next.splice(next.length - 1, 0, ev)
-          return next
-        })
-        break
-      }
-      case 'reasoning.delta':
-        setItems((prev) => {
-          const next = [...prev]
-          for (let i = next.length - 1; i >= 0; i--) {
-            if (next[i].evType === 'reasoning' && next[i].streamKey === runKeyRef.current) {
-              next[i] = { ...next[i], reasoning: (next[i].reasoning ?? '') + (payload.delta ?? '') }
-              return next
-            }
-          }
-          const card: ChatItem = { kind: 'event', evType: 'reasoning', reasoning: payload.delta ?? '', streamKey: runKeyRef.current, evKey: runKeyRef.current }
-          next.splice(Math.max(next.length - 1, 0), 0, card)
-          return next
-        })
-        break
-      case 'message.delta':
-        setItems((prev) => {
-          const next = [...prev]
-          const last = next[next.length - 1]
-          if (last && last.kind === 'msg' && last.streaming) last.content += payload.delta ?? ''
-          return next
-        })
-        break
-      case 'run.error': {
-        const msg = payload.message ?? '运行失败'
-        setItems((prev) => {
-          const next = [...prev]
-          const last = next[next.length - 1]
-          if (last && last.kind === 'msg' && last.streaming && !last.content) next.pop()
-          const ev: ChatItem = { kind: 'event', evType: 'run.error', eventErr: true, eventText: `⚠ ${msg}`, evData: payload }
-          return [...next, ev]
-        })
-        break
-      }
-      default:
-        // 过程类事件（工具/技能/子智能体/知识召回/本体）：统一插到流式助手消息之前
-        if (
-          event === 'tool.call' || event === 'tool.result' || event === 'skill.loaded' ||
-          event === 'subagent.enter' || event === 'subagent.exit' ||
-          event === 'retrieval' || event === 'ontology.query' || event === 'ontology.unavailable' ||
-          event === 'run.warning' || event === 'model.step'
-        ) {
-          const desc = describeEvent(event, payload)
-          setItems((prev) => {
-            const next = [...prev]
-            const ev: ChatItem = { kind: 'event', evType: event, eventText: desc.text, eventErr: desc.err, eventWarn: desc.warn, evData: payload }
-            next.splice(next.length - 1, 0, ev) // 流式助手消息存在时插到其前
-            return next
-          })
-        }
-    }
+    if (event === 'run.interrupted') setInterrupt(toInterruptState(payload))
+    setItems((prev) => applyRunEvent(prev, event, payload, runKeyRef.current))
   }
 
   // streamStart 运行/恢复公共段：追加流式助手消息 → 消费 SSE → 收尾刷新
@@ -775,9 +853,63 @@ export default function ChatWindow({
       return
     }
     setInput('')
+    // REQ-19e：对比模式走多窗格并行（一次提问 N 路，停止整组）
+    if (cmp.on && cmp.panes.length >= 2) {
+      await sendCompare(text)
+      return
+    }
     runKeyRef.current = `run-${Date.now()}`
     setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
     await streamStart((handler) => runConversation(conversation.id, text, debugLevel, handler))
+  }
+
+  // REQ-19e/19f 对比发送：共用输入框一次提问 → N 路并行；meta 建窗格 run_id 映射，事件按 run_id 路由
+  const sendCompare = async (text: string) => {
+    const panesPayload: ComparePaneConfig[] = cmp.panes.map((p) => ({
+      ...(p.model ? { model_conn_id: p.model } : {}),
+      ...(p.kb ? { kb_id: p.kb } : {}),
+      ...(p.profile ? { runtime_profile_id: p.profile } : {}),
+    }))
+    paneRunMapRef.current = {}
+    setPaneItems((prev) =>
+      prev.map(() => [
+        { kind: 'msg' as const, role: 'user' as const, content: text },
+        { kind: 'msg' as const, role: 'assistant' as const, content: '', streaming: true },
+      ]),
+    )
+    setRunning(true)
+    const aborter = runConversation(conversation.id, text, debugLevel, handleCompareEvent, panesPayload)
+    runRef.current = aborter
+    try {
+      await aborter.done
+    } catch { /* 用户中断 */ }
+    setPaneItems((prev) => prev.map((p) => p.map((it) => (it.streamKey ? { ...it, streamKey: undefined } : it))))
+    setRunning(false)
+    runRef.current = null
+    bumpData()
+    onConversationUpdated()
+  }
+
+  // 对比 SSE 路由：meta 建映射 → 事件按 data.run_id 落到对应窗格；无映射的组级事件（守卫错误）广播全部窗格
+  const handleCompareEvent = ({ event, data }: { event: string; data: any }) => {
+    if (event === 'meta') {
+      if (Array.isArray(data?.panes)) {
+        const m: Record<string, number> = {}
+        for (const p of data.panes) {
+          if (p?.run_id != null && typeof p.pane === 'number') m[String(p.run_id)] = p.pane
+        }
+        paneRunMapRef.current = m
+      }
+      return
+    }
+    const payload = data?.data ?? {}
+    const idx = paneRunMapRef.current[String(data?.run_id ?? '')]
+    if (event === 'run.interrupted' && idx !== undefined) setInterrupt(toInterruptState(payload))
+    if (idx === undefined) {
+      setPaneItems((prev) => prev.map((p, i) => applyRunEvent(p, event, payload, `pane-${i}`)))
+      return
+    }
+    updatePane(idx, (prev) => applyRunEvent(prev, event, payload, `pane-${idx}`))
   }
 
   // resume 答复挂起中断（ask_human 自由答复 / 审批 批准|拒绝），事件流与运行同构
@@ -882,6 +1014,26 @@ export default function ChatWindow({
             <Button size="small">导出</Button>
           </Dropdown>
           <Button size="small" onClick={() => setReplayOpen(true)}>重放</Button>
+          {/* REQ-19e 对比模式：开关 + 2~4 列（运行中锁定；开关与窗格配置按会话记忆） */}
+          <Tooltip title="对比模式：一次提问多窗格并行，窗格可分别覆盖模型/知识库/运行方案——学习配置差异对同一问题的影响（SC-10）">
+            <span className="cmp-switch" aria-label="对话对比模式开关">
+              <Switch size="small" checked={cmp.on} disabled={running || !conversation.id} onChange={(v) => patchCmp({ on: v })} />
+              <span className="cmp-switch-label">对比</span>
+            </span>
+          </Tooltip>
+          {cmp.on && (
+            <Segmented
+              size="small"
+              value={String(cmp.panes.length)}
+              disabled={running}
+              onChange={(v) => patchCmp({ panes: resizePanes(cmp.panes, Number(v)) })}
+              options={[
+                { value: '2', label: '2 列' },
+                { value: '3', label: '3 列' },
+                { value: '4', label: '4 列' },
+              ]}
+            />
+          )}
           {/* REQ-135②：对话级过程展示面板（默认收起）——粒度/深度思考/原始 JSON/审批覆盖 */}
           <Popover
             trigger={"click"}
@@ -981,7 +1133,71 @@ export default function ChatWindow({
       </div>
 
       <div className={`msg-list${running ? ' running' : ''}`}>
-        {items.length === 0 ? (
+        {cmp.on ? (
+          <>
+            {/* 对比开启前/外的对话历史（共享，折叠收纳；对比轮次的各窗格回答也会落库进此历史） */}
+            {items.length > 0 && (
+              <Collapse
+                ghost
+                size="small"
+                className="cmp-history"
+                items={[{
+                  key: 'h',
+                  label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>对比外的对话历史（{items.length} 条，收起以聚焦本轮对照）</Typography.Text>,
+                  children: <Bubble.List items={listItems} role={BUBBLE_ROLES} />,
+                }]}
+              />
+            )}
+            <div className="cmp-grid" style={{ '--n': cmp.panes.length } as CSSProperties}>
+              {cmp.panes.map((sel, i) => (
+                <section key={i} className="cmp-pane" aria-label={`对比窗格 ${i + 1}`}>
+                  <header className="cmp-pane-head">
+                    <span className="cmp-pane-title">窗格 {i + 1}</span>
+                    <span className="cmp-pane-badges">
+                      <span className={`cmp-badge${sel.model ? ' set' : ''}`} title={sel.model ? `模型覆盖：${conns.find((c) => c.id === sel.model)?.name ?? sel.model}` : '模型：继承对话/智能体配置'}>
+                        模型{sel.model ? `·${conns.find((c) => c.id === sel.model)?.name ?? ''}` : '·继承'}
+                      </span>
+                      <span className={`cmp-badge${sel.kb ? ' set' : ''}`} title={sel.kb ? `知识库覆盖：${kbs.find((k) => k.id === sel.kb)?.name ?? sel.kb}` : '知识库：继承对话配置'}>
+                        库{sel.kb ? `·${kbs.find((k) => k.id === sel.kb)?.name ?? ''}` : '·继承'}
+                      </span>
+                      <span className={`cmp-badge${sel.profile ? ' set' : ''}`} title={sel.profile ? `运行方案覆盖：${profiles.find((p) => p.id === sel.profile)?.name ?? sel.profile}` : '本体运行方案：继承对话配置'}>
+                        方案{sel.profile ? `·${profiles.find((p) => p.id === sel.profile)?.name ?? ''}` : '·继承'}
+                      </span>
+                    </span>
+                  </header>
+                  <div className="cmp-pane-stream">
+                    {(paneItems[i] ?? []).length > 0 ? (
+                      <Bubble.List items={paneListItems(i)} role={BUBBLE_ROLES} />
+                    ) : (
+                      <div className="cmp-pane-empty">独立生成 · 等待提问</div>
+                    )}
+                  </div>
+                  {/* REQ-19f 窗格独立配置区：未设置项继承对话当前配置（Q-6 不追溯，仅影响该窗格后续消息） */}
+                  <footer className="cmp-pane-cfg">
+                    <Select
+                      size="small" allowClear disabled={running}
+                      placeholder="模型 · 继承" value={sel.model || undefined}
+                      onChange={(v) => setPaneSel(i, 'model', v ?? '')}
+                      options={conns.map((c) => ({ value: c.id, label: c.name }))}
+                    />
+                    <Select
+                      size="small" allowClear disabled={running}
+                      placeholder="知识库 · 继承" value={sel.kb || undefined}
+                      onChange={(v) => setPaneSel(i, 'kb', v ?? '')}
+                      options={kbs.map((k) => ({ value: k.id, label: k.name }))}
+                    />
+                    <Select
+                      size="small" allowClear disabled={running}
+                      placeholder="本体方案 · 继承" value={sel.profile || undefined}
+                      onChange={(v) => setPaneSel(i, 'profile', v ?? '')}
+                      options={profiles.filter((p) => p.status === 'running').map((p) => ({ value: p.id, label: p.name }))}
+                    />
+                  </footer>
+                </section>
+              ))}
+            </div>
+          </>
+        ) : items.length === 0 ? (
           <div className="msg-empty">
             <Welcome
               variant="borderless"

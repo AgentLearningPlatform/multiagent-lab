@@ -473,13 +473,24 @@ export const api = {
  * 运行对话并逐事件回调（SSE over fetch，POST 请求）。
  * 返回一个可中断的 AbortController。
  */
+/** REQ-19f 对比窗格单项覆盖（空 = 继承对话当前配置；与后端 chat.PaneConfig 对齐） */
+export interface ComparePaneConfig {
+  model_conn_id?: string
+  kb_id?: string
+  runtime_profile_id?: string
+}
+
 export function runConversation(
   conversationId: string,
   input: string,
   debugLevel: number,
   onEvent: (ev: { event: string; data: any }) => void,
+  panes?: ComparePaneConfig[],
 ): { abort: () => void; done: Promise<void> } {
-  return streamRun(`/api/conversations/${conversationId}/runs`, { input, debug_level: debugLevel }, onEvent)
+  const body: Record<string, unknown> = { input, debug_level: debugLevel }
+  // REQ-19e/19f 对比模式：≥2 窗格一次提问 N 路（meta 事件回传窗格 run_id 映射）
+  if (panes && panes.length >= 2) body.panes = panes
+  return streamRun(`/api/conversations/${conversationId}/runs`, body, onEvent)
 }
 
 /**

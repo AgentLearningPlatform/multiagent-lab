@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/api/sse"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
@@ -67,24 +68,55 @@ func (s *Server) runConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	runID := store.NewID()
 
+	// REQ-19e/19f：对比模式 N 路事件并发写同一条 SSE 流，http.ResponseWriter 非并发安全——统一串行化
+	var swMu sync.Mutex
+	writeEvent := func(event string, data any) {
+		swMu.Lock()
+		defer swMu.Unlock()
+		_ = sw.Event(event, data)
+	}
+
+	emit := func(ev *chat.Event) {
+		if ev == nil {
+			return
+		}
+		writeEvent(ev.Type, ev)
+	}
+
+	// REQ-19e/19f 对比模式：一次提问 N 路（2~4 窗格）——meta 附窗格 run_id 映射，
+	// 前端按事件 run_id 路由到对应窗格（SSE 契约与单路一致）。
+	if len(in.Panes) >= 2 {
+		paneIDs := make([]string, len(in.Panes))
+		panes := make([]map[string]any, len(in.Panes))
+		for i, pc := range in.Panes {
+			paneIDs[i] = store.NewID()
+			panes[i] = map[string]any{
+				"pane": i, "run_id": paneIDs[i],
+				"model_conn_id": pc.ModelConnID, "kb_id": pc.KBID, "runtime_profile_id": pc.RuntimeProfileID,
+			}
+		}
+		meta := map[string]any{"run_id": runID, "conversation_id": conv.ID, "agent_name": agent.Name, "compare": true, "panes": panes}
+		if projectName != "" {
+			meta["project_name"] = projectName
+		}
+		writeEvent("meta", meta)
+		if _, err := s.Chat.RunCompare(r.Context(), conv, agent, runID, paneIDs, in, emit); err != nil {
+			ev := chat.NewErrorEvent(runID, "run_failed", err.Error())
+			writeEvent(ev.Type, ev)
+		}
+		return
+	}
+
 	// 元信息事件（供前端校验会话与运行归属）
 	meta := map[string]any{"run_id": runID, "conversation_id": conv.ID, "agent_name": agent.Name}
 	if projectName != "" {
 		meta["project_name"] = projectName
 	}
-	_ = sw.Event("meta", meta)
-
-	// 统一事件协议：{type, run_id, ts, data}
-	emit := func(ev *chat.Event) {
-		if ev == nil {
-			return
-		}
-		_ = sw.Event(ev.Type, ev)
-	}
+	writeEvent("meta", meta)
 
 	if _, err := s.Chat.Run(r.Context(), conv, agent, runID, in.Input, in.DebugLevel, in.DebugPersist, emit); err != nil {
 		ev := chat.NewErrorEvent(runID, "run_failed", err.Error())
-		_ = sw.Event(ev.Type, ev)
+		writeEvent(ev.Type, ev)
 	}
 }
 
