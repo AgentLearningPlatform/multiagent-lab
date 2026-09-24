@@ -7,6 +7,7 @@ import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
 import { api, resumeConversation, runConversation } from '../api/client'
 import EventReplayDrawer from './EventReplayDrawer'
+import { AgentLogo } from './AgentLogo'
 import type {
   Agent,
   Conversation,
@@ -984,7 +985,7 @@ export default function ChatWindow({
           <div className="msg-empty">
             <Welcome
               variant="borderless"
-              icon={<span className="agent-tile"><span className="agent-glyph" /></span>}
+              icon={<span className="agent-tile"><AgentLogo agent={agent} size={30} /></span>}
               title={`开始与「${subjectName ?? '智能体'}」对话`}
               description={
                 isProjectScope

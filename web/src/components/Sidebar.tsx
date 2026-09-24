@@ -12,6 +12,7 @@ import {
 import { Conversations } from '@ant-design/x'
 import { api } from '../api/client'
 import EmptyGuide from './EmptyGuide'
+import { AgentLogo } from './AgentLogo'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
 import { confirmAction } from '../lib/antd'
@@ -20,6 +21,8 @@ import NameModal from './NameModal'
 interface TreeNode {
   key: string
   name: string
+  logo?: string
+  backend?: string
   convs: Conversation[]
 }
 
@@ -68,6 +71,8 @@ export default function Sidebar({
       return agents.map((a) => ({
         key: a.id,
         name: a.name,
+        logo: a.logo_url,
+        backend: a.inference_backend,
         convs: conversations.filter((c) => c.scope === 'agent' && c.agent_id === a.id).sort(byCreated),
       }))
     }
@@ -182,7 +187,7 @@ export default function Sidebar({
                 >
                   <span className="side-node-chev">{expanded ? <DownOutlined /> : <RightOutlined />}</span>
                   {/* 智能体用品牌同源的三节点标记；项目保留各自图标，一眼可辨 */}
-                  <span className="side-node-dot">{isAgent ? <span className="agent-glyph" /> : <ProjectOutlined />}</span>
+                  <span className="side-node-dot">{isAgent ? <AgentLogo backend={n.backend} logoUrl={n.logo} size={16} /> : <ProjectOutlined />}</span>
                   <span className="side-node-name" title={n.name}>{n.name}</span>
                   <span className="side-node-count">{n.convs.length}</span>
                 </button>

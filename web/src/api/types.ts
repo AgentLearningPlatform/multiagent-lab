@@ -15,6 +15,8 @@ export interface Agent {
   runtime_backend: string
   /** M13 §6.16：推理后端（eino-adk 自研默认；claude-code/opencode/aider 外部 CLI） */
   inference_backend: string
+  // REQ-137：非内置后端登记的原 logo 图标 URL（未配置回退默认图标）
+  logo_url?: string
   created_at: string
   updated_at: string
 }

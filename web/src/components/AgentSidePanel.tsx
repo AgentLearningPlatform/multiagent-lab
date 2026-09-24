@@ -172,6 +172,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
+        logo_url: (v.logo_url ?? '').trim(), // REQ-137
         tools: v.tools ?? [],
         // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
         skills: agent.skills ?? [],
@@ -340,6 +341,13 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
               { value: 'all', label: '全部工具调用前审批' },
             ]}
           />
+        </Form.Item>
+        <Form.Item
+          name="logo_url"
+          label="自定义后端 Logo URL（REQ-137）"
+          extra="推理后端为自定义/外部部署（非内置）时，会话列表与对话界面将展示此图标；未配置回退默认图标"
+        >
+          <Input placeholder="https://…/logo.png" allowClear />
         </Form.Item>
       </Form>
 

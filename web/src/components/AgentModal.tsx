@@ -80,6 +80,7 @@ export default function AgentModal({
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
+        logo_url: (v.logo_url ?? '').trim(), // REQ-137：非内置后端登记原 logo
         tools: v.tools ?? [],
       })
       showToast('智能体已创建')
@@ -229,6 +230,15 @@ export default function AgentModal({
                   { value: 'all', label: '全部工具调用前审批' },
                 ]}
               />
+            </Form.Item>
+          </Col>
+          <Col span={24}>
+            <Form.Item
+              name="logo_url"
+              label="自定义后端 Logo URL（REQ-137）"
+              extra="推理后端为自定义/外部部署（非内置）时，会话列表与对话界面将展示此图标；未配置回退默认图标"
+            >
+              <Input placeholder="https://…/logo.png" allowClear />
             </Form.Item>
           </Col>
         </Row>
