@@ -115,7 +115,7 @@ func (s *Server) downloadProjectFile(w http.ResponseWriter, r *http.Request) {
 // 导致文件视图与对话工具按错误路径寻址——REQ-101 修复：检测接口展开校验，入库必须同规则）。
 func normalizeProjectLocalDir(w http.ResponseWriter, p *store.Project) bool {
 	p.LocalDir = fsutil.NormalizeDir(p.LocalDir)
-	if p.LocalDir != "" && !filepath.IsAbs(p.LocalDir) {
+	if p.LocalDir != "" && !fsutil.IsAbsDir(p.LocalDir) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local_dir 必须是绝对路径（以 / 开头，Windows 用 C:\\ 开头，或以 ~ 开头，保存时自动展开 ~）；收到: " + p.LocalDir})
 		return false
 	}
@@ -126,7 +126,7 @@ func normalizeProjectLocalDir(w http.ResponseWriter, p *store.Project) bool {
 // local_dir 经归一化（~ 展开 / Windows 盘符）后使用，兼容历史未展开数据（v0.17 前入库的 ~/...）。
 func (s *Server) projectRoot(p *store.Project) string {
 	if p != nil && p.LocalDir != "" {
-		if d := fsutil.NormalizeDir(p.LocalDir); filepath.IsAbs(d) {
+		if d := fsutil.NormalizeDir(p.LocalDir); fsutil.IsAbsDir(d) {
 			return d
 		}
 	}
@@ -163,7 +163,7 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必填"})
 		return
 	}
-	if !filepath.IsAbs(dir) {
+	if !fsutil.IsAbsDir(dir) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必须是绝对路径（以 / 开头，Windows 用 C:\\ 开头，或以 ~ 开头）；收到: " + req.Dir})
 		return
 	}
@@ -468,7 +468,7 @@ func (s *Server) loadGitProject(w http.ResponseWriter, r *http.Request) (string,
 		return "", false
 	}
 	dir := fsutil.NormalizeDir(proj.LocalDir)
-	if !filepath.IsAbs(dir) || !isGitDir(dir) {
+	if !fsutil.IsAbsDir(dir) || !isGitDir(dir) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该目录不可用或不是 Git 仓库（无 .git）"})
 		return "", false
 	}

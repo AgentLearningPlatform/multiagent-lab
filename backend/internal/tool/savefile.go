@@ -51,7 +51,7 @@ func NewSaveFileTool(deps SaveFileDeps) (einotool.BaseTool, error) {
 	// local_dir 归一化（~ 展开）后使用，兼容历史未展开入库的 ~/... 数据。
 	root := filepath.Join(deps.Root, deps.ProjectID)
 	if p, perr := deps.Store.GetProject(deps.ProjectID); perr == nil && p != nil && p.LocalDir != "" {
-		if d := fsutil.NormalizeDir(p.LocalDir); filepath.IsAbs(d) {
+		if d := fsutil.NormalizeDir(p.LocalDir); fsutil.IsAbsDir(d) {
 			root = d
 		}
 	}

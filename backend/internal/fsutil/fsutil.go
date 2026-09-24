@@ -24,6 +24,15 @@ func IsWindowsPath(p string) bool {
 	return (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') && p[1] == ':' && (p[2] == '\\' || p[2] == '/')
 }
 
+// IsAbsDir 绝对路径判定（跨运行时统一口径）：当前运行时绝对路径（filepath.IsAbs，
+// Windows 下含 UNC）、Windows 盘符形态、POSIX 形态（/ 开头）三者任一即视为绝对。
+// filepath.IsAbs 单独使用会在另一侧运行时误拒——POSIX 运行时拒 C:\（与 IsWindowsPath
+// 的跨平台承诺矛盾），Windows 运行时拒 /c/... 等 / 形态（与校验报错文案"以 / 开头"承诺
+// 矛盾）；本函数只判定形态，目录是否存在由调用方 os.Stat 如实回报。
+func IsAbsDir(p string) bool {
+	return filepath.IsAbs(p) || IsWindowsPath(p) || strings.HasPrefix(p, "/")
+}
+
 // ExpandHome 展开 ~ 前缀为用户主目录（macOS/Linux 输入习惯；Windows 盘符形态不受影响）。
 // 无法取得主目录时原样返回。
 func ExpandHome(p string) string {
@@ -38,7 +47,7 @@ func ExpandHome(p string) string {
 }
 
 // NormalizeDir 用户输入目录 → 运行时格式：去首尾空白、~ 展开、Windows 盘符归一、Clean。
-// 返回值不保证绝对路径（调用方按需校验 filepath.IsAbs）。
+// 返回值不保证绝对路径（调用方按需校验 IsAbsDir）。
 func NormalizeDir(p string) string {
 	d := strings.TrimSpace(p)
 	d = ExpandHome(d)

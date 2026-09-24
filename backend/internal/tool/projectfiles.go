@@ -34,7 +34,7 @@ func ProjectDirRoot(deps ProjectDirDeps) (string, error) {
 	}
 	root := filepath.Join(deps.FilesRoot, deps.ProjectID)
 	if p, err := deps.Store.GetProject(deps.ProjectID); err == nil && p != nil && p.LocalDir != "" {
-		if d := fsutil.NormalizeDir(p.LocalDir); filepath.IsAbs(d) {
+		if d := fsutil.NormalizeDir(p.LocalDir); fsutil.IsAbsDir(d) {
 			return d, nil
 		}
 	}

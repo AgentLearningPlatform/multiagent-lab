@@ -40,6 +40,29 @@ func TestNormalizeDir(t *testing.T) {
 	}
 }
 
+func TestIsAbsDir(t *testing.T) {
+	// 跨运行时统一口径：期望值在 POSIX 与 Windows 运行时下均成立。
+	//  - "/..." 在 POSIX 为绝对（IsAbs）、在 Windows 经 / 前缀放行（报错文案承诺的形态）；
+	//  - "C:\\..." / "C:/..." 在 Windows 为绝对（IsAbs）、在 POSIX 经 IsWindowsPath 放行；
+	//  - 相对路径与 ~ 前缀（归一化前的原始形态）两类运行时都拒绝。
+	abs := []string{"/Users/me/proj", "/c/Users/proj", `C:\Users\me\proj`, "C:/Users/me/proj"}
+	rel := []string{"", "proj", "../proj", ".\\proj", "~/proj"}
+	for _, p := range abs {
+		if !IsAbsDir(p) {
+			t.Errorf("IsAbsDir(%q) = false, want true", p)
+		}
+	}
+	for _, p := range rel {
+		if IsAbsDir(p) {
+			t.Errorf("IsAbsDir(%q) = true, want false", p)
+		}
+	}
+	// 归一化后仍保持绝对性判定（Clean 不破坏盘符形态）
+	if !IsAbsDir(NormalizeDir(`C:\Users\me\x\..\proj`)) {
+		t.Error("IsAbsDir(NormalizeDir(C:\\Users\\me\\x\\..\\proj)) = false, want true")
+	}
+}
+
 func TestSafeJoin(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {

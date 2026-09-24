@@ -6,7 +6,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
@@ -508,7 +507,7 @@ func (a *Assembler) composeInstructionWithScope(ag *store.Agent, sc assembleScop
 		return inst
 	}
 	dir := fsutil.NormalizeDir(p.LocalDir)
-	if !filepath.IsAbs(dir) {
+	if !fsutil.IsAbsDir(dir) {
 		return inst
 	}
 	return inst + "\n\n# 项目本地目录\n" +
