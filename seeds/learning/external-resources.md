@@ -45,6 +45,17 @@
 | **semantica** | <https://github.com/semantica-agi/semantica> | Graph-Native 上下文/决策智能平台，本项目独立栏集成（锁 v0.6.8+） |
 | **OntoChat / OntoExtend / OpenBKN** 等 LLM 本体工程对照项目 | 见 [docs/15_开源项目及论文登记簿.md](../../docs/15_开源项目及论文登记簿.md) 第二/六/七类 | 方法论与 prompt 素材对照参考，不引入代码 |
 
+## 五、智能体工程与知识增强（RAG / GraphRAG，对照参考）
+
+| 资源 | 链接 | 一句话说明 |
+| --- | --- | --- |
+| **ReAct**（论文，2022） | <https://arxiv.org/abs/2210.03629> | 推理+行动交替协同的智能体奠基范式，「边想边做」；理解本项目 Agent 运行循环（计划→工具→观察）的理论起点 |
+| **A Survey on LLM based Autonomous Agents**（论文，人大） | <https://arxiv.org/abs/2308.11432> | 自主智能体全景综述：架构/记忆/规划/工具使用四模块分类法，建立智能体能力地图的首选读物 |
+| **RAG for LLMs: A Survey**（论文） | <https://arxiv.org/abs/2312.10997> | 检索增强生成综述：Naive→Advanced→Modular RAG 演进脉络，本项目知识库检索链路的对标框架 |
+| **GraphRAG**（论文，微软） | <https://arxiv.org/abs/2404.16130> | 图谱增强检索：LLM 抽实体图谱+社区摘要回答全局性问题——知识库与知识图谱（REQ-141 调研方向）联动的关键参考 |
+| **Eino**（CloudWeGo） | <https://github.com/cloudwego/eino> | Go 语言 LLM 应用开发框架（编排/组件/流式），本项目智能体运行时基座 |
+| **GraphRAG 官方实现**（微软） | <https://github.com/microsoft/graphrag> | 论文的官方开源实现，可对照体验图谱构建与全局问答全流程 |
+
 ---
 
 > **维护说明**：本文件面向学习者（运行时渲染），收录粒度为"一句话 + 链接"；更完整的定位/使用状态/借鉴价值/活跃度评估见 `docs/15_开源项目及论文登记簿.md`（维护者视角全局台账）。两者内容不一致时以登记簿为准并回修本文件。
