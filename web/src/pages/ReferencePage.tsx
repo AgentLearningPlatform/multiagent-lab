@@ -10,6 +10,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import XMarkdown from '@ant-design/x-markdown'
+import DocViewerModal from '../components/DocViewerModal'
 
 // 内容资产（REQ-116）：构建期内联，编辑 seeds/learning/reference/*.md 后重建即生效（REQ-109 同模式）。
 // 每篇头部带 frontmatter 源指针（module/req/docs/decisions/synced）——它是该模块知识的权威出处地图，
@@ -46,6 +47,24 @@ interface Frontmatter {
   synced?: string
 }
 
+const DOC_FILE_BY_NO: Record<string, string> = {
+  '01': 'docs/01_智能体_需求文档_PRD.md',
+  '02': 'docs/02_智能体_技术方案设计.md',
+  '03': 'docs/03_本体_需求文档.md',
+  '04': 'docs/04_本体_方案设计.md',
+  '11': 'docs/11_知识库_需求文档.md',
+  '12': 'docs/12_知识库_方案设计.md',
+  '14': 'docs/14_本体_前端改造方案.md',
+  '16': 'docs/16_部署与运行.md',
+  '17': 'docs/17_产品_信息架构与界面设计.md',
+  '18': 'docs/18_REQ编号注册表.md',
+  '20': 'docs/20_回归冒烟清单.md',
+}
+export function docFileOf(ptr: string): string | null {
+  const no = ptr.trim().slice(0, 2)
+  return DOC_FILE_BY_NO[no] ?? null
+}
+
 /** 解析文章头部 `---` frontmatter（轻量 key: [a, b] 格式，无需引入 YAML 依赖） */
 function parseFrontmatter(raw: string): { meta: Frontmatter; body: string } {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
@@ -71,6 +90,7 @@ function parseFrontmatter(raw: string): { meta: Frontmatter; body: string } {
 
 /** 源文档地图（frontmatter → 文末导读卡）：权威事实在 docs/ 与 research/，此处只做指路 */
 function SourceMap({ meta }: { meta: Frontmatter }) {
+  const [viewDoc, setViewDoc] = useState<string | null>(null) // REQ-140：点击查看内部文档
   const rows: { label: string; items: string[] }[] = [
     { label: '需求编号', items: meta.req ?? [] },
     { label: '文档章节', items: meta.docs ?? [] },
@@ -86,11 +106,22 @@ function SourceMap({ meta }: { meta: Frontmatter }) {
         <div key={r.label} className="ref-sourcemap-row">
           <span className="ref-sourcemap-label">{r.label}</span>
           <span>
-            {r.items.map((it) => (
-              <Tag key={it} style={{ marginInlineEnd: 6 }}>
-                {it}
-              </Tag>
-            ))}
+            {r.items.map((it) => {
+              const file = r.label === '文档章节' ? docFileOf(it) : null
+              return file ? (
+                <Tag
+                  key={it}
+                  style={{ marginInlineEnd: 6, cursor: 'pointer', color: '#4f46e5', borderColor: '#4f46e5' }}
+                  onClick={() => setViewDoc(file)}
+                >
+                  {it} · 点击查看
+                </Tag>
+              ) : (
+                <Tag key={it} style={{ marginInlineEnd: 6 }}>
+                  {it}
+                </Tag>
+              )
+            })}
           </span>
         </div>
       ))}
@@ -99,6 +130,7 @@ function SourceMap({ meta }: { meta: Frontmatter }) {
           最后同步：{meta.synced}（语义级变更须按 AGENTS.md 纪律 7 同步本页）
         </Typography.Paragraph>
       )}
+      <DocViewerModal path={viewDoc} open={!!viewDoc} onClose={() => setViewDoc(null)} />
     </Card>
   )
 }
