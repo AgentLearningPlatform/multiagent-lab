@@ -35,6 +35,27 @@ func New(binary, javaBin, dataDir, logDir string) *Runtime {
 	return &Runtime{Binary: binary, JavaBin: javaBin, DataDir: dataDir, LogDir: logDir}
 }
 
+// Probe 引擎自检（REQ-146）：fuseki 依赖 JDK + 分发包解压，不支持一键安装（诚实边界），
+// 只报 detected/缺失 + 手动指引。
+func (r *Runtime) Probe() engine.EngineStatus {
+	st := engine.EngineStatus{Engine: "fuseki", Registered: true}
+	cands := []string{r.Binary}
+	if p, err := exec.LookPath("fuseki-server"); err == nil {
+		cands = append(cands, p)
+	}
+	st.Searched = cands
+	if bin, ok := engine.FindExecutable(cands); ok {
+		st.Installed = true
+		st.Binary = bin
+		if _, jok := engine.FindExecutable([]string{r.JavaBin, "java"}); !jok {
+			st.Hint = "fuseki-server 已找到，但未找到 java（JDK 17+）：安装 JDK 并加入 PATH，或设置 FUSEKI_JAVA 后重启 runtimed"
+		}
+		return st
+	}
+	st.Hint = "未安装：请下载 apache-jena-fuseki（https://jena.apache.org/download/）解压，设置 FUSEKI_BIN 指向 fuseki-server 启动脚本（需 JDK 17+）后重启 runtimed；暂不支持一键安装"
+	return st
+}
+
 // reasoningConfig 生成带/不带推理的 dataset 配置（Turtle，assembler 语法）。
 // reasoning=true：ja:InfModel + RDFS/OWL 规则推理（GenericRuleReasoner，OWL_FB 规则集）；
 // reasoning=false：纯 TDB2 数据集（与 Oxigraph 同为无推理基线）。

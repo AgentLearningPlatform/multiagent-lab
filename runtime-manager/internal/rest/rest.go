@@ -39,6 +39,8 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/runtime-profiles/{id}/sparql", s.sparql)  // SPARQL 工作台端点（REQ-92，Yasgui）
 	m.HandleFunc("POST /api/runtime-profiles/{id}/sparql", s.sparql) // 同上
 	m.HandleFunc("GET /api/runtime-profiles/{id}/guide", s.guide)
+	m.HandleFunc("GET /api/engines", s.engines)                       // 引擎自检（REQ-146）
+	m.HandleFunc("POST /api/engines/{name}/install", s.engineInstall) // 一键安装（REQ-146，异步任务）
 	m.HandleFunc("GET /healthz", s.healthz)
 }
 
@@ -68,6 +70,22 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// engines 引擎自检汇总（REQ-146）：GET /api/engines → {engines:[EngineStatus]}。
+func (s *Server) engines(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"engines": s.Manager.EngineStatuses()})
+}
+
+// engineInstall 一键安装（REQ-146）：POST /api/engines/{name}/install → 202 异步任务，
+// 结果经 GET /api/engines 轮询（Installing/LastInstallError/Installed）。
+func (s *Server) engineInstall(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.Manager.StartInstall(name); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "engine": name})
 }
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {

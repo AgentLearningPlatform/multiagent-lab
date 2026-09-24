@@ -373,6 +373,11 @@ export const api = {
 
   // ---- M8 运行平面 :8090 /api/runtime-profiles* ----
   listRuntimeProfiles: () => req<RuntimeProfile[]>('/api/runtime-profiles'),
+  /** REQ-146 引擎自检：oxigraph/fuseki 全量呈现（未注册也返回 + 指引） */
+  listEngines: () => req<{ engines: EngineStatus[] }>('/api/engines'),
+  /** REQ-146 一键安装（仅 oxigraph；202 异步任务，结果轮询 listEngines） */
+  installEngine: (name: string) =>
+    req<{ started: boolean; engine: string }>(`/api/engines/${encodeURIComponent(name)}/install`, { method: 'POST' }),
   createRuntimeProfile: (p: { name: string; engine?: string; ontology_ids: string[]; config?: string | Record<string, unknown>; port?: number }) =>
     req<RuntimeProfile>('/api/runtime-profiles', { method: 'POST', body: JSON.stringify(p) }),
   updateRuntimeProfile: (id: string, p: { name: string; ontology_ids?: string[]; config?: Record<string, unknown>; port?: number }) =>
@@ -556,4 +561,18 @@ function streamRun(
     }
   })()
   return { abort: () => ctrl.abort(), done }
+}
+
+/** REQ-146 引擎自检结果（运行平面 GET /api/engines；与后端 engine.EngineStatus 对齐） */
+export interface EngineStatus {
+  engine: string
+  registered: boolean
+  installed: boolean
+  installing?: boolean
+  last_install_error?: string
+  binary?: string
+  version?: string
+  searched?: string[]
+  hint?: string
+  installable: boolean
 }

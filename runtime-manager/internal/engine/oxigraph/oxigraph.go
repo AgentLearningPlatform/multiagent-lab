@@ -30,11 +30,104 @@ func New(binary, dataDir, logDir string) *Runtime {
 	return &Runtime{Binary: binary, DataDir: dataDir, LogDir: logDir}
 }
 
+// PinnedVersion 一键安装 pin 的官方 release 版本（与 run-dev.sh 安装指引一致）。
+const PinnedVersion = "v0.5.11"
+
+// ReleaseBaseURL 官方 release 下载基址（一键安装按 GOOS/GOARCH 拼接资产名）。
+const ReleaseBaseURL = "https://github.com/oxigraph/oxigraph/releases/download/" + PinnedVersion
+
+// ReleaseAsset 按 GOOS/GOARCH 映射官方 release 资产名（REQ-146；实测 v0.5.11 资产清单，
+// darwin/linux/windows 全平台覆盖；无预编译产物的平台返回手动构建指引）。
+func ReleaseAsset(goos, goarch string) (string, error) {
+	base := "oxigraph_" + PinnedVersion + "_"
+	switch {
+	case goos == "darwin" && goarch == "amd64":
+		return base + "x86_64_apple", nil
+	case goos == "darwin" && goarch == "arm64":
+		return base + "aarch64_apple", nil
+	case goos == "linux" && goarch == "amd64":
+		return base + "x86_64_linux_gnu", nil
+	case goos == "linux" && goarch == "arm64":
+		return base + "aarch64_linux_gnu", nil
+	case goos == "windows" && goarch == "amd64":
+		return base + "x86_64_windows_msvc.exe", nil
+	case goos == "windows" && goarch == "arm64":
+		return base + "aarch64_windows_msvc.exe", nil
+	}
+	return "", fmt.Errorf("当前平台 %s/%s 无官方预编译产物，请从源码构建：cargo install --git https://github.com/oxigraph/oxigraph oxigraph-cli（或参考仓库 README）", goos, goarch)
+}
+
+// candidatePaths 可执行文件候选序（REQ-146）：显式配置 → PATH 常见名 → data/bin → tools/bin。
+// 与 run-dev.sh 的搜索语义一致；data/bin 为一键安装的落点，装后即命中、无需重启 runtimed。
+func (r *Runtime) candidatePaths() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	add(r.Binary)
+	if p, err := exec.LookPath("oxigraph_server"); err == nil {
+		add(p)
+	}
+	if p, err := exec.LookPath("oxigraph"); err == nil {
+		add(p)
+	}
+	add("data/bin/oxigraph_server")
+	add("data/bin/oxigraph")
+	add("tools/bin/oxigraph")
+	return out
+}
+
+// resolveBinary 探测可用可执行文件；全落空给可自助的安装指引（含一键安装提示）。
+func (r *Runtime) resolveBinary() (string, error) {
+	cands := r.candidatePaths()
+	if bin, ok := engine.FindExecutable(cands); ok {
+		return bin, nil
+	}
+	return "", fmt.Errorf("未找到 oxigraph 可执行文件（已探测 %s）: 可在本体运行页「一键安装」（写入 data/bin，即时生效），或从 https://github.com/oxigraph/oxigraph/releases 下载 %s 并加入 PATH / 放置 data/bin/ 下，或设置 OXIGRAPH_BIN 为完整路径后重启 runtimed",
+		strings.Join(cands, " → "), PinnedVersion)
+}
+
+// Probe 引擎自检（REQ-146）：installed/binary/version + 缺失时的候选清单与指引。
+func (r *Runtime) Probe() engine.EngineStatus {
+	st := engine.EngineStatus{Engine: "oxigraph", Registered: true, Installable: true}
+	cands := r.candidatePaths()
+	st.Searched = cands
+	if bin, ok := engine.FindExecutable(cands); ok {
+		st.Installed = true
+		st.Binary = bin
+		st.Version = probeVersion(bin)
+		return st
+	}
+	st.Hint = "未安装：可一键安装（官方 release " + PinnedVersion + "，写入 data/bin，装后即时生效无需重启）；或手动下载后加入 PATH / 放置 data/bin/oxigraph"
+	return st
+}
+
+// probeVersion best-effort 取 `--version` 首行（失败不阻塞自检）。
+func probeVersion(bin string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	if len(line) > 60 {
+		line = line[:60]
+	}
+	return line
+}
+
 // Start 装载并启动。ttls: ontology_id → TTL 内容。
 func (r *Runtime) Start(ctx context.Context, profileID string, port int, ttls map[string]string) (*engine.Process, error) {
-	// 预检引擎二进制：缺失时给出可自助的安装指引，而非裸 exec 错误
-	if _, err := exec.LookPath(r.Binary); err != nil {
-		return nil, fmt.Errorf("未找到引擎可执行文件 %q（不在 PATH，环境变量 OXIGRAPH_BIN 也未指向有效路径）: 请从 https://github.com/oxigraph/oxigraph/releases 下载对应平台的 oxigraph_server 并加入 PATH，或将其放到 data/bin/ 下，或设置 OXIGRAPH_BIN 为完整路径后重启 runtimed", r.Binary)
+	// 预检并解析引擎二进制（REQ-146：动态解析，data/bin 一键安装后即时命中）
+	bin, rerr := r.resolveBinary()
+	if rerr != nil {
+		return nil, rerr
 	}
 	dir := filepath.Join(r.DataDir, profileID)
 	// 幂等：重建数据目录
@@ -48,7 +141,7 @@ func (r *Runtime) Start(ctx context.Context, profileID string, port int, ttls ma
 		if err := os.WriteFile(f, []byte(ttl), 0o644); err != nil {
 			return nil, err
 		}
-		cmd := exec.CommandContext(ctx, r.Binary, "load", "--location", dir, "--file", f)
+		cmd := exec.CommandContext(ctx, bin, "load", "--location", dir, "--file", f)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return nil, fmt.Errorf("oxigraph load %s 失败: %v: %s", oid, err, tail(out, 300))
@@ -56,7 +149,7 @@ func (r *Runtime) Start(ctx context.Context, profileID string, port int, ttls ma
 		_ = os.Remove(f)
 	}
 	// serve
-	cmd := exec.Command(r.Binary, "serve", "--location", dir, "--bind", fmt.Sprintf("127.0.0.1:%d", port))
+	cmd := exec.Command(bin, "serve", "--location", dir, "--bind", fmt.Sprintf("127.0.0.1:%d", port))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {

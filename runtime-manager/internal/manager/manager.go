@@ -7,36 +7,46 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/engine"
+	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/engine/oxigraph"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/store"
 )
 
 type Manager struct {
-	Store       *store.Store
-	Engines     map[string]engine.Runtime // engine 名 → 适配器（oxigraph/fuseki；O6 起多引擎）
-	BuildURL    string                    // 构建平面地址（拉取本体形态）
-	LogDir      string
-	HTTP        *http.Client
-	HealthTries int // 启动健康检查重试次数
+	Store         *store.Store
+	Engines       map[string]engine.Runtime // engine 名 → 适配器（oxigraph/fuseki；O6 起多引擎）
+	BuildURL      string                    // 构建平面地址（拉取本体形态）
+	LogDir        string
+	InstallBinDir string // 一键安装落点目录（REQ-146，默认 data/bin）
+	HTTP          *http.Client
+	HealthTries   int // 启动健康检查重试次数
 
 	mu    sync.Mutex
 	procs map[string]*engine.Process // profileID → 运行句柄（进程内态，重启 Manager 后按 stopped 处理）
+
+	installMu  sync.Mutex
+	installing bool   // oxigraph 一键安装进行中（REQ-146）
+	installErr string // 最近一次安装失败原因
 }
 
-func New(st *store.Store, buildURL, logDir string) *Manager {
+func New(st *store.Store, buildURL, logDir, installBinDir string) *Manager {
 	_ = os.MkdirAll(logDir, 0o755)
+	_ = os.MkdirAll(installBinDir, 0o755)
 	return &Manager{
 		Store: st, Engines: map[string]engine.Runtime{}, BuildURL: strings.TrimRight(buildURL, "/"), LogDir: logDir,
-		HTTP:        &http.Client{Timeout: 30 * time.Second},
-		HealthTries: 20,
-		procs:       map[string]*engine.Process{},
+		InstallBinDir: installBinDir,
+		HTTP:          &http.Client{Timeout: 30 * time.Second},
+		HealthTries:   20,
+		procs:         map[string]*engine.Process{},
 	}
 }
 
@@ -50,15 +60,146 @@ func (m *Manager) engineFor(name string) (engine.Runtime, error) {
 	if eng, ok := m.Engines[name]; ok {
 		return eng, nil
 	}
-	hint := "请检查 runtimed 启动配置（对应引擎二进制未就绪或未注册）"
-	if name == "fuseki" {
-		hint = "请下载 apache-jena-fuseki 并设置 FUSEKI_BIN 指向 fuseki-server 脚本（JDK 17+），重启 runtimed"
-	}
-	if name == "oxigraph" {
-		hint = "请安装 oxigraph_server 并加入 PATH（或设置 OXIGRAPH_BIN），重启 runtimed"
-	}
-	return nil, fmt.Errorf("引擎 %q 未注册: %s", name, hint)
+	return nil, fmt.Errorf("引擎 %q 未注册: %s", name, engineHint(name))
 }
+
+func engineHint(name string) string {
+	switch name {
+	case "fuseki":
+		return "请下载 apache-jena-fuseki 并设置 FUSEKI_BIN 指向 fuseki-server 脚本（JDK 17+），重启 runtimed"
+	case "oxigraph":
+		return "请在本体运行页一键安装（写入 data/bin 即时生效），或安装 oxigraph_server 并加入 PATH（或设置 OXIGRAPH_BIN）后重启 runtimed"
+	}
+	return "请检查 runtimed 启动配置（对应引擎二进制未就绪或未注册）"
+}
+
+// knownEngines 引擎状态汇总的固定顺序（未注册的也呈现，REQ-146）。
+var knownEngines = []string{"oxigraph", "fuseki"}
+
+// EngineStatuses 引擎自检汇总（REQ-146）：oxigraph/fuseki 全量呈现（未注册=不可用 + 指引），
+// 附加一键安装任务态。
+func (m *Manager) EngineStatuses() []engine.EngineStatus {
+	m.installMu.Lock()
+	active, lastErr := m.installing, m.installErr
+	m.installMu.Unlock()
+	out := make([]engine.EngineStatus, 0, len(knownEngines))
+	for _, name := range knownEngines {
+		var st engine.EngineStatus
+		if eng, ok := m.Engines[name]; ok {
+			if p, ok := eng.(engine.StatusProbe); ok {
+				st = p.Probe()
+			} else {
+				st = engine.EngineStatus{Engine: name, Registered: true}
+			}
+		} else {
+			st = engine.EngineStatus{Engine: name, Registered: false, Hint: engineHint(name)}
+		}
+		if name == "oxigraph" {
+			st.Installable = true
+			st.Installing = active
+			st.LastInstallError = lastErr
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// StartInstall 异步发起一键安装（REQ-146，仅 oxigraph）：进行中返回错误；
+// 结果经 EngineStatuses 的 Installing/LastInstallError/Installed 轮询呈现。
+func (m *Manager) StartInstall(name string) error {
+	if name != "oxigraph" {
+		return fmt.Errorf("引擎 %q 暂不支持一键安装（fuseki 需 JDK + apache-jena-fuseki 解压，手动配置 FUSEKI_BIN）", name)
+	}
+	m.installMu.Lock()
+	if m.installing {
+		m.installMu.Unlock()
+		return fmt.Errorf("安装任务进行中，请稍候")
+	}
+	m.installing = true
+	m.installErr = ""
+	m.installMu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		err := m.installOxigraph(ctx)
+		m.installMu.Lock()
+		m.installing = false
+		if err != nil {
+			m.installErr = err.Error()
+		}
+		m.installMu.Unlock()
+	}()
+	return nil
+}
+
+// installOxigraph 下载官方 release（GOOS/GOARCH 映射资产，pin PinnedVersion）流式落盘：
+// temp + rename 原子替换，装后 oxigraph 适配器动态解析即时命中（Start 无需重启 runtimed）。
+func (m *Manager) installOxigraph(ctx context.Context) error {
+	asset, err := oxigraph.ReleaseAsset(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return err
+	}
+	url := oxigraph.ReleaseBaseURL + "/" + asset
+	target := filepath.Join(m.InstallBinDir, "oxigraph")
+	if runtime.GOOS == "windows" {
+		target += ".exe"
+	}
+	if err := downloadTo(ctx, url, target, 1<<20); err != nil {
+		return err
+	}
+	log.Printf("[manager] oxigraph 一键安装完成: %s (%s)", target, asset)
+	return nil
+}
+
+// downloadTo 流式下载 url → target（temp+rename 原子替换，非 windows 补执行位）。
+// minBytes 下限防截断/错误页落盘。独立成函数便于对下载机制做零网络依赖单测（httptest）。
+func downloadTo(ctx context.Context, url, target string, minBytes int64) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("创建安装目录失败: %w", err)
+	}
+	tmp := target + ".download"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := installHTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("下载失败（%s）: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("下载失败: %s（%s）", resp.Status, url)
+	}
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(f, resp.Body)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("下载中断（已收 %d 字节）: %w", n, err)
+	}
+	if n < minBytes {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("下载内容异常（仅 %d 字节，预期更大）: %s", n, url)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(tmp, 0o755); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+var installHTTP = &http.Client{Timeout: 10 * time.Minute}
 
 // FetchTTL 从构建平面拉取本体 TTL 形态（original turtle 直接回原文；自建经 spec→sidecar 导出）。
 func (m *Manager) FetchTTL(ontologyID string) (string, error) {

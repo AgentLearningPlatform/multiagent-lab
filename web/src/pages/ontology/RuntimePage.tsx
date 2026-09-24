@@ -26,6 +26,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   ApiOutlined,
   DeleteOutlined,
+  EditOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -33,6 +34,7 @@ import {
   RightOutlined,
 } from '@ant-design/icons'
 import { api } from '../../api/client'
+import type { EngineStatus } from '../../api/client'
 import type { Conversation, Ontology, RuntimeProfile } from '../../api/types'
 import { useUI } from '../../store/ui'
 import { StatusBadge } from './shared'
@@ -90,12 +92,28 @@ function friendlyEngineError(err?: string): string | null {
 
 export default function RuntimePage() {
   const [engineKey, setEngineKey] = useState<EngineKey>(readEngineKey)
+  // REQ-146 引擎自检：oxigraph/fuseki 缺失时导航 Tag 显异常，分组页给一键安装入口
+  const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([])
 
   useEffect(() => {
     const sync = () => setEngineKey(readEngineKey())
     window.addEventListener('onto-sidebar-change', sync)
     return () => window.removeEventListener('onto-sidebar-change', sync)
   }, [])
+
+  const loadEngines = () => {
+    api
+      .listEngines()
+      .then((r) => setEngineStatuses(r.engines ?? []))
+      .catch(() => setEngineStatuses([]))
+  }
+  useEffect(loadEngines, [])
+  useEffect(() => {
+    const t = setInterval(loadEngines, 5000)
+    return () => clearInterval(t)
+  }, [])
+
+  const engineStatus = (key: EngineKey): EngineStatus | null => engineStatuses.find((e) => e.engine === key) ?? null
 
   const select = (key: EngineKey) => {
     localStorage.setItem(ONTO_ENGINE_KEY, key)
@@ -119,31 +137,42 @@ export default function RuntimePage() {
       </div>
 
       <div className="onto-engine-nav">
-        {ENGINES.map((e) => (
-          <button
-            key={e.key}
-            type="button"
-            className={`onto-engine-item${engineKey === e.key ? ' active' : ''}${e.state === 'disabled' ? ' disabled' : ''}`}
-            onClick={() => e.state !== 'disabled' && select(e.key)}
-            disabled={e.state === 'disabled'}
-          >
-            <span className="onto-engine-top">
-              <span className="onto-engine-label">{e.label}</span>
-              {STATE_TAG[e.key].map((t) => (
-                <Tag key={t.text} color={t.color} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
-                  {t.text}
-                </Tag>
-              ))}
-            </span>
-            <span className="onto-engine-desc">{e.desc}</span>
-          </button>
-        ))}
+        {ENGINES.map((e) => {
+          // REQ-146：managed 引擎（oxigraph/fuseki）本地无启动程序时 Tag 显异常（安装中转橙）
+          const st = engineStatus(e.key)
+          const missing = (e.key === 'oxigraph' || e.key === 'fuseki') && st && !st.installed
+          return (
+            <button
+              key={e.key}
+              type="button"
+              className={`onto-engine-item${engineKey === e.key ? ' active' : ''}${e.state === 'disabled' ? ' disabled' : ''}`}
+              onClick={() => e.state !== 'disabled' && select(e.key)}
+              disabled={e.state === 'disabled'}
+            >
+              <span className="onto-engine-top">
+                <span className="onto-engine-label">{e.label}</span>
+                {missing ? (
+                  <Tag color={st?.installing ? 'orange' : 'red'} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                    {st?.installing ? '安装中' : '未安装'}
+                  </Tag>
+                ) : (
+                  STATE_TAG[e.key].map((t) => (
+                    <Tag key={t.text} color={t.color} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                      {t.text}
+                    </Tag>
+                  ))
+                )}
+              </span>
+              <span className="onto-engine-desc">{e.desc}</span>
+            </button>
+          )
+        })}
       </div>
 
       {engineKey === 'oo' ? (
         <OpenOntologiesGuide />
       ) : (
-        <EngineProfilesPage engine={engineKey} />
+        <EngineProfilesPage engine={engineKey} engineStatus={engineStatus(engineKey)} />
       )}
     </div>
   )
@@ -153,7 +182,13 @@ export default function RuntimePage() {
 // 引擎分组页（Oxigraph；Fuseki 交付后共用模板）
 // ---------------------------------------------------------------------------
 
-function EngineProfilesPage({ engine }: { engine: EngineKey }) {
+function EngineProfilesPage({
+  engine,
+  engineStatus,
+}: {
+  engine: EngineKey
+  engineStatus: EngineStatus | null
+}) {
   const { showToast } = useUI()
   const [profiles, setProfiles] = useState<RuntimeProfile[]>([])
   const [ontos, setOntos] = useState<Ontology[]>([])
@@ -161,6 +196,13 @@ function EngineProfilesPage({ engine }: { engine: EngineKey }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [installing, setInstalling] = useState(false)
+
+  // 安装任务终态复位：引擎已命中 / 上次安装报错时解除按钮 loading（轮询由父组件 5s 驱动）
+  useEffect(() => {
+    if (engineStatus?.installed || engineStatus?.last_install_error) setInstalling(false)
+  }, [engineStatus?.installed, engineStatus?.last_install_error])
 
   const reload = () => {
     api
@@ -188,7 +230,21 @@ function EngineProfilesPage({ engine }: { engine: EngineKey }) {
 
   const mine = useMemo(() => profiles.filter((p) => (p.engine ?? 'oxigraph') === engine), [profiles, engine])
   const detail = mine.find((p) => p.id === detailId) ?? null
+  const editing = mine.find((p) => p.id === editId) ?? null
   const anyError = mine.some((p) => p.status === 'error' && p.last_error)
+  // REQ-146：本地无引擎启动程序 → 引擎不可用（导航已显异常，此处给预检 Alert + 安装入口）
+  const engineMissing = !!engineStatus && !engineStatus.installed
+
+  const install = async () => {
+    setInstalling(true)
+    try {
+      await api.installEngine(engine)
+      showToast('已开始后台下载安装（约 20MB），完成后状态自动刷新')
+    } catch (e: any) {
+      showToast(e.message, 'err')
+      setInstalling(false)
+    }
+  }
 
   const act = async (id: string, fn: () => Promise<unknown>, ok: string) => {
     setBusyId(id)
@@ -223,6 +279,37 @@ function EngineProfilesPage({ engine }: { engine: EngineKey }) {
           showIcon
           message="运行平面暂不可达"
           description="RUNTIME_MGR_URL（:8090）未就绪，无法读取 / 管理运行方案。"
+        />
+      )}
+      {engineMissing && (
+        <Alert
+          type="error"
+          showIcon
+          message={`${ENGINES.find((e) => e.key === engine)?.label} 引擎未安装，方案无法启动（REQ-146 预检）`}
+          description={
+            <div>
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 12 }}>
+                {engineStatus?.last_install_error
+                  ? `上次安装失败：${engineStatus.last_install_error}`
+                  : engineStatus?.hint ?? '未探测到引擎可执行文件。'}
+                {engineStatus?.binary ? `（当前命中：${engineStatus.binary}）` : ''}
+              </Typography.Paragraph>
+              {engineStatus?.installable ? (
+                <Space wrap>
+                  <Button type="primary" size="small" loading={installing || !!engineStatus.installing} onClick={install}>
+                    {engineStatus.installing ? '安装中…' : '一键下载安装'}
+                  </Button>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    官方 release（pin v0.5.11）按当前平台自动选择，写入 data/bin 后即时生效，无需重启服务
+                  </Typography.Text>
+                </Space>
+              ) : (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  该引擎暂不支持一键安装，请按上方指引手动配置后重启 runtimed。
+                </Typography.Text>
+              )}
+            </div>
+          }
         />
       )}
       {anyError && (
@@ -260,6 +347,11 @@ function EngineProfilesPage({ engine }: { engine: EngineKey }) {
               </div>
               <div className="onto-profile-meta">
                 <span>引擎 {p.engine ?? '—'}</span>
+                {engineMissing && (
+                  <Tag color="red" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                    引擎缺失
+                  </Tag>
+                )}
                 <span className="dot">·</span>
                 <span>端口 {p.port ?? '—'}</span>
                 {typeof p.pid === 'number' && (
@@ -314,6 +406,18 @@ function EngineProfilesPage({ engine }: { engine: EngineKey }) {
                     重载
                   </Button>
                 </Tooltip>
+                {/* REQ-147：停止态编辑（更换加载本体）；running/starting 置灰（后端语义为更新即先停，UI 不主动停） */}
+                {p.status === 'running' || p.status === 'starting' ? (
+                  <Tooltip title="运行中：先停止再编辑（REQ-147）">
+                    <Button type="link" size="small" icon={<EditOutlined />} disabled>
+                      编辑
+                    </Button>
+                  </Tooltip>
+                ) : (
+                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => setEditId(p.id)}>
+                    编辑
+                  </Button>
+                )}
                 <Button type="link" size="small" icon={<RightOutlined />} onClick={() => setDetailId(p.id)}>
                   详情
                 </Button>
@@ -346,12 +450,123 @@ function EngineProfilesPage({ engine }: { engine: EngineKey }) {
         }}
       />
 
+      <ProfileEdit
+        open={!!editing}
+        profile={editing}
+        ontos={ontos}
+        onClose={() => setEditId(null)}
+        onSaved={() => {
+          setEditId(null)
+          reload()
+        }}
+      />
+
       <ProfileDetail
         profile={detail}
         profilesErr={profilesErr}
         onClose={() => setDetailId(null)}
       />
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 编辑运行方案（REQ-147）：stopped/created/error 态改名称与本体集合；引擎/端口只读
+// ---------------------------------------------------------------------------
+
+function ProfileEdit({
+  open,
+  profile,
+  ontos,
+  onClose,
+  onSaved,
+}: {
+  open: boolean
+  profile: RuntimeProfile | null
+  ontos: Ontology[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const { showToast } = useUI()
+  const [name, setName] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (open && profile) {
+      setName(profile.name)
+      setSelectedIds([...(profile.ontology_ids ?? [])])
+    }
+  }, [open, profile])
+
+  const save = async () => {
+    if (!profile) return
+    if (!name.trim()) {
+      showToast('请输入方案名称', 'err')
+      return
+    }
+    if (selectedIds.length === 0) {
+      showToast('请至少勾选一个本体', 'err')
+      return
+    }
+    setBusy(true)
+    try {
+      // 端口原样回传保持不变；config 不传（后端 orDefault 保留原值）
+      await api.updateRuntimeProfile(profile.id, {
+        name: name.trim(),
+        ontology_ids: selectedIds,
+        port: profile.port ?? 0,
+      })
+      showToast('方案已更新；下次启动按新本体集合装载（REQ-87 显式重载语义不变）')
+      onSaved()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      centered
+      title={`编辑运行方案 · ${profile?.name ?? ''}`}
+      width={560}
+      onCancel={onClose}
+      footer={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={busy} onClick={save}>
+            保存
+          </Button>
+        </Space>
+      }
+    >
+      {profile && (
+        <Space direction="vertical" style={{ width: '100%' }} size={10}>
+          <Alert
+            type="info"
+            showIcon
+            message={`引擎 ${profile.engine ?? '—'} 与端口 ${profile.port ? profile.port : '自动分配'} 不可修改（引擎换型=删建方案；端口影响 facade 挂载稳定性）。保存后下次启动按新本体集合装载。`}
+          />
+          <div className="onto-csv-field">
+            <span className="cfg-label">方案名称</span>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="onto-csv-field">
+            <span className="cfg-label">加载的本体集合（多选，来自构建平面仓库）</span>
+            <Select
+              mode="multiple"
+              style={{ width: '100%' }}
+              placeholder="选择本体（可多选）"
+              value={selectedIds}
+              onChange={setSelectedIds}
+              options={ontos.map((o) => ({ value: o.id, label: `${o.name}（v${o.version ?? '—'} · 概念 ${o.n_concepts ?? 0}）` }))}
+            />
+          </div>
+        </Space>
+      )}
+    </Modal>
   )
 }
 

@@ -39,7 +39,7 @@ func main() {
 		log.Fatalf("打开存储失败: %v", err)
 	}
 	eng := oxigraph.New(oxigraphBin, dataDir, logDir)
-	mg := manager.New(st, buildURL, logDir)
+	mg := manager.New(st, buildURL, logDir, env("ENGINE_INSTALL_DIR", "data/bin"))
 	mg.RegisterEngine("oxigraph", eng)
 	// O6：Fuseki 引擎（FUSEKI_BIN 指向 fuseki-server 启动脚本；未配置则不注册，创建 fuseki 方案时给可自助提示）
 	fusekiBin := env("FUSEKI_BIN", "")
