@@ -48,6 +48,8 @@ body { font-size: 14px; background: var(--c-bg); }
 .brand-text { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .brand-name { font-size: 15.5px; font-weight: 700; letter-spacing: .2px; color: var(--c-ink); }
 .brand-sub { font-size: 12px; color: var(--c-ink-3); letter-spacing: .01em; white-space: nowrap; }
+/* REQ-133：目录检测分字段直连——远程目录存在性未核实的说明文案 */
+.dir-check-hint { font-size: 12px; color: var(--c-ink-3); line-height: 1.5; }
 
 /* 导航：自绘 pill（图标 + 文字），激活态品牌底 + 底部强调条 */
 .topnav-nav { display: flex; align-items: center; gap: 2px; min-width: 0; }

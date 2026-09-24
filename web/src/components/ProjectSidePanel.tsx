@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { Agent, DirValidation, GitBranch, GitCommit, GitFileChange, GitWorkingFile, Project, ProjectDirEntry } from '../api/types'
+import DirCheckResult from './DirCheckResult'
 import { useUI } from '../store/ui'
 
 export type PanelView = 'files' | 'git' | 'config'
@@ -614,9 +615,24 @@ function ConfigView({ project, agents, onChanged }: { project: Project; agents: 
     try {
       setDirCheck(await api.validateProjectDir(dir))
     } catch (e: any) {
-      setDirCheck({ exists: false, is_dir: false, is_git: false, error: e?.message ?? '检测失败' })
+      setDirCheck({ format_ok: false, reachable: false, exists: null, is_dir: null, is_git: false, error: e?.message ?? '检测失败' })
     } finally {
       setChecking(false)
+    }
+  }
+
+  // REQ-133：同机部署唤起系统目录选择对话框回填；远程部署后端 400，提示手输
+  const [picking, setPicking] = useState(false)
+  const pickDir = async () => {
+    setPicking(true)
+    try {
+      const { dir } = await api.pickProjectDir()
+      form.setFieldValue('local_dir', dir)
+      setDirCheck(await api.validateProjectDir(dir))
+    } catch (e: any) {
+      showToast(e?.message ?? '目录选择不可用（远程部署请手填路径）', 'err')
+    } finally {
+      setPicking(false)
     }
   }
 
@@ -686,43 +702,16 @@ function ConfigView({ project, agents, onChanged }: { project: Project; agents: 
             <Button onClick={checkDir} loading={checking} disabled={!(localDir ?? '').trim()}>
               检测
             </Button>
+            <Button
+              onClick={pickDir}
+              loading={picking}
+              title="唤起部署主机系统目录选择对话框（仅与浏览器同机部署可用；远程部署请手填路径）"
+            >
+              选目录
+            </Button>
           </Space.Compact>
         </Form.Item>
-        {dirCheck && (
-          <div className="dir-check">
-            {dirCheck.error ? (
-              <Alert type="error" showIcon message="目录检测失败" description={dirCheck.error} />
-            ) : (
-              <Space size={6} wrap>
-                <Tag color={dirCheck.exists ? 'green' : 'red'} style={{ margin: 0 }}>
-                  {dirCheck.exists ? '存在' : '不存在'}
-                </Tag>
-                <Tag color={dirCheck.is_dir ? 'green' : 'red'} style={{ margin: 0 }}>
-                  {dirCheck.is_dir ? '目录' : '非目录'}
-                </Tag>
-                {dirCheck.is_git ? (
-                  <>
-                    <Tag color="blue" style={{ margin: 0 }}>
-                      分支 {dirCheck.git_branch || '—'}
-                    </Tag>
-                    <Tag style={{ margin: 0 }}>{(dirCheck.git_commit || '').slice(0, 10) || '—'}</Tag>
-                    {dirCheck.git_dirty ? (
-                      <Tag color="orange" style={{ margin: 0 }}>
-                        已修改
-                      </Tag>
-                    ) : (
-                      <Tag color="green" style={{ margin: 0 }}>
-                        干净
-                      </Tag>
-                    )}
-                  </>
-                ) : (
-                  <Tag style={{ margin: 0 }}>非 Git 仓库</Tag>
-                )}
-              </Space>
-            )}
-          </div>
-        )}
+        {dirCheck && <DirCheckResult result={dirCheck} />}
         {checking && !dirCheck && (
           <div className="dir-check">
             <Spin size="small" />

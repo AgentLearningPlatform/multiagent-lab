@@ -145,9 +145,11 @@ export const api = {
   setProjectAgents: (id: string, members: { agent_id: string; role: 'coordinator' | 'member' }[]) =>
     req<Project>(`/api/projects/${id}/agents`, { method: 'PUT', body: JSON.stringify(members) }),
   deleteProject: (id: string) => req<{ deleted: string }>(`/api/projects/${id}`, { method: 'DELETE' }),
-  /** REQ-101：检测本地目录（存在/目录/Git 状态） */
+  /** REQ-101：检测本地目录（REQ-133 分字段直连：format_ok/reachable/exists/is_dir/Git） */
   validateProjectDir: (dir: string) =>
     req<DirValidation>('/api/projects/validate-dir', { method: 'POST', body: JSON.stringify({ dir }) }),
+  /** REQ-133：唤起部署主机系统目录选择对话框（仅同机部署可用；远程部署 400 + 提示手输） */
+  pickProjectDir: () => req<{ dir: string }>('/api/projects/pick-dir', { method: 'POST' }),
   /** REQ-102：列出绑定目录下的条目（未绑定 → 400）；path 为相对子路径 */
   listProjectDirFiles: (id: string, path?: string) =>
     req<ProjectDirListing>(`/api/projects/${id}/dir-files${path ? `?path=${encodeURIComponent(path)}` : ''}`),

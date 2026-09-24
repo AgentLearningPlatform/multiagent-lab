@@ -63,6 +63,28 @@ func TestIsAbsDir(t *testing.T) {
 	}
 }
 
+func TestPathForm(t *testing.T) {
+	// 形态分类与运行时无关（REQ-133 分字段直连：形态 × 部署主机 → 是否后端可达）
+	win := map[string]bool{`C:\Users\me`: true, "C:/Users/me": true, `c:\x`: true}
+	posix := map[string]bool{"/Users/me": true, "/c/Users": true, "/": true}
+	none := []string{"", "proj", "proj/x", `\\server\share`, "~/proj", `C:Users`}
+	for p := range win {
+		if PathForm(p) != "windows" {
+			t.Errorf("PathForm(%q) = %q, want windows", p, PathForm(p))
+		}
+	}
+	for p := range posix {
+		if PathForm(p) != "posix" {
+			t.Errorf("PathForm(%q) = %q, want posix", p, PathForm(p))
+		}
+	}
+	for _, p := range none {
+		if PathForm(p) != "" {
+			t.Errorf("PathForm(%q) = %q, want empty", p, PathForm(p))
+		}
+	}
+}
+
 func TestSafeJoin(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {

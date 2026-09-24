@@ -54,6 +54,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/projects/{id}/files/{fid}/content", s.downloadProjectFile)
 	// M12 REQ-101/102：项目绑定本地目录 + 目录文件视图
 	m.HandleFunc("POST /api/projects/validate-dir", s.validateProjectDir)
+	// REQ-133：同机部署系统目录选择对话框（远程部署由前端降级手输）
+	m.HandleFunc("POST /api/projects/pick-dir", s.pickProjectDir)
 	m.HandleFunc("GET /api/projects/{id}/dir-files", s.listDirFiles)
 	m.HandleFunc("GET /api/projects/{id}/dir-file", s.getDirFile)
 	// M12 REQ-102 深度版：Git 视图（提交历史 / 分支 / 变更明细）

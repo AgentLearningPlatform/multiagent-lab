@@ -2,11 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -139,9 +142,15 @@ func (s *Server) projectRoot(p *store.Project) string {
 
 // ---- REQ-101 项目绑定本地目录 ----
 
+// validateDirResp 分字段直连结果（REQ-133 主场景修订）：前端逐字段渲染，不自行推断。
+// exists/is_dir 仅在 reachable=true 时填充（指针 nil = 未检查，序列化为 null）——
+// 远程部署（Linux 后端 + Windows 客户端目录）下只能做格式校验，存在性未知，
+// 不再以「不存在/非目录」误报。
 type validateDirResp struct {
-	Exists    bool   `json:"exists"`
-	IsDir     bool   `json:"is_dir"`
+	FormatOK  bool   `json:"format_ok"`
+	Reachable bool   `json:"reachable"`
+	Exists    *bool  `json:"exists"`
+	IsDir     *bool  `json:"is_dir"`
 	IsGit     bool   `json:"is_git"`
 	GitBranch string `json:"git_branch"`
 	GitCommit string `json:"git_commit"`
@@ -149,7 +158,9 @@ type validateDirResp struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// validateProjectDir POST /api/projects/validate-dir：校验本地目录与 git 状态（REQ-101）。
+// validateProjectDir POST /api/projects/validate-dir：校验本地目录（REQ-101；REQ-133 分字段直连）。
+// 语义：format_ok=路径为绝对形态（跨运行时口径 fsutil.IsAbsDir）；reachable=路径形态与
+// 部署主机一致（fsutil.PathForm vs runtime.GOOS），仅可达时做 os.Stat 与 git 探测。
 func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Dir string `json:"dir"`
@@ -163,11 +174,21 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必填"})
 		return
 	}
+	resp := validateDirResp{}
 	if !fsutil.IsAbsDir(dir) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dir 必须是绝对路径（以 / 开头，Windows 用 C:\\ 开头，或以 ~ 开头）；收到: " + req.Dir})
+		resp.Error = "dir 必须是绝对路径（以 / 开头，Windows 用 C:\\ 开头，或以 ~ 开头）；收到: " + req.Dir
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	resp := validateDirResp{}
+	resp.FormatOK = true
+	resp.Reachable = (fsutil.PathForm(dir) == "windows") == (runtime.GOOS == "windows")
+	if !resp.Reachable {
+		// 远程目录（如 Linux 后端 + Windows 本机目录）：格式合法即通过，存在性未知
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	exists, isDir := false, false
+	resp.Exists, resp.IsDir = &exists, &isDir
 	fi, err := os.Stat(dir)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -176,9 +197,9 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	resp.Exists = true
-	resp.IsDir = fi.IsDir()
-	if !resp.IsDir {
+	exists = true
+	isDir = fi.IsDir()
+	if !isDir {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -209,6 +230,57 @@ func (s *Server) validateProjectDir(w http.ResponseWriter, r *http.Request) {
 		resp.Error = err.Error()
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---- REQ-133 同机部署系统目录选择 ----
+
+// pickProjectDir POST /api/projects/pick-dir：唤起部署主机的系统目录选择对话框
+// （Windows FolderBrowserDialog / macOS osascript choose folder / Linux zenity），
+// 回填所选目录绝对路径。仅同机部署可用——远程部署（主场景）后端无法向用户桌面
+// 弹对话框，前端降级为手输 + validate-dir 分字段校验（02 v0.49 §6.17）。
+func (s *Server) pickProjectDir(w http.ResponseWriter, r *http.Request) {
+	dir, err := systemPickDir(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"dir": dir})
+}
+
+// systemPickDir 按平台调系统目录选择器，返回归一化绝对路径；等待用户确认上限 3 分钟。
+func systemPickDir(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.CommandContext(ctx, "osascript", "-e",
+			`POSIX path of (choose folder with prompt "选择项目本地目录")`)
+	case "windows":
+		script := `$d = New-Object System.Windows.Forms.FolderBrowserDialog; ` +
+			`$d.Description = '选择项目本地目录'; $d.ShowNewFolderButton = $false; ` +
+			`if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath } else { exit 1 }`
+		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-STA", "-Command", script)
+	case "linux":
+		if _, err := exec.LookPath("zenity"); err != nil {
+			return "", errors.New("同机目录选择需要 zenity（apt install zenity）；远程部署请在输入框手填目录路径")
+		}
+		cmd = exec.CommandContext(ctx, "zenity", "--file-selection", "--directory", "--title", "选择项目本地目录")
+	default:
+		return "", fmt.Errorf("平台 %s 暂不支持系统目录选择，请手填路径", runtime.GOOS)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", errors.New("目录选择超时（3 分钟未确认）")
+		}
+		return "", errors.New("目录选择已取消或不可用（系统对话框仅同机部署可用；远程部署请手填路径）")
+	}
+	dir := fsutil.NormalizeDir(strings.TrimSpace(string(out)))
+	if dir == "" || dir == "." || !fsutil.IsAbsDir(dir) {
+		return "", errors.New("未选择目录")
+	}
+	return dir, nil
 }
 
 // gitOutput 执行 git 子命令（-C dir），单次 3s 超时，返回修剪首尾空白的输出。

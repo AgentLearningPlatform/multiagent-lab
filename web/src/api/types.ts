@@ -55,10 +55,18 @@ export interface Project {
 
 // ---- M12 项目本地目录（REQ-101/102/103）----
 
-/** 目录检测结果（POST /api/projects/validate-dir） */
+/**
+ * 目录检测结果（POST /api/projects/validate-dir；REQ-133 分字段直连）。
+ * 前端逐字段渲染，不按本机 OS 规则推断路径形态：
+ * - format_ok：路径为绝对形态（跨运行时口径）；
+ * - reachable：路径形态与部署主机一致——false（远程部署，如 Linux 后端 + Windows 本机目录）时
+ *   存在性未校验，exists/is_dir 为 null，不得显示「不存在/非目录」。
+ */
 export interface DirValidation {
-  exists: boolean
-  is_dir: boolean
+  format_ok: boolean
+  reachable: boolean
+  exists: boolean | null
+  is_dir: boolean | null
   is_git: boolean
   git_branch?: string | null
   git_commit?: string | null

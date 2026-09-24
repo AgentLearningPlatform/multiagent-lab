@@ -33,6 +33,21 @@ func IsAbsDir(p string) bool {
 	return filepath.IsAbs(p) || IsWindowsPath(p) || strings.HasPrefix(p, "/")
 }
 
+// PathForm 路径形态分类（REQ-133 分字段直连）："windows"（盘符形态）/"posix"（/ 开头）/
+// ""（非绝对路径或 UNC 等无法按前缀分类的形态）。调用方据此判定"后端可达"：形态与
+// 部署主机 OS 一致才可做存在性校验，跨形态（远程部署：Linux 后端 + Windows 客户端目录）
+// 只做格式校验、存在性未知。
+func PathForm(p string) string {
+	switch {
+	case IsWindowsPath(p):
+		return "windows"
+	case strings.HasPrefix(p, "/"):
+		return "posix"
+	default:
+		return ""
+	}
+}
+
 // ExpandHome 展开 ~ 前缀为用户主目录（macOS/Linux 输入习惯；Windows 盘符形态不受影响）。
 // 无法取得主目录时原样返回。
 func ExpandHome(p string) string {
