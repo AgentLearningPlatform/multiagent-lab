@@ -1,4 +1,4 @@
-# Eino 多智能体学习平台
+# AgentLab 智能体构建平台
 
 本地学习用多智能体平台（Go + CloudWeGo Eino/ADK + React + SQLite）。通过**从单 Agent 到多 Agent、从进程内运行到沙箱化、从纯对话到知识/技能/本体增强**的渐进式开发，系统掌握多智能体应用的工程化开发。设计文档见 `docs/`。
 
