@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Col, Divider, Form, Input, InputNumber, Modal, Row, Select, Space } from 'antd'
+import { Button, Col, Collapse, Divider, Form, Input, InputNumber, Modal, Row, Select, Space } from 'antd'
 import { api } from '../api/client'
 import type { InferenceBackendStatus, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
@@ -26,7 +26,9 @@ function Section({ children, first }: { children: ReactNode; first?: boolean }) 
 
 /**
  * 新建智能体弹窗（REQ-103：编辑用途已迁至右侧边栏配置视图，本弹窗仅用于新建）。
- * 布局分组：基本信息 → 模型 → 采样参数 → 工具 → 执行；短字段走两列 Row/Col，长文本整行 autoSize。
+ * 布局分级（REQ-132②）：基本项（名称/描述/系统提示词/模型连接）填写即可创建；
+ * 采样参数/工具/执行归入「高级配置」折叠区（默认收起，其余取默认：跟随全局模型/inprocess/审批 off）。
+ * 短字段走两列 Row/Col，长文本整行 autoSize；创建后一律经右侧边栏修改（弹窗仅保留新建）。
  * M5：工具白名单来自工具注册表（api.listTools）；模型连接留空 = 跟随全局默认（M3）。
  */
 export default function AgentModal({
@@ -155,6 +157,14 @@ export default function AgentModal({
           <Select allowClear placeholder="跟随全局默认" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
         </Form.Item>
 
+        <Collapse
+          ghost
+          size="small"
+          items={[{
+            key: 'advanced',
+            label: <span style={{ fontSize: 13 }}>高级配置（采样参数 / 工具 / 执行——默认取平台默认值，创建后可在右侧边栏调整）</span>,
+            children: (
+              <>
         <Section>采样参数</Section>
         <Row gutter={16}>
           <Col span={12}>
@@ -242,6 +252,10 @@ export default function AgentModal({
             </Form.Item>
           </Col>
         </Row>
+              </>
+            ),
+          }]}
+        />
       </Form>
     </Modal>
   )

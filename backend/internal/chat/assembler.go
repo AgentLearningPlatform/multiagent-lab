@@ -6,6 +6,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -344,6 +345,27 @@ func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent, sc assembleSc
 	}, nil
 }
 
+// isSelfMCPEndpoint 判断 URL 是否指向本平台 /mcp 端点（环回主机 + /mcp 路径）。
+// 防止 agent 配置本平台对外端点造成 agent→server→agent 链式递归（§6.13 安全边界）。
+func isSelfMCPEndpoint(raw string) bool {
+	u := strings.TrimSpace(raw)
+	if !strings.Contains(u, "/mcp") {
+		return false
+	}
+	host := u
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	if i := strings.Index(host, "/"); i >= 0 {
+		host = host[:i]
+	}
+	h := strings.ToLower(host)
+	if i := strings.LastIndex(h, ":"); i >= 0 {
+		h = h[:i]
+	}
+	return h == "localhost" || h == "127.0.0.1" || h == "0.0.0.0" || h == "::1" || h == "[::1]"
+}
+
 // toolBundle 单 Agent 的工具装配产物。
 type toolBundle struct {
 	Tools        []einotool.BaseTool
@@ -400,6 +422,11 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 	// 3) MCP servers（M9；连接失败降级继续，不阻断运行）
 	for _, ms := range ag.MCPServers {
 		if ms.URL == "" {
+			continue
+		}
+		// REQ-131/M18：拦截本平台 /mcp 自引用（防 agent→server→agent 循环递归）
+		if isSelfMCPEndpoint(ms.URL) {
+			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 指向本平台 /mcp 端点（自引用），已拒绝装配", ms.Name, ms.URL))
 			continue
 		}
 		bts, ferr := tool.FetchMCPTools(ctx, ms.Name, ms.URL, mcpFetchTimeout)

@@ -19,8 +19,16 @@ type Agent struct {
 	InferenceBackend string      `json:"inference_backend"` // M13 §6.16：空 = eino-adk 自研默认
 	LogoURL          string      `json:"logo_url,omitempty"`  // REQ-137：非内置后端登记的原 logo 图标 URL
 	ToolApproval    string      `json:"tool_approval"`  // REQ-14 恢复②：工具调用人工审批（""=off | "all"）
+	McpServe        McpServe    `json:"mcp_serve"`          // REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name）
 	CreatedAt      string      `json:"created_at"`
 	UpdatedAt      string      `json:"updated_at"`
+}
+
+// McpServe Agent 对外服务配置（REQ-131/M18）：开启后经平台 /mcp 端点以 agent_{id} 工具暴露。
+type McpServe struct {
+	Enabled  bool   `json:"enabled"`
+	Token    string `json:"token,omitempty"`    // Agent 级 Bearer Token（开启时自动生成，可重置）
+	ToolName string `json:"tool_name,omitempty"` // 覆盖默认工具名 agent_{id}
 }
 
 // MCPServer Agent 级 MCP 端点（P2）。

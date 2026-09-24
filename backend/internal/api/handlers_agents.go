@@ -38,6 +38,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
+	// REQ-131/M18：mcp_serve 开启时自动生成 Token 由 normalizeMcpServe 处理（见 updateAgent 同款逻辑）
 	var a store.Agent
 	if err := decodeJSON(r, &a); err != nil {
 		writeErr(w, err)
@@ -57,11 +58,15 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if a.McpServe.Enabled && a.McpServe.Token == "" {
+		a.McpServe.Token = RandToken()
+	}
 	created, err := s.Store.CreateAgent(&a)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
+	s.mcpSync()
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -85,6 +90,14 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if prev, perr := s.Store.GetAgent(a.ID); perr == nil && prev != nil {
+		if s.normalizeMcpServe(&a, *prev) {
+			defer s.mcpSync()
+		}
+	} else if a.McpServe.Enabled && a.McpServe.Token == "" {
+		a.McpServe.Token = RandToken()
+		defer s.mcpSync()
+	}
 	updated, err := s.Store.UpdateAgent(&a)
 	if err != nil {
 		writeErr(w, err)
@@ -95,6 +108,7 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	s.mcpSync()
 	if err := s.Store.DeleteAgent(id); err != nil {
 		writeErr(w, err)
 		return

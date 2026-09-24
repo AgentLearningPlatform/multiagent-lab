@@ -17,8 +17,20 @@ export interface Agent {
   inference_backend: string
   // REQ-137：非内置后端登记的原 logo 图标 URL（未配置回退默认图标）
   logo_url?: string
+  /** REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name；token 为 Agent 级 Bearer） */
+  mcp_serve?: { enabled: boolean; token?: string; tool_name?: string }
   created_at: string
   updated_at: string
+}
+
+/** REQ-131/M18：mcp-serve 管理端点返回（Token 掩码 + 调用示例） */
+export interface McpServeInfo {
+  enabled: boolean
+  tool_name: string
+  endpoint: string
+  token_mask?: string
+  curl?: string
+  configured: boolean
 }
 
 /** M13 §6.16：推理后端探测状态（GET /api/inference-backends） */

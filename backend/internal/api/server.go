@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
@@ -30,6 +31,8 @@ type Server struct {
 	DBPath   string             // REQ-113：SQLite 文件路径（数据与安全概览展示 DB 体积）
 	DocsRoot string             // REQ-140：内部方案文档根目录（只读查看）
 	Mux       *http.ServeMux
+	mcpMu     sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
+	mcpHTTP   http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
 }
 
 // NewServer 构造并注册全部路由。
@@ -46,6 +49,14 @@ func (s *Server) routes() {
 	})
 
 	// Agents
+	// REQ-131/M18：Agent 对外 MCP 服务化——/mcp Streamable HTTP + 管理端点
+	m.Handle("/mcp", s.mcpAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 懒重建：mcp_serve 变更后 invalidateMCP() 生效，工具表按最新 enabled Agent 组装
+		s.mcpHandler().ServeHTTP(w, r)
+	})))
+	m.HandleFunc("GET /api/agents/{id}/mcp-serve", s.getAgentMcpServe)
+	m.HandleFunc("POST /api/agents/{id}/mcp-serve/reset", s.resetAgentMcpToken)
+
 	m.HandleFunc("GET /api/agents", s.listAgents)
 	// M10 §6.3：沙箱配置下发（内部端点，一次性 token）
 	m.HandleFunc("GET /api/internal/agents/{id}/manifest", s.getManifest)
@@ -171,6 +182,9 @@ func (s *Server) routes() {
 		m.Handle("/api/ontochat/", s.Ontology.BuildProxy())
 		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
 		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
+		// REQ-146：引擎自检与一键安装（install 为 202 异步任务，轮询 /api/engines 无长连接）
+		m.Handle("/api/engines", s.Ontology.RuntimeProxy())
+		m.Handle("/api/engines/", s.Ontology.RuntimeProxy())
 		// D-O15：/api/semantica* 与 /semantica/explorer* 反代已随「去-semantica 化」移除，
 		// 消费/审计改走上方自研 /api/kg、/api/audit 端点（§4.9 反转注记）
 	}

@@ -9,12 +9,12 @@ import (
 
 func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var a Agent
-	var tools, skills, mcp string
+	var tools, skills, mcp, mcpServe string
 	var modelConn sql.NullString
 	var temp sql.NullFloat64
 	var maxTok sql.NullInt64
 	err := row.Scan(&a.ID, &a.Name, &a.Description, &a.Instruction, &modelConn, &temp, &maxTok,
-		&a.MaxIteration, &tools, &skills, &mcp, &a.RuntimeBackend, &a.InferenceBackend, &a.LogoURL, &a.ToolApproval, &a.CreatedAt, &a.UpdatedAt)
+		&a.MaxIteration, &tools, &skills, &mcp, &a.RuntimeBackend, &a.InferenceBackend, &a.LogoURL, &a.ToolApproval, &mcpServe, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -31,6 +31,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	_ = json.Unmarshal([]byte(tools), &a.Tools)
 	_ = json.Unmarshal([]byte(skills), &a.Skills)
 	_ = json.Unmarshal([]byte(mcp), &a.MCPServers)
+	_ = json.Unmarshal([]byte(mcpServe), &a.McpServe)
 	if a.Tools == nil {
 		a.Tools = []string{}
 	}
@@ -43,7 +44,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	return &a, nil
 }
 
-const agentCols = `id,name,description,instruction,model_conn_id,temperature,max_tokens,max_iteration,tools,skills,mcp_servers,runtime_backend,inference_backend,logo_url,tool_approval,created_at,updated_at`
+const agentCols = `id,name,description,instruction,model_conn_id,temperature,max_tokens,max_iteration,tools,skills,mcp_servers,runtime_backend,inference_backend,logo_url,tool_approval,mcp_serve,created_at,updated_at`
 
 // ListAgents 返回全部 Agent（按创建时间升序）。
 func (s *Store) ListAgents() ([]*Agent, error) {
@@ -81,9 +82,10 @@ func (s *Store) CreateAgent(a *Agent) (*Agent, error) {
 	tools, _ := json.Marshal(a.Tools)
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
-	_, err := s.DB.Exec(`INSERT INTO agent (`+agentCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	mcpServeJSON, _ := json.Marshal(a.McpServe)
+	_, err := s.DB.Exec(`INSERT INTO agent (`+agentCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.ID, a.Name, a.Description, a.Instruction, a.ModelConnID, a.Temperature, a.MaxTokens,
-		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, now(), now())
+		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, string(mcpServeJSON), now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -98,9 +100,10 @@ func (s *Store) UpdateAgent(a *Agent) (*Agent, error) {
 	tools, _ := json.Marshal(a.Tools)
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
-	res, err := s.DB.Exec(`UPDATE agent SET name=?,description=?,instruction=?,model_conn_id=?,temperature=?,max_tokens=?,max_iteration=?,tools=?,skills=?,mcp_servers=?,runtime_backend=?,inference_backend=?,logo_url=?,tool_approval=?,updated_at=? WHERE id=?`,
+	mcpServeJSON, _ := json.Marshal(a.McpServe)
+	res, err := s.DB.Exec(`UPDATE agent SET name=?,description=?,instruction=?,model_conn_id=?,temperature=?,max_tokens=?,max_iteration=?,tools=?,skills=?,mcp_servers=?,runtime_backend=?,inference_backend=?,logo_url=?,tool_approval=?,mcp_serve=?,updated_at=? WHERE id=?`,
 		a.Name, a.Description, a.Instruction, a.ModelConnID, a.Temperature, a.MaxTokens,
-		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, now(), a.ID)
+		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, string(mcpServeJSON), now(), a.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict

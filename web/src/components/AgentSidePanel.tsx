@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
-import { Button, Divider, Form, Input, InputNumber, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
+import { Button, Collapse, Divider, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   ApiOutlined,
   BranchesOutlined,
   CloseOutlined,
+  CopyOutlined,
   DeleteOutlined,
+  ExportOutlined,
   FolderOutlined,
   PlusOutlined,
+  ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
-import type { Agent, InferenceBackendStatus, ModelConnection, ToolInfo } from '../api/types'
+import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
 
@@ -22,15 +24,6 @@ const connLabel = (c: ModelConnection) => (c.name.endsWith(`·${c.model_name}`) 
 const providerOfConn = (c: ModelConnection) => {
   const i = c.name.indexOf('·')
   return i > 0 ? c.name.slice(0, i) : c.name
-}
-
-/** 侧边栏小节标题（左对齐小标题；窄面板收紧边距） */
-function Section({ children, first }: { children: ReactNode; first?: boolean }) {
-  return (
-    <Divider titlePlacement="left" plain style={{ margin: first ? '0 0 12px' : '4px 0 12px' }}>
-      {children}
-    </Divider>
-  )
 }
 
 /** 本地已知 MCP server 预设（REQ-99 ③ 通用挂载契约保留；D-O15 起 semantica 预设随「去-semantica 化」移除，
@@ -67,10 +60,10 @@ function McpServerRow({ name, remove }: { name: number; remove: (i: number) => v
 }
 
 /**
- * 智能体右侧侧边栏（REQ-103 统一范式）：
- * 复用 ProjectSidePanel 的 activity bar（~44px）+ 视图区（~320px）结构。
- * 本轮 activity bar 仅「配置」可用，文件 / Git 为占位（后续扩展）。
- * 配置视图 = 原 AgentModal 编辑表单迁入（字段 / 校验 / 提交 API 不变，仅纵向排布适配窄面板）。
+ * 智能体右侧侧边栏（REQ-103 统一范式 + REQ-132 四分类改版 / M18）：
+ * activity bar（~44px）不变；配置视图由单视图平铺升级为 **四分类页签**——
+ * 基本 / 模型与参数 / 能力 / 对外服务（REQ-131，M18 新增）。
+ * 页签面板 forceRender（跨页签字段同表单提交）；字段/校验/提交 API 不变，仅承载重组（REQ-134）。
  */
 export default function AgentSidePanel({
   agent,
@@ -117,7 +110,7 @@ export default function AgentSidePanel({
 }
 
 // ---------------------------------------------------------------------------
-// 配置视图（原 AgentModal 编辑表单迁入；字段 / 校验 / 提交逻辑不变）
+// 配置视图（REQ-132：四分类页签；字段/校验/提交逻辑不变）
 // ---------------------------------------------------------------------------
 
 function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
@@ -134,7 +127,12 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   const mcpWatched = (Form.useWatch('mcp_servers', form) ?? []) as { name?: string; url?: string }[]
 
   useEffect(() => {
-    form.setFieldsValue(agent)
+    form.setFieldsValue({
+      ...agent,
+      // REQ-131：对外服务开关/工具名平铺为表单字段（token 不进表单，走专用端点管理）
+      mcp_serve_enabled: agent.mcp_serve?.enabled ?? false,
+      mcp_serve_tool_name: agent.mcp_serve?.tool_name ?? '',
+    })
     api.listConnections().then(setAllConns).catch(() => {})
     // M5：工具注册表（失败降级为空 + 提示，不阻塞保存）
     api
@@ -177,6 +175,12 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
         skills: agent.skills ?? [],
         mcp_servers: (v.mcp_servers ?? []).filter((s: { name?: string; url?: string }) => s?.name && s?.url),
+        // REQ-131/M18：对外服务（token 原样保留——重置走专用端点）
+        mcp_serve: {
+          enabled: !!v.mcp_serve_enabled,
+          tool_name: (v.mcp_serve_tool_name ?? '').trim(),
+          token: agent.mcp_serve?.token ?? '',
+        },
       })
       showToast('已保存，下次运行生效')
       bumpData()
@@ -203,152 +207,195 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
     }
   }
 
+  /** 小节分隔（页签内二级标题） */
+  const sec = (label: string) => (
+    <Divider titlePlacement="left" plain style={{ margin: '4px 0 12px' }}>
+      {label}
+    </Divider>
+  )
+
   return (
     <div className="proj-view-body">
       <Form form={form} layout="vertical" initialValues={agent} requiredMark={false} size="small">
-        <Section first>基本信息</Section>
-        <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]}>
-          <Input placeholder="智能体名称" />
-        </Form.Item>
-        <Form.Item name="description" label="描述（用于多智能体协作时互相理解）">
-          <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} />
-        </Form.Item>
-        <Form.Item name="instruction" label="系统提示词（Instruction）">
-          <Input.TextArea autoSize={{ minRows: 6, maxRows: 14 }} placeholder="定义角色、能力边界、回答风格…" />
-        </Form.Item>
+        <Tabs
+          defaultActiveKey="basic"
+          size="small"
+          items={[
+            {
+              key: 'basic',
+              label: '基本',
+              forceRender: true,
+              children: (
+                <>
+                  <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]}>
+                    <Input placeholder="智能体名称" />
+                  </Form.Item>
+                  <Form.Item name="description" label="描述（用于多智能体协作时互相理解）">
+                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} />
+                  </Form.Item>
+                  <Form.Item name="instruction" label="系统提示词（Instruction）">
+                    <Input.TextArea autoSize={{ minRows: 6, maxRows: 14 }} placeholder="定义角色、能力边界、回答风格…" />
+                  </Form.Item>
+                  <Form.Item
+                    name="logo_url"
+                    label="自定义后端 Logo URL（REQ-137）"
+                    extra="推理后端为自定义/外部部署（非内置）时，会话列表与对话界面将展示此图标；未配置回退默认图标"
+                  >
+                    <Input placeholder="https://…/logo.png" allowClear />
+                  </Form.Item>
+                </>
+              ),
+            },
+            {
+              key: 'model',
+              label: '模型与参数',
+              forceRender: true,
+              children: (
+                <>
+                  <Form.Item
+                    name="model_conn_id"
+                    label="模型连接"
+                    extra={
+                      selectedConn ? (
+                        <span className="model-meta" title={selectedConn.base_url}>
+                          当前模型：{providerOfConn(selectedConn)} · <span className="model-meta-name">{selectedConn.model_name}</span>
+                        </span>
+                      ) : defaultConn ? (
+                        <span className="model-meta" title={defaultConn.base_url}>
+                          留空 = 跟随全局默认：{providerOfConn(defaultConn)} · <span className="model-meta-name">{defaultConn.model_name}</span>
+                        </span>
+                      ) : (
+                        <span className="model-meta warn">
+                          {conns.length === 0
+                            ? '留空 = 跟随全局默认；当前无可用 chat 连接，可到「设置-模型管理」新增。'
+                            : '留空 = 跟随全局默认；当前无启用的 chat 默认连接，可到「设置-模型管理」设置默认。'}
+                        </span>
+                      )
+                    }
+                  >
+                    <Select allowClear placeholder="跟随全局默认" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
+                  </Form.Item>
+                  {sec('采样参数')}
+                  <Form.Item name="temperature" label="温度（0~2，留空默认）">
+                    <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} placeholder="默认" />
+                  </Form.Item>
+                  <Form.Item name="max_tokens" label="最大回复 tokens">
+                    <InputNumber min={1} style={{ width: '100%' }} placeholder="默认" />
+                  </Form.Item>
+                  {sec('执行')}
+                  <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
+                    <InputNumber min={1} max={100} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M2 默认 inprocess；subprocess/容器后端在 M5 开放">
+                    <Input disabled />
+                  </Form.Item>
+                  <Form.Item
+                    name="inference_backend"
+                    label="推理后端"
+                    extra="「在哪儿跑」由运行后端决定，「谁来推理」由此决定：eino-adk 为平台自研（完整能力）；外部 CLI 后端模型由其自身配置决定（Agent 模型连接不生效），技能/MCP 降级为提示注入，不支持多 Agent 编排"
+                  >
+                    <Select
+                      options={inferenceBackendOptions(backends)}
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder="eino-adk（自研默认）"
+                    />
+                  </Form.Item>
+                </>
+              ),
+            },
+            {
+              key: 'ability',
+              label: '能力',
+              forceRender: true,
+              children: (
+                <>
+                  <Form.Item
+                    name="tools"
+                    label="工具白名单"
+                    extra={toolsErr ? '工具注册表暂不可用，可稍后重试。' : '来自工具注册表（内置 / 本体 / MCP 动态工具），勾选后随运行装配。'}
+                  >
+                    <Select
+                      mode="multiple"
+                      allowClear
+                      virtual={false}
+                      placeholder={toolsErr ? '工具注册表暂不可用' : '选择可用工具'}
+                      options={tools.map((t) => ({ value: t.id, label: t.name, title: t.description, source: t.source }))}
+                      notFoundContent={toolsErr ? '工具注册表暂不可用' : '暂无工具'}
+                      classNames={{ popup: { root: 'tool-select-popup' } }}
+                      optionRender={(opt) => (
+                        <div className="tool-option">
+                          <div className="tool-option-name">
+                            <span>{opt.data?.label}</span>
+                            {opt.data?.source ? <span className="tool-option-src">{opt.data.source}</span> : null}
+                          </div>
+                          {opt.data?.title ? <div className="tool-option-desc">{opt.data.title}</div> : null}
+                        </div>
+                      )}
+                    />
+                  </Form.Item>
 
-        <Section>模型</Section>
-        <Form.Item
-          name="model_conn_id"
-          label="模型连接"
-          extra={
-            selectedConn ? (
-              <span className="model-meta" title={selectedConn.base_url}>
-                当前模型：{providerOfConn(selectedConn)} · <span className="model-meta-name">{selectedConn.model_name}</span>
-              </span>
-            ) : defaultConn ? (
-              <span className="model-meta" title={defaultConn.base_url}>
-                留空 = 跟随全局默认：{providerOfConn(defaultConn)} · <span className="model-meta-name">{defaultConn.model_name}</span>
-              </span>
-            ) : (
-              <span className="model-meta warn">
-                {conns.length === 0
-                  ? '留空 = 跟随全局默认；当前无可用 chat 连接，可到「设置-模型管理」新增。'
-                  : '留空 = 跟随全局默认；当前无启用的 chat 默认连接，可到「设置-模型管理」设置默认。'}
-              </span>
-            )
-          }
-        >
-          <Select allowClear placeholder="跟随全局默认" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
-        </Form.Item>
+                  {sec('MCP Servers')}
+                  <div style={{ marginBottom: 8 }}>
+                    <ApiOutlined style={{ marginRight: 6 }} />
+                    <span className="model-meta">
+                      外部 MCP 工具源（Streamable HTTP）；工具以 <code>{'{server}__{tool}'}</code> 前缀并入白名单候选，连接失败降级不阻断运行。注意：指向本平台 /mcp 端点属自引用，装配时会被拒绝。
+                    </span>
+                  </div>
+                  <Form.List name="mcp_servers">
+                    {(fields, { add, remove }) => (
+                      <>
+                        {fields.map(({ key, name }) => (
+                          <McpServerRow key={key} name={name} remove={remove} />
+                        ))}
+                        <Space wrap size={4}>
+                          <Button size="small" icon={<PlusOutlined />} onClick={() => add({ name: '', url: '' })}>
+                            添加 Server
+                          </Button>
+                          {MCP_PRESETS.map((p) => {
+                            const mounted = mcpWatched.some((s) => s?.name === p.name || s?.url === p.url)
+                            return (
+                              <Button
+                                key={p.name}
+                                size="small"
+                                disabled={mounted}
+                                onClick={() => add({ name: p.name, url: p.url })}
+                                title={p.desc}
+                              >
+                                {mounted ? <Tag color="green" style={{ marginInlineEnd: 0 }}>已挂载 {p.name}</Tag> : `挂载 ${p.name}`}
+                              </Button>
+                            )
+                          })}
+                        </Space>
+                      </>
+                    )}
+                  </Form.List>
 
-        <Section>采样参数</Section>
-        <Form.Item name="temperature" label="温度（0~2，留空默认）">
-          <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} placeholder="默认" />
-        </Form.Item>
-        <Form.Item name="max_tokens" label="最大回复 tokens">
-          <InputNumber min={1} style={{ width: '100%' }} placeholder="默认" />
-        </Form.Item>
-
-        <Section>工具</Section>
-        <Form.Item
-          name="tools"
-          label="工具白名单"
-          extra={toolsErr ? '工具注册表暂不可用，可稍后重试。' : '来自工具注册表（内置 / 本体 / MCP 动态工具），勾选后随运行装配。'}
-        >
-          <Select
-            mode="multiple"
-            allowClear
-            virtual={false}
-            placeholder={toolsErr ? '工具注册表暂不可用' : '选择可用工具'}
-            options={tools.map((t) => ({ value: t.id, label: t.name, title: t.description, source: t.source }))}
-            notFoundContent={toolsErr ? '工具注册表暂不可用' : '暂无工具'}
-            classNames={{ popup: { root: 'tool-select-popup' } }}
-            optionRender={(opt) => (
-              <div className="tool-option">
-                <div className="tool-option-name">
-                  <span>{opt.data?.label}</span>
-                  {opt.data?.source ? <span className="tool-option-src">{opt.data.source}</span> : null}
-                </div>
-                {opt.data?.title ? <div className="tool-option-desc">{opt.data.title}</div> : null}
-              </div>
-            )}
-          />
-        </Form.Item>
-
-        <Section>MCP Servers</Section>
-        <div style={{ marginBottom: 8 }}>
-          <ApiOutlined style={{ marginRight: 6 }} />
-          <span className="model-meta">外部 MCP 工具源（Streamable HTTP）；工具以 <code>{'{server}__{tool}'}</code> 前缀并入白名单候选，连接失败降级不阻断运行。</span>
-        </div>
-        <Form.List name="mcp_servers">
-          {(fields, { add, remove }) => (
-            <>
-              {fields.map(({ key, name }) => (
-                <McpServerRow key={key} name={name} remove={remove} />
-              ))}
-              <Space wrap size={4}>
-                <Button size="small" icon={<PlusOutlined />} onClick={() => add({ name: '', url: '' })}>
-                  添加 Server
-                </Button>
-                {MCP_PRESETS.map((p) => {
-                  const mounted = mcpWatched.some((s) => s?.name === p.name || s?.url === p.url)
-                  return (
-                    <Button
-                      key={p.name}
-                      size="small"
-                      disabled={mounted}
-                      onClick={() => add({ name: p.name, url: p.url })}
-                      title={p.desc}
-                    >
-                      {mounted ? <Tag color="green" style={{ marginInlineEnd: 0 }}>已挂载 {p.name}</Tag> : `挂载 ${p.name}`}
-                    </Button>
-                  )
-                })}
-              </Space>
-            </>
-          )}
-        </Form.List>
-
-        <Section>执行</Section>
-        <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
-          <InputNumber min={1} max={100} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M2 默认 inprocess；subprocess/容器后端在 M5 开放">
-          <Input disabled />
-        </Form.Item>
-        <Form.Item
-          name="inference_backend"
-          label="推理后端"
-          extra="「在哪儿跑」由运行后端决定，「谁来推理」由此决定：eino-adk 为平台自研（完整能力）；外部 CLI 后端模型由其自身配置决定（Agent 模型连接不生效），技能/MCP 降级为提示注入，不支持多 Agent 编排"
-        >
-          <Select
-            options={inferenceBackendOptions(backends)}
-            showSearch
-            optionFilterProp="label"
-            placeholder="eino-adk（自研默认）"
-          />
-        </Form.Item>
-        <Form.Item
-          name="tool_approval"
-          label="工具调用人工审批"
-          initialValue=""
-          extra="开启后，本智能体每次调用工具前都会挂起等待你批准或拒绝（REQ-14 恢复语义 / 危险操作审批）；关闭则工具直接执行"
-        >
-          <Select
-            options={[
-              { value: '', label: '关闭（直接执行）' },
-              { value: 'all', label: '全部工具调用前审批' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item
-          name="logo_url"
-          label="自定义后端 Logo URL（REQ-137）"
-          extra="推理后端为自定义/外部部署（非内置）时，会话列表与对话界面将展示此图标；未配置回退默认图标"
-        >
-          <Input placeholder="https://…/logo.png" allowClear />
-        </Form.Item>
+                  {sec('工具调用人工审批')}
+                  <Form.Item
+                    name="tool_approval"
+                    label="审批策略"
+                    initialValue=""
+                    extra="开启后，本智能体每次调用工具前都会挂起等待你批准或拒绝（REQ-14 恢复语义 / 危险操作审批）；开启审批后，对外 MCP 服务（server 模式）的调用将被默认拒绝"
+                  >
+                    <Select
+                      options={[
+                        { value: '', label: '关闭（直接执行）' },
+                        { value: 'all', label: '全部工具调用前审批' },
+                      ]}
+                    />
+                  </Form.Item>
+                </>
+              ),
+            },
+            {
+              key: 'serve',
+              label: '对外服务',
+              forceRender: true,
+              children: <McpServeTab agent={agent} />,
+            },
+          ]}
+        />
       </Form>
 
       <div className="proj-view-actions">
@@ -369,5 +416,114 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         </Popconfirm>
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 对外服务（REQ-131/M18）：开关/工具名随本表单保存提交；Token 经专用端点管理
+// ---------------------------------------------------------------------------
+
+function McpServeTab({ agent }: { agent: Agent }) {
+  const { showToast, bumpData } = useUI()
+  const form = Form.useFormInstance()
+  const enabled = Form.useWatch('mcp_serve_enabled', form) ?? false
+  const toolName = Form.useWatch('mcp_serve_tool_name', form) ?? ''
+  const [info, setInfo] = useState<McpServeInfo | null>(null)
+  const [resetting, setResetting] = useState(false)
+
+  const loadInfo = () => {
+    api.getAgentMcpServe(agent.id).then(setInfo).catch(() => setInfo(null))
+  }
+  useEffect(loadInfo, [agent.id])
+
+  const resetToken = async () => {
+    setResetting(true)
+    try {
+      await api.resetAgentMcpToken(agent.id)
+      showToast('Token 已重置（旧 Token 立即失效）')
+      loadInfo()
+      bumpData()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setResetting(false)
+    }
+  }
+
+  const effToolName = (toolName || '').trim() || `agent_${agent.id}`
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  const curl = `curl -X POST "${baseUrl}/mcp" \\\n  -H "Authorization: Bearer $TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"${effToolName}","arguments":{"input":"你好"}},"id":1}'`
+
+  const hasToken = !!(info?.configured || agent.mcp_serve?.token)
+
+  return (
+    <>
+      <Form.Item name="mcp_serve_enabled" label="开启对外服务" valuePropName="checked" extra="开启后，本智能体作为 MCP 工具经平台 /mcp 端点（Streamable HTTP）暴露给外部 MCP 客户端；服务默认仅回环监听，跨机访问需经反代按需暴露">
+        <Switch />
+      </Form.Item>
+      <Form.Item
+        name="mcp_serve_tool_name"
+        label="工具名（可选覆盖）"
+        extra={<>缺省为 <Typography.Text code>agent_{agent.id}</Typography.Text>；须全局唯一，冲突时后注册者跳过</>}
+      >
+        <Input placeholder={`agent_${agent.id}`} allowClear disabled={!enabled} />
+      </Form.Item>
+
+      {enabled && (
+        <Collapse
+          ghost
+          size="small"
+          items={[
+            {
+              key: 'access',
+              label: <span className="event-link">接入信息（端点 / Token / 调用示例）</span>,
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div className="proj-kv">
+                    <span className="proj-k">端点</span>
+                    <span className="proj-mono">{baseUrl}/mcp</span>
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<CopyOutlined />}
+                      aria-label="复制端点"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(`${baseUrl}/mcp`).then(
+                          () => showToast('端点已复制'),
+                          () => showToast('复制失败', 'err'),
+                        )
+                      }}
+                    />
+                  </div>
+                  <div className="proj-kv">
+                    <span className="proj-k">工具名</span>
+                    <span className="proj-mono">{effToolName}</span>
+                  </div>
+                  <div className="proj-kv">
+                    <span className="proj-k">Token</span>
+                    <span className="proj-mono">{hasToken ? info?.token_mask || '已配置' : '未生成'}</span>
+                    <Tooltip title={hasToken ? '重置后旧 Token 立即失效' : '生成 Agent 级 Bearer Token'}>
+                      <Button size="small" icon={hasToken ? <ReloadOutlined /> : <ExportOutlined />} loading={resetting} onClick={resetToken} aria-label={hasToken ? '重置 Token' : '生成 Token'} />
+                    </Tooltip>
+                  </div>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginBottom: 4 }}>
+                    调用示例（$TOKEN 为生成/重置后的 Token 值，仅服务端保存，请妥善保管）：
+                  </Typography.Paragraph>
+                  <pre className="raw-json" style={{ maxHeight: 170, overflow: 'auto' }}>{curl}</pre>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginBottom: 0 }}>
+                    安全边界：开启「工具审批」的智能体在 server 模式下调用将被默认拒绝；本平台 /mcp 端点不可配置进其他智能体的 MCP servers（自引用拦截，装配期告警）。
+                  </Typography.Paragraph>
+                </div>
+              ),
+            },
+          ]}
+        />
+      )}
+      {!enabled && (
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          与 §6.11（Agent 作为 MCP client 调用外部服务）构成双向闭环——本页是 server 侧。开启并保存后可见接入信息。
+        </Typography.Paragraph>
+      )}
+    </>
   )
 }

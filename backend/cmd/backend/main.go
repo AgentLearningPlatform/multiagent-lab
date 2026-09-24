@@ -127,7 +127,8 @@ func withStatic(next http.Handler) http.Handler {
 	}
 	fs := http.FileServer(http.Dir(abs))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") {
+		// REQ-131/M18：/mcp（Agent 对外 MCP 服务化）与 /api、/healthz 同属 API 面，绕过静态托管
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/healthz") || strings.HasPrefix(r.URL.Path, "/mcp") {
 			next.ServeHTTP(w, r)
 			return
 		}
