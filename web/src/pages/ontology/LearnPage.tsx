@@ -23,6 +23,42 @@ import RESOURCES_MD from '../../../../seeds/learning/external-resources.md?raw'
 
 // ---------------------------------------------------------------------------
 // 方法论卡片（REQ-90 五模块，v0.2 深度版：body 精简骨架 + deep 深度增量；全文见 seeds/learning/methodology/）
+// REQ-139：要点结构化渲染——按 ①②③/序号/句读自动分段为要点列表（排版降噪），全部卡片统一受益
+function structuredPoints(text: string): { marker: string; text: string }[] {
+  // 先按 ①②③/1.2.3. 等序号标记切分
+  const m = text.match(/(?:^|[。；;]s*)([①②③④⑤⑥⑦⑧⑨]|d+[.、])s*/g)
+  if (m && m.length >= 2) {
+    const parts = text.split(/(?:^|[。；;]s*)(?:[①②③④⑤⑥⑦⑧⑨]|\d+[.、])\s*/).filter((x) => x.trim())
+    if (parts.length >= 2) {
+      return parts.map((t, i) => ({ marker: i < m.length ? (m[i]?.trim() || '') : '', text: t.trim() }))
+        .map((x) => ({ marker: x.marker || '', text: x.text }))
+        .filter((x) => x.text)
+    }
+  }
+  // 无序号：按句切分为要点
+  return text
+    .split(/(?<=[。；;])s*/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((t) => ({ marker: '', text: t }))
+}
+
+function StructuredText({ text, small }: { text: string; small?: boolean }) {
+  const pts = structuredPoints(text)
+  if (pts.length <= 1) {
+    return <p className="onto-learn-method-body" style={small ? { fontSize: 12 } : undefined}>{text}</p>
+  }
+  return (
+    <ul className="onto-learn-points" style={{ margin: 0, paddingLeft: 18 }}>
+      {pts.map((p, i) => (
+        <li key={i} style={{ marginBottom: 4 }}>
+          {p.marker && <span style={{ color: 'var(--c-brand)', marginInlineEnd: 4 }}>{p.marker}</span>}
+          {p.text}
+        </li>
+      ))}
+    </ul>
+  )
+}
 // ---------------------------------------------------------------------------
 
 const METHODOLOGY: { key: string; stage: string; title: string; tag: string; body: string; deep: string }[] = [
@@ -355,7 +391,10 @@ export default function LearnPage() {
                 ),
                 children: (
                   <>
-                    <p className="onto-learn-method-body">{m.body}</p>
+                    <StructuredText text={m.body} />
+                    <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
+                      来源：seeds/learning/methodology/ 深度全文 · 对应文档 03 §2（REQ-90）
+                    </Typography.Text>
                     <Collapse
                       size="small"
                       ghost
@@ -363,7 +402,7 @@ export default function LearnPage() {
                         {
                           key: 'deep',
                           label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>深度版（REQ-90 P2 补齐）</Typography.Text>,
-                          children: <p className="onto-learn-method-body" style={{ fontSize: 12 }}>{m.deep}</p>,
+                          children: <StructuredText text={m.deep} small />,
                         },
                       ]}
                     />
