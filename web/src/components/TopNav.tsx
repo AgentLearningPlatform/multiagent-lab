@@ -31,8 +31,7 @@ export default function TopNav() {
           </svg>
         </span>
         <span className="brand-text">
-          <span className="brand-name">Eino</span>
-          <span className="brand-chip">Lab</span>
+          <span className="brand-name">AgentLab</span>
           <span className="brand-sub">多智能体学习平台</span>
         </span>
       </div>

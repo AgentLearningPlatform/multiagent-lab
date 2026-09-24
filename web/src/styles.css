@@ -47,11 +47,6 @@ body { font-size: 14px; background: var(--c-bg); }
 }
 .brand-text { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .brand-name { font-size: 15.5px; font-weight: 700; letter-spacing: .2px; color: var(--c-ink); }
-.brand-chip {
-  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-  color: #4f46e5; background: #eef0fe; border: 1px solid #dfe2fb;
-  padding: 1px 6px; border-radius: 999px; transform: translateY(-1px);
-}
 .brand-sub { font-size: 12px; color: var(--c-ink-3); letter-spacing: .01em; white-space: nowrap; }
 
 /* 导航：自绘 pill（图标 + 文字），激活态品牌底 + 底部强调条 */
