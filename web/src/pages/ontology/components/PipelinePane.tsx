@@ -212,7 +212,7 @@ export default function PipelinePane() {
         <span className="onto-sec-title">工具链配置（REQ-75：路径级 pipeline_profile）</span>
         <span className="hit-spacer" />
         <Space>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => reload()} />
+          <Button size="small" icon={<ReloadOutlined />} aria-label="刷新配置列表" onClick={() => reload()} />
           <Button size="small" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
             新建
           </Button>
@@ -223,7 +223,7 @@ export default function PipelinePane() {
             重置默认
           </Button>
           <Popconfirm title="删除该工具链配置？" onConfirm={removeActive} disabled={!active}>
-            <Button size="small" danger icon={<DeleteOutlined />} disabled={!active} />
+            <Button size="small" danger icon={<DeleteOutlined />} aria-label="删除配置" disabled={!active} />
           </Popconfirm>
         </Space>
       </div>

@@ -57,6 +57,7 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("POST /api/ontologies/seed-learning", s.seedLearning)
 	m.HandleFunc("GET /api/ontologies/{id}/versions", s.listVersions)
 	m.HandleFunc("GET /api/ontologies/{id}/versions/{version}/original", s.versionOriginal)
+	m.HandleFunc("GET /api/ontologies/{id}/versions/{version}/spec", s.versionSpec)
 	m.HandleFunc("GET /api/ontologies/{id}/diff", s.diffVersions)
 	m.HandleFunc("POST /api/ontologies/{id}/ingest-csv", s.ingestCSV)
 	m.HandleFunc("GET /api/ontologies/{id}/ingest-mapping", s.getIngestMapping)
@@ -545,6 +546,28 @@ func (s *Server) versionOriginal(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("X-Ontology-Version", strconv.Itoa(v))
 	_, _ = w.Write([]byte(content))
+}
+
+// versionSpec GET /api/ontologies/{id}/versions/{version}/spec：按版本读取 spec_json 快照原文（REQ-145/M22 A3 前端文本 diff 的数据面；只读）。
+func (s *Server) versionSpec(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.Store.GetOntology(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	v, err := strconv.Atoi(r.PathValue("version"))
+	if err != nil || v <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "版本号必须是正整数"})
+		return
+	}
+	raw, err := s.Store.GetVersionSpec(id, v)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Ontology-Version", strconv.Itoa(v))
+	_, _ = w.Write([]byte(raw))
 }
 
 // ---- REQ-95 版本 diff ----

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Card, Collapse, Progress, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { Alert, Badge, Button, Card, Collapse, Progress, Skeleton, Space, Tabs, Tag, Typography } from 'antd'
 import {
   BookOutlined,
   CheckCircleOutlined,
@@ -547,7 +547,7 @@ export default function LearnPage() {
             key: 'examples',
             label: '示例本体库',
             children: learningExamples === null ? (
-              <Spin size="small" />
+              <Skeleton active title={false} paragraph={{ rows: 3 }} />
             ) : learningExamples.length === 0 ? (
               <Typography.Text type="secondary">构建平面未返回学习示例（需 ontology-service 就绪）。</Typography.Text>
             ) : (

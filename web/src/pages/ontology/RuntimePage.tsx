@@ -279,6 +279,11 @@ function EngineProfilesPage({
           showIcon
           message="运行平面暂不可达"
           description="RUNTIME_MGR_URL（:8090）未就绪，无法读取 / 管理运行方案。"
+          action={
+            <Button size="small" icon={<ReloadOutlined />} onClick={reload} aria-label="重试加载方案">
+              重试
+            </Button>
+          }
         />
       )}
       {engineMissing && (

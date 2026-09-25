@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Empty, Select, Spin, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Empty, Select, Skeleton, Tabs, Tag, Typography } from 'antd'
 import { CopyOutlined, DownloadOutlined } from '@ant-design/icons'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
@@ -194,7 +194,7 @@ export default function SourceView({ ontologyId, currentVersion, spec }: { ontol
                   }
                 />
               ) : origLoading ? (
-                <Spin size="small" />
+                <Skeleton active title={false} paragraph={{ rows: 8 }} />
               ) : original != null ? (
                 <div className="onto-cm-wrap">
                   <CodeMirror

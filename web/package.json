@@ -20,6 +20,7 @@
     "3d-force-graph": "1.80.0",
     "antd": "^6.6.5",
     "react": "^18.3.1",
+    "react-diff-viewer-continued": "^4.4.0",
     "react-dom": "^18.3.1",
     "three": "0.186.1",
     "zustand": "^5.0.2"

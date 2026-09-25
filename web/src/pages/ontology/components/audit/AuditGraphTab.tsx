@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Skeleton, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ExportOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../../../api/client'
@@ -124,10 +124,7 @@ export default function AuditGraphTab({ kbId }: { kbId?: string }) {
         }
       >
         {!data && loading ? (
-          <Space size={8} style={{ padding: '12px 0' }}>
-            <Spin size="small" />
-            <Typography.Text type="secondary">读取中…</Typography.Text>
-          </Space>
+          <Skeleton active title={false} paragraph={{ rows: 4 }} style={{ padding: '12px 0' }} />
         ) : entities.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}

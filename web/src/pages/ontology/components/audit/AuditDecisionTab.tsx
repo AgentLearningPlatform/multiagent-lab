@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Drawer, Empty, Form, Input, Select, Space, Spin, Table, Tag, Timeline, Typography } from 'antd'
+import { Alert, Button, Card, Drawer, Empty, Form, Input, Select, Skeleton, Space, Table, Tag, Timeline, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { BranchesOutlined, ExportOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../../../api/client'
@@ -124,6 +124,7 @@ export default function AuditDecisionTab({ kbId }: { kbId?: string }) {
     {
       title: '操作',
       width: 110,
+      fixed: 'right' as const,
       render: (_, r) => (
         <Button type="link" size="small" icon={<BranchesOutlined />} onClick={() => setChainTarget(r)}>
           溯源链
@@ -275,7 +276,7 @@ function ChainDrawer({ decision, onClose }: { decision: OntoDecision; onClose: (
 
       <div className="sema-audit-chain" style={{ marginTop: 12 }}>
         {loading && chain.length === 0 ? (
-          <Spin size="small" />
+          <Skeleton active title={false} paragraph={{ rows: 5 }} />
         ) : chain.length === 0 ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无链路" />
         ) : (

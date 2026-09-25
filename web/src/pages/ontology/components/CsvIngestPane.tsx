@@ -419,6 +419,7 @@ export default function CsvIngestPane({
             pagination={false}
             size="small"
             style={{ marginBottom: 12 }}
+            scroll={{ x: 'max-content' }}
           />
           <Descriptions size="small" column={1} style={{ marginBottom: 12 }}>
             <Descriptions.Item label="入库方式">

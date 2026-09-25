@@ -125,6 +125,7 @@ export default function TraceTable({ profiles }: { profiles: RuntimeProfile[] })
         pagination={{ pageSize: 10, hideOnSinglePage: true }}
         size="small"
         locale={{ emptyText: '暂无透视记录（执行 onto_* 工具后生成）' }}
+        scroll={{ x: 'max-content' }}
         expandable={{
           expandedRowRender: (r) => (
             <div className="onto-trace-expand">

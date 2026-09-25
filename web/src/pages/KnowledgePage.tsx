@@ -27,6 +27,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import EmptyGuide from '../components/EmptyGuide'
+import LoadErrorAlert from '../components/LoadErrorAlert'
 import KGGraphView, { KGGovernancePanel, KGGlobalPanel } from '../components/KGGraphView'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
@@ -359,7 +360,7 @@ export default function KnowledgePage() {
             ))}
             {kbs.length === 0 &&
               (loadErr ? (
-                <div className="empty-hint">{loadErr}</div>
+                <LoadErrorAlert title="知识库列表加载失败" message={loadErr} onRetry={reloadKBs} style={{ margin: 12 }} />
               ) : (
                 <EmptyGuide
                   title="创建第一个知识库"

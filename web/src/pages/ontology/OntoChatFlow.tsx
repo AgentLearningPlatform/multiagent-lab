@@ -2,10 +2,11 @@
 // 交互流：cq（领域描述+CQ）→ domain（逐轮补全，模型归纳+引导）→ 生成草稿（校验循环后端内聚）
 // → 预览确认入库（REQ-82 门控）或回复修改意见进入 refine。会话留痕可切换/删除。
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, List, Popconfirm, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Input, List, Popconfirm, Skeleton, Space, Spin, Tag, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined, SendOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
 import type { OntoChatSession, Spec } from '../../api/types'
+import LoadErrorAlert from '../../components/LoadErrorAlert'
 import { useUI } from '../../store/ui'
 
 const STAGE_TAG: Record<string, { color: string; text: string }> = {
@@ -22,6 +23,7 @@ const CQ_TEMPLATE = '软件缺陷管理系统\n缺陷源于哪个需求？\n缺�
 export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string) => void }) {
   const { showToast } = useUI()
   const [sessions, setSessions] = useState<OntoChatSession[]>([])
+  const [sessionsErr, setSessionsErr] = useState<string | null>(null)
   const [active, setActive] = useState<OntoChatSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [turning, setTurning] = useState(false)
@@ -35,8 +37,10 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
     try {
       const list = await api.listOntoChatSessions()
       setSessions(list)
+      setSessionsErr(null)
       return list
-    } catch {
+    } catch (e: any) {
+      setSessionsErr(e?.message ?? '加载失败')
       return []
     }
   }, [])
@@ -182,6 +186,16 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
               新建
             </Button>
           </Space>
+          {sessionsErr && (
+            <LoadErrorAlert
+              title="会话列表加载失败"
+              message={sessionsErr}
+              onRetry={() => {
+                refreshList()
+              }}
+              style={{ marginBottom: 8 }}
+            />
+          )}
           <List
             size="small"
             dataSource={sessions}
@@ -197,7 +211,7 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
                 onClick={() => openSession(s.id)}
                 actions={[
                   <Popconfirm key="del" title="删除该会话？" onConfirm={(e) => { e?.stopPropagation(); removeSession(s.id) }}>
-                    <Button type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                    <Button type="text" size="small" icon={<DeleteOutlined />} aria-label="删除会话" onClick={(e) => e.stopPropagation()} />
                   </Popconfirm>,
                 ]}
               >
@@ -215,7 +229,7 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
         {/* 对话区 */}
         <div style={{ flex: 1, minWidth: 0 }}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+            <Skeleton active paragraph={{ rows: 6 }} style={{ padding: 24, marginTop: 16 }} />
           ) : !active ? (
             <Empty description="新建或选择一个会话开始" style={{ padding: 40 }} />
           ) : (

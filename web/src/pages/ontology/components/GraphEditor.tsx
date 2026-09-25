@@ -266,7 +266,7 @@ export default function GraphEditor({
       )}
       <Splitter className="onto-flow-split" orientation="horizontal">
         <Splitter.Panel defaultSize="68%" min="40%">
-          <div className="onto-flow-pane">
+          <div className="onto-flow-pane" role="application" aria-label="本体图谱画布（拖拽节点排版，点击节点/连线编辑属性）">
             <ReactFlow
               key={d.concepts.map((c) => c.name).join('|')}
               nodes={nodes}

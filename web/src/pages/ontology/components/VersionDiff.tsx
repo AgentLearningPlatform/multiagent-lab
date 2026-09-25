@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Empty, Select, Spin, Statistic, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Empty, Select, Skeleton, Statistic, Table, Tabs, Tag, Typography } from 'antd'
 import { SwapOutlined } from '@ant-design/icons'
+import ReactDiffViewer from 'react-diff-viewer-continued'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '../../../api/client'
 import type { DiffChanged, DiffCollection, DiffItem, DiffResult, VersionMeta } from '../../../api/types'
@@ -89,6 +90,80 @@ function shortVal(v: unknown): string {
   return s.length > 40 ? s.slice(0, 40) + '…' : s
 }
 
+/** spec 快照文本归一格式化（两版同口径序列化，diff 才有意义）；非合法 JSON 回退原文 */
+function prettySpec(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
+/** 文本对照（REQ-145/M22 A3）：两版 spec 快照归一格式化后分栏对照，与结构化三集合表并存 */
+function TextDiffPane({ ontologyId, fromV, toV }: { ontologyId: string; fromV: number | null; toV: number | null }) {
+  const [texts, setTexts] = useState<{ from: string; to: string } | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    if (fromV == null || toV == null || fromV === toV) {
+      setTexts(null)
+      setErr(null)
+      return
+    }
+    let alive = true
+    setLoading(true)
+    setErr(null)
+    Promise.all([api.getVersionSpec(ontologyId, fromV), api.getVersionSpec(ontologyId, toV)])
+      .then(([a, b]) => {
+        if (alive) setTexts({ from: prettySpec(a), to: prettySpec(b) })
+      })
+      .catch((e: any) => {
+        if (alive) {
+          setTexts(null)
+          setErr(e?.message ?? '加载失败')
+        }
+      })
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [ontologyId, fromV, toV, tick])
+
+  if (fromV == null || toV == null || fromV === toV) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择两个不同版本查看文本对照" />
+  }
+  if (err) {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message="文本对照加载失败"
+        description={err}
+        action={<Button size="small" onClick={() => setTick((t) => t + 1)}>重试</Button>}
+      />
+    )
+  }
+  if (loading || !texts) {
+    return <Skeleton active paragraph={{ rows: 8 }} />
+  }
+  return (
+    <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, maxHeight: 480, overflow: 'auto' }}>
+      <ReactDiffViewer
+        oldValue={texts.from}
+        newValue={texts.to}
+        splitView
+        leftTitle={`v${fromV}（起始）`}
+        rightTitle={`v${toV}（目标）`}
+        styles={{ contentText: { fontSize: 12, lineHeight: '18px' }, gutter: { minWidth: 36 } }}
+      />
+    </div>
+  )
+}
+
 /** 版本 diff 面板：版本对选择 + 汇总统计 + 三集合表 + 引用影响 */
 export default function VersionDiff({ ontologyId, versions, currentVersion }: { ontologyId: string; versions: VersionMeta[]; currentVersion?: number }) {
   const opts = versions.map((v) => ({ value: v.version, label: `v${v.version} · ${v.created_at}` }))
@@ -146,7 +221,7 @@ export default function VersionDiff({ ontologyId, versions, currentVersion }: { 
       {err ? (
         <Alert type="warning" showIcon message="版本对比失败" description={err} />
       ) : loading ? (
-        <Spin size="small" />
+        <Skeleton active paragraph={{ rows: 4 }} />
       ) : !result ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择两个版本开始对比" />
       ) : (
@@ -166,6 +241,11 @@ export default function VersionDiff({ ontologyId, versions, currentVersion }: { 
               { key: 'concepts', label: `概念 (${totalConcepts(result)})`, children: <DiffSetTable set={result.concepts} kind="concepts" /> },
               { key: 'relations', label: `关系 (${totalRelations(result)})`, children: <DiffSetTable set={result.relations} kind="relations" /> },
               { key: 'instances', label: `实例 (${totalInstances(result)})`, children: <DiffSetTable set={result.instances} kind="instances" /> },
+              {
+                key: 'text',
+                label: '文本对照',
+                children: <TextDiffPane ontologyId={ontologyId} fromV={fromV} toV={toV} />,
+              },
               {
                 key: 'impact',
                 label: `引用影响 (${result.impact.length})`,

@@ -460,6 +460,8 @@ export const api = {
   /** 版本 diff：GET /api/ontologies/{id}/diff?from&to；400 版本无快照 / 404 → ApiError（UI 内联 Alert） */
   diffOntologyVersions: (id: string, fromV: number, toV: number) =>
     req<DiffResult>(`/api/ontologies/${id}/diff?from=${fromV}&to=${toV}`),
+  /** 按版本读取 spec_json 快照原文（REQ-145/M22 A3 文本 diff 数据面；404 版本不存在） */
+  getVersionSpec: (id: string, version: number) => reqText(`/api/ontologies/${id}/versions/${version}/spec`),
   /** CSV 灌装预览：multipart（csv + concept/key_column/relation_columns/attribute_columns/skip_rows/mode=preview） */
   ingestCsvPreview: (id: string, form: FormData) => reqMultipart<CsvIngestPreview>(`/api/ontologies/${id}/ingest-csv`, form),
   /** CSV 灌装确认入库：同 multipart，mode=apply；400 校验失败带 validation_errors */
