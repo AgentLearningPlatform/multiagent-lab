@@ -12,6 +12,8 @@
     "@ant-design/icons": "^6.3.4",
     "@ant-design/x": "^2.9.0",
     "@ant-design/x-markdown": "^2.9.0",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lint": "^6.9.7",
     "@triply/yasgui": "^4.2.28",
     "@uiw/react-codemirror": "^4.25.11",
     "@xyflow/react": "^12.11.6",
