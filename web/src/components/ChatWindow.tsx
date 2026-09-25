@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, Popover, Segmented, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
@@ -46,7 +46,11 @@ interface PaneSel {
   kb: string
   profile: string
   noHistory: boolean // REQ-143③：不携带对话历史（干净对照）
+  temperature: number | null // REQ-144：推理参数覆盖（null=继承）
+  instruction: string // REQ-144：系统提示词临时改写（''=继承）
+  skills: '' | 'on' | 'off' // REQ-144：技能开关（''=继承，REQ-19g 口径）
 }
+const BLANK_PANE: PaneSel = { agent: '', model: '', kb: '', profile: '', noHistory: false, temperature: null, instruction: '', skills: '' }
 
 // 子 Agent 名（§6.5 subagent.enter/exit payload = 子 Agent 名；字段名做兼容取值）
 function subagentName(d: any): string {
@@ -404,6 +408,10 @@ export default function ChatWindow({
 
   // 历史还原：消息表（对话正文）+ 事件表（执行时间线）按时间合并
   useEffect(() => {
+    // B3（research/ChatWindow渲染与SSE链路审查）：切换会话先中止旧流，防止旧会话事件写入新会话列表
+    runRef.current?.abort()
+    runRef.current = null
+    setRunning(false)
     let alive = true
     setItems([])
     if (!conversation) return
@@ -472,16 +480,16 @@ export default function ChatWindow({
 
   // ---- REQ-19e/19f 对话对比模式：开关 + 2~4 窗格 + 每窗格单项覆盖（''= 继承对话当前配置）----
   const cmpKey = `eino.compare.${conversation?.id}`
-  const [cmp, setCmp] = useState<{ on: boolean; panes: PaneSel[] }>({ on: false, panes: [{ agent: '', model: '', kb: '', profile: '', noHistory: false }, { agent: '', model: '', kb: '', profile: '', noHistory: false }] })
+  const [cmp, setCmp] = useState<{ on: boolean; panes: PaneSel[] }>({ on: false, panes: [{ ...BLANK_PANE }, { ...BLANK_PANE }] })
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(cmpKey) || 'null')
       if (saved && typeof saved.on === 'boolean' && Array.isArray(saved.panes) && saved.panes.length >= 2 && saved.panes.length <= 4) {
-        setCmp({ on: saved.on, panes: saved.panes.map((p: any) => ({ agent: p?.agent ?? '', model: p?.model ?? '', kb: p?.kb ?? '', profile: p?.profile ?? '', noHistory: !!p?.noHistory })) })
+        setCmp({ on: saved.on, panes: saved.panes.map((p: any) => ({ agent: p?.agent ?? '', model: p?.model ?? '', kb: p?.kb ?? '', profile: p?.profile ?? '', noHistory: !!p?.noHistory, temperature: typeof p?.temperature === 'number' ? p.temperature : null, instruction: p?.instruction ?? '', skills: p?.skills ?? '' })) })
         return
       }
     } catch { /* 忽略坏数据 */ }
-    setCmp({ on: false, panes: [{ agent: '', model: '', kb: '', profile: '', noHistory: false }, { agent: '', model: '', kb: '', profile: '', noHistory: false }] })
+    setCmp({ on: false, panes: [{ ...BLANK_PANE }, { ...BLANK_PANE }] })
   }, [cmpKey])
   const patchCmp = (patch: Partial<{ on: boolean; panes: PaneSel[] }>) => {
     setCmp((prev) => {
@@ -490,7 +498,7 @@ export default function ChatWindow({
       return next
     })
   }
-  const setPaneSel = (i: number, field: keyof PaneSel, value: string | boolean) => {
+  const setPaneSel = (i: number, field: keyof PaneSel, value: string | number | boolean | null) => {
     setCmp((prev) => {
       if (!prev.on) return prev
       const panes = prev.panes.map((p, j) => (j === i ? { ...p, [field]: value } : p))
@@ -499,9 +507,79 @@ export default function ChatWindow({
       return next
     })
   }
-  const resizePanes = (panes: PaneSel[], n: number): PaneSel[] => {
-    const blank = { agent: '', model: '', kb: '', profile: '', noHistory: false }
-    return Array.from({ length: n }, (_, i) => panes[i] ?? { ...blank })
+  const resizePanes = (panes: PaneSel[], n: number): PaneSel[] =>
+    Array.from({ length: n }, (_, i) => panes[i] ?? { ...BLANK_PANE })
+
+  // REQ-144：配置剖面对话级命名保存（localStorage，不做全局剖面库）
+  const profilesKey = `eino.compare.profiles.${conversation?.id}`
+  const [cmpProfiles, setCmpProfiles] = useState<{ name: string; cfg: Partial<PaneSel> }[]>([])
+  const [profileSaveFor, setProfileSaveFor] = useState<number | null>(null)
+  const [profileName, setProfileName] = useState('')
+  useEffect(() => {
+    try {
+      const list = JSON.parse(localStorage.getItem(profilesKey) || '[]')
+      if (Array.isArray(list)) setCmpProfiles(list)
+    } catch { /* 忽略坏数据 */ }
+  }, [profilesKey])
+  const persistProfiles = (list: { name: string; cfg: Partial<PaneSel> }[]) => {
+    setCmpProfiles(list)
+    try { localStorage.setItem(profilesKey, JSON.stringify(list)) } catch { /* 忽略配额 */ }
+  }
+  // 剖面仅捕获「配置型」字段（智能体/模型/库/方案/温度/提示词/技能/历史口径）
+  const capturePane = (p: PaneSel): Partial<PaneSel> => ({
+    agent: p.agent, model: p.model, kb: p.kb, profile: p.profile,
+    temperature: p.temperature, instruction: p.instruction, skills: p.skills, noHistory: p.noHistory,
+  })
+  const saveProfile = (i: number) => setProfileSaveFor(i)
+  const doSaveProfile = () => {
+    if (profileSaveFor == null) return
+    const name = profileName.trim()
+    if (!name) { showToast('请输入剖面名称', 'err'); return }
+    const cfg = capturePane(cmp.panes[profileSaveFor])
+    const next = [...cmpProfiles.filter((x) => x.name !== name), { name, cfg }]
+    persistProfiles(next)
+    showToast(`剖面「${name}」已保存（对话级，可在任意窗格应用）`)
+    setProfileSaveFor(null)
+    setProfileName('')
+  }
+  const applyProfile = (i: number, cfg: Partial<PaneSel>) => {
+    setCmp((prev) => {
+      if (!prev.on) return prev
+      const panes = prev.panes.map((p, j) => (j === i ? { ...p, ...cfg } : p))
+      const next = { ...prev, panes }
+      try { localStorage.setItem(cmpKey, JSON.stringify(next)) } catch { /* 忽略配额 */ }
+      return next
+    })
+    showToast(`已应用剖面到窗格 ${i + 1}（覆盖合并序：剖面 > 窗格单项 > 智能体 > 全局）`)
+  }
+  // REQ-144 可选增强：采纳窗格配置转正（agent 直聊：写回 agent_id/知识库/方案/技能开关继续对话；
+  // 项目会话不提供——主智能体/协调者变更属项目配置职责）
+  const adoptPane = (sel: PaneSel) => {
+    if (isProjectScope) return
+    const kb = sel.kb || conversation.kb_id
+    const rp = sel.profile || conversation.runtime_profile_id
+    const patch: Partial<Conversation> = {
+      agent_id: sel.agent || conversation.agent_id,
+      enable_kb: sel.kb ? true : conversation.enable_kb,
+      ontology_enabled: sel.profile ? true : conversation.ontology_enabled,
+    }
+    if (kb) patch.kb_id = kb
+    if (rp) patch.runtime_profile_id = rp
+    if (sel.skills) patch.enable_skills = sel.skills === 'on'
+    patchConv(patch)
+    showToast(`已采纳窗格配置（智能体 ${agents.find((a) => a.id === patch.agent_id)?.name ?? '—'}），关闭对比后单流沿用`)
+  }
+
+  // REQ-144：复制上一窗格配置（纯前端操作，便于单变量 A/B）
+  const copyPrevPane = (i: number) => {
+    setCmp((prev) => {
+      if (!prev.on || i <= 0) return prev
+      const panes = prev.panes.map((p, j) => (j === i ? { ...prev.panes[i - 1] } : p))
+      const next = { ...prev, panes }
+      try { localStorage.setItem(cmpKey, JSON.stringify(next)) } catch { /* 忽略配额 */ }
+      return next
+    })
+    showToast(`已复制窗格 ${i} 的配置到窗格 ${i + 1}`)
   }
 
   // 窗格消息流（会话内累计；切会话清空；窗格数变化对齐长度）
@@ -897,6 +975,9 @@ export default function ChatWindow({
       ...(p.model ? { model_conn_id: p.model } : {}),
       ...(p.kb ? { kb_id: p.kb } : {}),
       ...(p.profile ? { runtime_profile_id: p.profile } : {}),
+      ...(p.temperature != null ? { temperature: p.temperature } : {}),
+      ...(p.instruction ? { instruction: p.instruction } : {}),
+      ...(p.skills ? { enable_skills: p.skills === 'on' } : {}),
       ...(p.noHistory ? { no_history: true } : {}),
     }))
     paneRunMapRef.current = {}
@@ -1203,6 +1284,17 @@ export default function ChatWindow({
                       <AgentLogo agent={paneAgentOf(sel)} size={16} />
                       <Typography.Text strong style={{ fontSize: 12 }}>{paneAgentOf(sel)?.name ?? '—'}</Typography.Text>
                     </span>
+                    {/* REQ-144 可选增强：采纳该窗格配置写回对话（仅 agent 直聊；运行中禁用） */}
+                    {!isProjectScope && conversation.agent_id && !running && (
+                      <Tooltip title="采纳：把该窗格的智能体/知识库/方案/技能开关写回对话配置，之后单流对话沿用">
+                        <Button
+                          type="link" size="small" style={{ padding: '0 4px', fontSize: 11 }}
+                          onClick={() => adoptPane(sel)}
+                        >
+                          采纳
+                        </Button>
+                      </Tooltip>
+                    )}
                     <span className="cmp-pane-badges">
                       <span className={`cmp-badge${sel.model ? ' set' : ''}`} title={sel.model ? `模型覆盖：${conns.find((c) => c.id === sel.model)?.name ?? sel.model}` : '模型：继承对话/智能体配置'}>
                         模型{sel.model ? `·${conns.find((c) => c.id === sel.model)?.name ?? ''}` : '·继承'}
@@ -1257,6 +1349,53 @@ export default function ChatWindow({
                     >
                       不携带历史（干净对照，REQ-143）
                     </Checkbox>
+                    {/* REQ-144：更多配置（推理参数/提示词改写/技能开关）+ 剖面与窗格间复制 */}
+                    <Collapse
+                      ghost
+                      size="small"
+                      className="cmp-more-cfg"
+                      items={[{
+                        key: 'more',
+                        label: <span style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary, #999)' }}>更多配置（温度 / 提示词改写 / 技能 · 剖面）</span>,
+                        children: (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <InputNumber
+                                size="small" style={{ flex: 1 }} min={0} max={2} step={0.1} disabled={running}
+                                placeholder="温度 · 继承" value={sel.temperature ?? undefined}
+                                onChange={(v) => setPaneSel(i, 'temperature', typeof v === 'number' ? v : null)}
+                              />
+                              <Select
+                                size="small" style={{ flex: 1 }} disabled={running}
+                                placeholder="技能 · 继承" value={sel.skills || undefined}
+                                onChange={(v) => setPaneSel(i, 'skills', v ?? '')}
+                                options={[{ value: 'on', label: '技能开' }, { value: 'off', label: '技能关' }]}
+                              />
+                            </div>
+                            <Input.TextArea
+                              size="small" rows={2} disabled={running} maxLength={2000}
+                              placeholder="系统提示词临时改写 · 继承（仅本窗格生效）"
+                              value={sel.instruction || undefined}
+                              onChange={(e) => setPaneSel(i, 'instruction', e.target.value)}
+                            />
+                            <Space size={4} wrap>
+                              <Select
+                                size="small" style={{ minWidth: 130 }} allowClear disabled={running}
+                                placeholder="应用剖面…" value={undefined}
+                                onChange={(name) => { const pr = cmpProfiles.find((x) => x.name === name); if (pr) applyProfile(i, pr.cfg) }}
+                                options={cmpProfiles.map((x) => ({ value: x.name, label: x.name }))}
+                              />
+                              <Button size="small" disabled={running} onClick={() => saveProfile(i)}>存为剖面</Button>
+                              {i > 0 && (
+                                <Button size="small" disabled={running} onClick={() => copyPrevPane(i)}>
+                                  复制上一窗格
+                                </Button>
+                              )}
+                            </Space>
+                          </div>
+                        ),
+                      }]}
+                    />
                   </footer>
                 </section>
               ))}
@@ -1401,6 +1540,29 @@ export default function ChatWindow({
           />
         </div>
       </div>
+
+      {/* REQ-144：剖面命名保存（对话级） */}
+      <Modal
+        open={profileSaveFor != null}
+        centered
+        title={`保存窗格 ${(profileSaveFor ?? 0) + 1} 配置为剖面`}
+        width={420}
+        onCancel={() => { setProfileSaveFor(null); setProfileName('') }}
+        onOk={doSaveProfile}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Input
+          value={profileName}
+          onChange={(e) => setProfileName(e.target.value)}
+          placeholder="剖面名称（对话级，如：低温度-严格事实）"
+          onPressEnter={doSaveProfile}
+          autoFocus
+        />
+        <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+          剖面捕获：智能体/模型/知识库/方案/温度/提示词改写/技能/历史口径。应用时按「剖面 &gt; 窗格单项 &gt; 智能体 &gt; 全局」合并。
+        </Typography.Text>
+      </Modal>
 
       {replayOpen && (
         <EventReplayDrawer

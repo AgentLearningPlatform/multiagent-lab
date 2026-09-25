@@ -77,14 +77,18 @@ type RunInput struct {
 	Panes []PaneConfig `json:"panes,omitempty"`
 }
 
-// PaneConfig 对比窗格单项覆盖（REQ-19f/REQ-143）：模型连接 / 知识库 / 本体运行方案 / 智能体；
-// 空 = 继承对话当前配置。NoHistory = 窗格级「不携带历史」开关（干净对照，默认共享完整对话历史）。
+// PaneConfig 对比窗格单项覆盖（REQ-19f/143/144）：智能体 / 模型连接 / 知识库 / 本体运行方案 /
+// 推理参数（温度）/ 系统提示词临时改写 / 技能开关；空 = 继承对话当前配置。
+// NoHistory = 窗格级「不携带历史」开关（干净对照，默认共享完整对话历史）。
 type PaneConfig struct {
-	AgentID          string `json:"agent_id,omitempty"`
-	ModelConnID      string `json:"model_conn_id,omitempty"`
-	KBID             string `json:"kb_id,omitempty"`
-	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
-	NoHistory        bool   `json:"no_history,omitempty"`
+	AgentID          string   `json:"agent_id,omitempty"`
+	ModelConnID      string   `json:"model_conn_id,omitempty"`
+	KBID             string   `json:"kb_id,omitempty"`
+	RuntimeProfileID string   `json:"runtime_profile_id,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`   // REQ-144：推理参数覆盖（作用于窗格 Agent 副本）
+	Instruction      string   `json:"instruction,omitempty"`   // REQ-144：系统提示词临时改写（仅本窗格）
+	EnableSkills     *bool    `json:"enable_skills,omitempty"` // REQ-144：技能开关（REQ-19g 口径，窗格级）
+	NoHistory        bool     `json:"no_history,omitempty"`
 }
 
 // RunResult 运行结果摘要。
@@ -389,13 +393,18 @@ func (s *Service) resolvePaneAgent(def *store.Agent, pc PaneConfig) (*store.Agen
 	return ag, nil
 }
 
-// paneConversation 应用窗格知识库/本体运行方案覆盖（空 = 继承对话配置，含继承「未开启」状态）。
+// paneConversation 应用窗格知识库/本体运行方案/技能开关覆盖（REQ-143/144；
+// 空 = 继承对话配置，含继承「未开启」状态）。
 func paneConversation(conv *store.Conversation, pc PaneConfig) *store.Conversation {
-	if pc.KBID == "" && pc.RuntimeProfileID == "" {
+	if pc.KBID == "" && pc.RuntimeProfileID == "" && pc.EnableSkills == nil {
 		return conv
 	}
 	cp := *conv
 	cp.InterruptState = "" // 组级已处理，窗格内不再触发
+	if pc.EnableSkills != nil {
+		v := *pc.EnableSkills
+		cp.EnableSkills = &v
+	}
 	if pc.KBID != "" {
 		id := pc.KBID
 		cp.KBID = &id
@@ -409,14 +418,24 @@ func paneConversation(conv *store.Conversation, pc PaneConfig) *store.Conversati
 	return &cp
 }
 
-// paneAgent 应用窗格模型覆盖（空 = 继承智能体配置；无效连接由装配层报错，与单路一致）。
+// paneAgent 应用窗格智能体覆盖（REQ-143/144）：模型连接 / 推理参数（温度）/ 系统提示词临时改写；
+// 任一字段覆盖即克隆 Agent 副本，不污染原对象。无效连接由装配层报错，与单路一致。
 func paneAgent(ag *store.Agent, pc PaneConfig) *store.Agent {
-	if ag == nil || pc.ModelConnID == "" {
+	if ag == nil || (pc.ModelConnID == "" && pc.Temperature == nil && pc.Instruction == "") {
 		return ag
 	}
 	cp := *ag
-	id := pc.ModelConnID
-	cp.ModelConnID = &id
+	if pc.ModelConnID != "" {
+		id := pc.ModelConnID
+		cp.ModelConnID = &id
+	}
+	if pc.Temperature != nil {
+		t := *pc.Temperature
+		cp.Temperature = &t
+	}
+	if pc.Instruction != "" {
+		cp.Instruction = pc.Instruction
+	}
 	return &cp
 }
 
@@ -429,12 +448,22 @@ func agentIDOf(ag *store.Agent) string {
 }
 
 func paneMetaJSON(idx int, runID string, ag *store.Agent, pc PaneConfig) string {
+	ov := map[string]any{
+		"model_conn_id": pc.ModelConnID, "kb_id": pc.KBID, "runtime_profile_id": pc.RuntimeProfileID,
+	}
+	if pc.Temperature != nil {
+		ov["temperature"] = *pc.Temperature
+	}
+	if pc.Instruction != "" {
+		ov["instruction"] = pc.Instruction
+	}
+	if pc.EnableSkills != nil {
+		ov["enable_skills"] = *pc.EnableSkills
+	}
 	b, err := json.Marshal(map[string]any{
 		"compare": true, "pane": idx, "run_id": runID,
 		"agent_id": agentIDOf(ag), "no_history": pc.NoHistory,
-		"overrides": map[string]any{
-			"model_conn_id": pc.ModelConnID, "kb_id": pc.KBID, "runtime_profile_id": pc.RuntimeProfileID,
-		},
+		"overrides": ov,
 	})
 	if err != nil {
 		return ""

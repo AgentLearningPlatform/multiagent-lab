@@ -18,6 +18,7 @@ func TestRunInputPanesDecode(t *testing.T) {
 		{"model_conn_id":"mc1"},
 		{"kb_id":"kb2","runtime_profile_id":"rp2"},
 		{"agent_id":"ag9","no_history":true},
+		{"temperature":0.9,"instruction":"你是海盗","enable_skills":false},
 		{}]}`
 	var in RunInput
 	if err := json.Unmarshal([]byte(body), &in); err != nil {
@@ -26,8 +27,11 @@ func TestRunInputPanesDecode(t *testing.T) {
 	if in.Input != "同问对比" || in.DebugLevel != 1 {
 		t.Fatalf("base fields: %+v", in)
 	}
-	if len(in.Panes) != 4 {
-		t.Fatalf("panes len = %d, want 4", len(in.Panes))
+	if len(in.Panes) != 5 {
+		t.Fatalf("panes len = %d, want 5", len(in.Panes))
+	}
+	if in.Panes[3].Temperature == nil || *in.Panes[3].Temperature != 0.9 || in.Panes[3].Instruction != "你是海盗" || in.Panes[3].EnableSkills == nil || *in.Panes[3].EnableSkills {
+		t.Fatalf("pane3 REQ-144 字段: %+v", in.Panes[3])
 	}
 	if in.Panes[2].AgentID != "ag9" || !in.Panes[2].NoHistory {
 		t.Fatalf("pane2 REQ-143 字段: %+v", in.Panes[2])
@@ -38,8 +42,8 @@ func TestRunInputPanesDecode(t *testing.T) {
 	if in.Panes[1].KBID != "kb2" || in.Panes[1].RuntimeProfileID != "rp2" || in.Panes[1].ModelConnID != "" {
 		t.Fatalf("pane1 = %+v", in.Panes[1])
 	}
-	if in.Panes[3] != (PaneConfig{}) {
-		t.Fatalf("pane3 应为空（全继承）: %+v", in.Panes[3])
+	if in.Panes[4] != (PaneConfig{}) {
+		t.Fatalf("pane4 应为空（全继承）: %+v", in.Panes[4])
 	}
 	// 旧请求体（无 panes）兼容：单路现状不变
 	var legacy RunInput
@@ -97,6 +101,21 @@ func TestPaneConversationOverrides(t *testing.T) {
 	if pc3.EnableKB {
 		t.Fatal("未覆盖 kb 开关时应继承 false")
 	}
+
+	// REQ-144：技能开关覆盖（REQ-19g 口径，skillGated 读 EnableSkills）
+	off := false
+	on := true
+	pc4 := paneConversation(conv, PaneConfig{EnableSkills: &off})
+	if pc4.EnableSkills == nil || *pc4.EnableSkills {
+		t.Fatalf("技能关闭覆盖未生效: %+v", pc4)
+	}
+	pc5 := paneConversation(conv, PaneConfig{EnableSkills: &on})
+	if pc5.EnableSkills == nil || !*pc5.EnableSkills {
+		t.Fatalf("技能开启覆盖未生效: %+v", pc5)
+	}
+	if conv.EnableSkills != nil {
+		t.Fatal("原对话被改动")
+	}
 }
 
 func TestPaneAgentModelOverride(t *testing.T) {
@@ -118,10 +137,25 @@ func TestPaneAgentModelOverride(t *testing.T) {
 	if pc.ID != "a1" || pc.Name != "A" {
 		t.Fatal("其余字段应保持")
 	}
+
+	// REQ-144：温度 + 提示词改写（克隆应用）
+	t09 := 0.9
+	pc2 := paneAgent(ag, PaneConfig{Temperature: &t09, Instruction: "你是海盗"})
+	if pc2.Temperature == nil || *pc2.Temperature != 0.9 || pc2.Instruction != "你是海盗" {
+		t.Fatalf("温度/提示词覆盖未生效: %+v", pc2)
+	}
+	if ag.Temperature != nil || ag.Instruction != "" {
+		t.Fatal("原智能体被改动")
+	}
+	if paneAgent(ag, PaneConfig{}) != ag {
+		t.Fatal("全空覆盖应返回原对象")
+	}
 }
 
 func TestPaneMetaJSON(t *testing.T) {
-	meta := paneMetaJSON(2, "run-3", &store.Agent{ID: "ag-x"}, PaneConfig{ModelConnID: "mc1", KBID: "kb1", NoHistory: true})
+	off := false
+	t02 := 0.2
+	meta := paneMetaJSON(2, "run-3", &store.Agent{ID: "ag-x"}, PaneConfig{ModelConnID: "mc1", KBID: "kb1", NoHistory: true, Temperature: &t02, Instruction: " pirate", EnableSkills: &off})
 	var m map[string]any
 	if err := json.Unmarshal([]byte(meta), &m); err != nil {
 		t.Fatalf("meta 非合法 JSON: %v", err)
@@ -132,7 +166,10 @@ func TestPaneMetaJSON(t *testing.T) {
 	if m["agent_id"] != "ag-x" || m["no_history"] != true {
 		t.Fatalf("meta REQ-143 快照字段: %v", m)
 	}
-	ov, _ := m["overrides"].(map[string]any)
+	ov := m["overrides"].(map[string]any)
+	if ov["temperature"] != 0.2 || ov["instruction"] != " pirate" || ov["enable_skills"] != false {
+		t.Fatalf("meta REQ-144 快照字段: %v", ov)
+	}
 	if ov["model_conn_id"] != "mc1" || ov["kb_id"] != "kb1" || ov["runtime_profile_id"] != "" {
 		t.Fatalf("overrides: %v", ov)
 	}
