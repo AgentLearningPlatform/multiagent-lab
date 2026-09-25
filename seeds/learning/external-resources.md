@@ -58,4 +58,35 @@
 
 ---
 
+## 六、本体开源实现方案借鉴（技术研究专栏，REQ-155~158 配套）
+
+> 来源：docs/23《本体开源实现方案借鉴研究》（2026-09-25，7 方向全量评估）。原则：选型全都要（多方案并存）/ Go 优先排期 / 结构化分组呈现。「落地栏」= 建议并入的本体模块页面；工作量 S/M/L 为初估。
+
+| 方向 | 项目/方案 | 链接 | 一句话说明 | 落地栏 | 工作量 |
+| --- | --- | --- | --- | --- | --- |
+| 建模辅助 | **ROBOT Template** | <https://github.com/ontodev/robot> | 表格驱动批量生成本体，模板→术语批量展开 | 构建·批量生成（sidecar 后置） | M |
+| 建模辅助 | **ODP 本体设计模式库** | <https://github.com/kastle-lab/modular-ontology-design-library> | 模块化可复用设计模式库，构建时推荐套用 | 构建·新增路径 | M |
+| 建模辅助 | **Domain-OntoGen** | <https://arxiv.org/html/2504.17402> | LLM 需求引出→领域本体自动生成管线 | 构建·ontochat 路径 | S |
+| 建模辅助 | **LinkML** | <https://linkml.io> | Schema-as-Code 建模（与 spec_json 定位需评估融合） | 构建·对照评估 | L |
+| 校验 | **OLIVAW** | <https://arxiv.org/html/2510.17184v1> | 本体质量 CI 门禁三模式（保存钩子/导入门禁/CLI 批检） | 资产·质量门禁（REQ-156） | M |
+| 校验 | **Semantica QualityGate** | <https://docs.getsemantica.ai/reference/ontology/> | 商用质量门禁检查项参考（语法/一致性/覆盖率） | 资产·质量门禁（REQ-156） | M |
+| 复用生态 | **LOV** | <https://lov.linkeddata.es> | 词表搜索 API，Go HTTP 客户端直连即可用 | 构建·新增路径 | S |
+| 复用生态 | **EBI OLS** | <https://www.ebi.ac.uk/ols4/> | 本体语义地图与术语检索 | 资产·可视化 | M |
+| 复用生态 | **BioPortal** | <https://bioportal.bioontology.org> | 最大本体仓库与 Annotator 术语抽取 | 构建·新增路径 | S |
+| 可视化 | **WebVOWL** | <https://www.npmjs.com/package/angular-webvowl> | 力导向本体可视化（已随 REQ-154/M21 排期对照激活） | 资产·可视化（已排期） | — |
+| 可视化 | **OrionBelt** | <https://pypi.org/project/orionbelt-ontology-builder/1.16.6/> | Streamlit 本体工作台，导入三策略审查参考 | 资产·导入审查（REQ-157） | M |
+| 可视化 | **OntoGraf** | <https://protegewiki.stanford.edu/wiki/OntoGraf> | Protégé 交互式图谱导航 | 资产·可视化 | S |
+| AI-native | **Open Ontologies** ⚡ | <https://glama.ai/mcp/servers/fabio-rovai/open-ontologies> | Rust/Oxigraph AI-native 本体工程，70+ MCP 工具；F1 实验：工具链 0.717 ≫ 直读 OWL 0.323 | 三栏·工具链（REQ-155，Top1） | L |
+| AI-native | **OntoChat** | <https://github.com/King-s-Knowledge-Graph-Lab/OntoChat> | 多智能体对话式本体构建工作流 | 构建·ontochat 路径 | M |
+| AI-native | **OntoGenix** | <https://mikelval82.github.io/Portfolio/blog-ontogenix.html> | 本体自修复循环（validate→repair 迭代） | 构建·ontochat 路径 | S |
+| AI-native | **LLM4ACOE** | <https://resolve.cambridge.org/core/journals/knowledge-engineering-review/article/automating-agentic-collaborative-ontology-engineering-with-roleplaying-simulation-of-llmpowered-agents-and-rag-technology/C4DFC9BD18020226B4CC763BE7056659> | 角色扮演多智能体协作本体工程框架 | 构建·ontochat 路径 | M |
+| 存储 | **Data Pipeline 增强** | 见 docs/23 §7.1 | KG 构建管线增强（D-O14 迭代：混合策略/质量抽检） | 知识库·第六路径 | M |
+| 存储 | **语义嵌入双空间搜索** | 见 docs/23 §7.2 | 术语向量与图结构双空间检索 | 资产·检索 | M |
+| 协作 | **WebProtégé 协作** | <https://github.com/protegeproject/webprotege> | 自托管协作建模（远期） | 构建·协作 | L |
+| 协作 | **语义 Diff** | <https://www.w3.org/2001/sw/wiki/How_to_diff_RDF> | RDF diff 方法集（结构化报告先行） | 资产·版本对比 | M |
+
+> 完整评估（每方案三段式：是什么/亮点/借鉴点）与三阶段路线见 `docs/23_本体_开源实现方案借鉴研究.md` §9；吸收池方案推进时逐一立项。
+
+---
+
 > **维护说明**：本文件面向学习者（运行时渲染），收录粒度为"一句话 + 链接"；更完整的定位/使用状态/借鉴价值/活跃度评估见 `docs/15_开源项目及论文登记簿.md`（维护者视角全局台账）。两者内容不一致时以登记簿为准并回修本文件。
