@@ -113,7 +113,7 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	// M10 §6.3：执行后端分发——docker 沙箱 → Start + /run SSE 透传；inprocess → 进程内装配执行
 	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend == "docker" {
 		if s.Runtime != nil {
-			return s.runDocker(ctx, conv, agent, runID, input, emit)
+			return s.runDocker(ctx, conv, agent, runID, input, debug, debugPersist, emit)
 		}
 		emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了 docker 执行后端但沙箱后端未启用，已回退 inprocess"}))
 	}
@@ -950,7 +950,8 @@ type agentdRunRequest struct {
 // runDocker docker 沙箱后端执行（§6.3，M10）：用户消息主平台落库 → 配置经启动时下发、
 // history 随请求下发 → agentd 容器内同一装配代码运行 → SSE 事件透传并记录 →
 // assistant 文本聚合落主平台库。对话历史权威数据在主平台（容器可随时重建）。
-func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, emit EmitFn) (*RunResult, error) {
+// debug/debugPersist 随 /run 载荷透传（M17 阶段二沙箱通道，10a 实测补齐实际断链）。
+func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID string, input string, debug int, debugPersist bool, emit EmitFn) (*RunResult, error) {
 	res := &RunResult{}
 	start := time.Now()
 	if emit == nil {
@@ -989,6 +990,7 @@ func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent
 	body, _ := json.Marshal(agentdRunRequest{
 		Input: input, RunID: runID, History: histVals,
 		RuntimeProfileID: conv.RuntimeProfileID, OntologyEnabled: conv.OntologyEnabled,
+		DebugLevel: debug, DebugPersist: debugPersist,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.URL+"/run", bytes.NewReader(body))
 	if err != nil {
@@ -1032,21 +1034,37 @@ func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent
 		case strings.HasPrefix(line, "data: "):
 			raw := json.RawMessage(strings.TrimSpace(strings.TrimPrefix(line, "data: ")))
 			ev := &Event{Type: curEvent, RunID: runID, Ts: time.Now().UTC().Format(time.RFC3339Nano), Data: rewrite(raw)}
-			// assistant 文本聚合（message.delta 与主平台 inprocess 语义一致）
+			// assistant 文本聚合（message.delta 与主平台 inprocess 语义一致）。
+			// agentd 事件为平台信封 {type,run_id,ts,data:{...}}，delta 在 data 内层（10a 实测：
+			// 此前只读顶层 delta，docker 运行的助手消息从未落库）
 			if curEvent == "message.delta" {
 				var d struct {
 					Delta string `json:"delta"`
+					Data  struct {
+						Delta string `json:"delta"`
+					} `json:"data"`
 				}
 				if json.Unmarshal(raw, &d) == nil {
-					buf.WriteString(d.Delta)
+					if d.Data.Delta != "" {
+						buf.WriteString(d.Data.Delta)
+					} else {
+						buf.WriteString(d.Delta)
+					}
 				}
 			}
 			if curEvent == "run.error" {
 				var d struct {
+					Data struct {
+						Message string `json:"message"`
+					} `json:"data"`
 					Message string `json:"message"`
 				}
-				if json.Unmarshal(raw, &d) == nil && d.Message != "" {
-					res.Error = d.Message
+				if json.Unmarshal(raw, &d) == nil {
+					if d.Data.Message != "" {
+						res.Error = d.Data.Message
+					} else {
+						res.Error = d.Message
+					}
 				}
 			}
 			s.emitAndRecord(ctx, conv, runID, ev, emit)

@@ -114,6 +114,12 @@ func (s *Store) CreateConversation(c *Conversation) (*Conversation, error) {
 	if c.EnableSkills != nil {
 		enableSkills = *c.EnableSkills
 	}
+	// tool_approval：nil → ""（列 NOT NULL DEFAULT ''；内部创建方如 agentd 不传该字段，
+	// 显式 nil 插入会违反约束——10a 实测暴露）
+	if c.ToolApproval == nil {
+		empty := ""
+		c.ToolApproval = &empty
+	}
 	_, err := s.DB.Exec(`INSERT INTO conversation (`+convCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Scope, c.AgentID, c.ProjectID, c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), now(), boolInt(enableSkills), c.InterruptState, c.ToolApproval)
 	if err != nil {

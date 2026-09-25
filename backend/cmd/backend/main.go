@@ -76,6 +76,7 @@ func main() {
 		platformURL := getenv("PLATFORM_URL_EXTERNAL", "http://host.docker.internal"+addr)
 		svc.Runtime = &runtime.DockerBackend{
 			Image:       img,
+			Bin:         getenv("DOCKER_BIN", ""),
 			PlatformURL: platformURL,
 			TokenIssue:  srv.IssueManifestToken,
 		}

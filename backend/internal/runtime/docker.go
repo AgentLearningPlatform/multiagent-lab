@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -22,6 +23,7 @@ import (
 // 通过 docker CLI（os/exec）操作，不引入 SDK 依赖（学习尺度：本地单机）。
 type DockerBackend struct {
 	Image       string                               // agentd 镜像，如 agentd:dev
+	Bin         string                               // docker CLI 路径（空 = PATH 查找 + 常见安装位置回退，10a）
 	PlatformURL string                               // 容器内访问主平台的地址（如 http://host.docker.internal:8080）
 	TokenIssue  func(agentID string) (string, error) // 一次性 manifest token 签发回调
 	HealthzWait time.Duration                        // 启动后等待 healthz 就绪的上限（默认 60s）
@@ -29,9 +31,39 @@ type DockerBackend struct {
 
 func (d *DockerBackend) containerName(agentID string) string { return "agt-" + agentID }
 
+// dockerBin 解析 docker CLI 路径（10a 实测补强）：DOCKER_BIN > PATH > Docker Desktop 常见安装位置。
+// macOS Docker Desktop 装于 ~/.docker/bin 且不一定在服务进程 PATH 上，回退避免"找不到可执行文件"。
+func (d *DockerBackend) dockerBin() string {
+	if d.Bin != "" {
+		return d.Bin
+	}
+	if p := envOf("DOCKER_BIN"); p != "" {
+		return p
+	}
+	if _, err := exec.LookPath("docker"); err == nil {
+		return "docker"
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if c := filepath.Join(home, ".docker", "bin", "docker"); fileExecutable(c) {
+			return c
+		}
+	}
+	for _, c := range []string{"/usr/local/bin/docker", "/opt/homebrew/bin/docker"} {
+		if fileExecutable(c) {
+			return c
+		}
+	}
+	return "docker" // 兜底：让 exec 报出原始错误
+}
+
+func fileExecutable(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
+}
+
 // docker 执行 helper：输出 stdout，非零退出返回 error。
 func (d *DockerBackend) docker(ctx context.Context, args ...string) (string, error) {
-	c := exec.CommandContext(ctx, "docker", args...)
+	c := exec.CommandContext(ctx, d.dockerBin(), args...)
 	out, err := c.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {

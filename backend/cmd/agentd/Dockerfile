@@ -18,6 +18,6 @@ RUN cd backend && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/agen
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/agentd /app/agentd
-ENV ADDR=:9099
-EXPOSE 9099
+ENV ADDR=:8080
+EXPOSE 8080
 ENTRYPOINT ["/app/agentd"]

@@ -173,6 +173,7 @@ func (a *agentd) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// 会话先落库（message.conversation_id 外键），单次请求一个内存会话
 	if _, err := a.svc.Store.CreateConversation(conv); err != nil {
+		log.Printf("[agentd] create sandbox conversation: %v", err) // 10a：错误可见（此前静默，仅 superfluous WriteHeader 线索）
 		http.Error(w, "create sandbox conversation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
