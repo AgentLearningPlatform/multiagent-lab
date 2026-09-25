@@ -484,3 +484,16 @@ pre.raw-json {
 .cmp-splitter { flex: 1; min-height: 0; }
 .cmp-splitter .ant-splitter-panel { min-width: 0; overflow: hidden; }
 .cmp-splitter .cmp-pane { height: 100%; }
+
+/* REQ-150② 窗格状态对齐：流式/完成/出错/已停止状态点（生成中脉冲） */
+.cmp-pane-status { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--c-ink-3); white-space: nowrap; }
+.cmp-pane-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-ink-3, #999); flex: none; }
+.cmp-pane-status.st-streaming { color: #4f46e5; }
+.cmp-pane-status.st-streaming .dot { background: #4f46e5; animation: cmp-pulse 1.2s ease-in-out infinite; }
+.cmp-pane-status.st-done { color: #389e0d; }
+.cmp-pane-status.st-done .dot { background: #389e0d; }
+.cmp-pane-status.st-error { color: #d4380d; }
+.cmp-pane-status.st-error .dot { background: #d4380d; }
+.cmp-pane-status.st-stopped { color: #d48806; }
+.cmp-pane-status.st-stopped .dot { background: #d48806; }
+@keyframes cmp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }

@@ -446,6 +446,8 @@ export default function ChatWindow({
   const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({})
   const runRef = useRef<{ abort: () => void; done: Promise<void> } | null>(null)
   const runKeyRef = useRef('')
+  // REQ-150②：用户主动停止标记——abort 断流后 run.finished 不会到达，收尾据此把流式消息置终态
+  const stopFlagRef = useRef(false)
 
   // 历史还原：消息表（对话正文）+ 事件表（执行时间线）按时间合并
   useEffect(() => {
@@ -916,6 +918,30 @@ export default function ChatWindow({
     [items, showRaw, reasoningOpen, granularity, showReasoning, debugLevel],
   )
 
+  // REQ-150② 窗格状态对齐：从窗格消息流派生本轮状态（流式中/出错/已停止/完成/待提问），窗格头统一呈现
+  const paneStatus = (i: number): 'idle' | 'streaming' | 'error' | 'stopped' | 'done' => {
+    const list = paneItems[i] ?? []
+    if (!list.length) return 'idle'
+    const last = list[list.length - 1]
+    if (last.kind === 'msg' && last.streaming) return 'streaming'
+    let err = false
+    let stopped = false
+    for (let k = list.length - 1; k >= 0; k--) {
+      const it = list[k]
+      if (it.kind === 'msg' && it.role === 'user') break // 只看本轮（最后一条提问之后）
+      if (it.kind === 'event') {
+        if (it.evType === 'run.error') err = true
+        if (it.evType === 'run.finished' && it.evData?.reason === 'stopped') stopped = true
+      }
+    }
+    if (err) return 'error'
+    // 主动停止：正常路径 run.finished(reason=stopped) 事件卡命中；断流兜底路径命中收尾写入的停止文案
+    if (stopped) return 'stopped'
+    const lastMsg = list[list.length - 1]
+    if (lastMsg.kind === 'msg' && lastMsg.role === 'assistant' && lastMsg.content === '（已停止生成）') return 'stopped'
+    return 'done'
+  }
+
   // REQ-19e 窗格消息流条目（与单路 listItems 同构映射：消息走角色、事件卡无边框）
   const paneListItems = (i: number) =>
     withSubDepth(paneItems[i] ?? []).map((it, j) => {
@@ -975,6 +1001,7 @@ export default function ChatWindow({
   const streamStart = async (
     start: (handler: (ev: { event: string; data: any }) => void) => { abort: () => void; done: Promise<void> },
   ) => {
+    stopFlagRef.current = false
     setItems((prev) => [...prev, { kind: 'msg', role: 'assistant', content: '', streaming: true }])
     setRunning(true)
     const aborter = start(handleRunEvent)
@@ -982,8 +1009,14 @@ export default function ChatWindow({
     try {
       await aborter.done
     } catch { /* 用户中断 */ }
-    // 运行结束：reasoning 卡收起（保留内容，可手动展开）
-    setItems((prev) => prev.map((it) => (it.streamKey ? { ...it, streamKey: undefined } : it)))
+    // 运行结束：reasoning 卡收起（保留内容，可手动展开）；主动停止断流时终态事件收不到，兜底收尾流式消息
+    setItems((prev) => prev.map((it) => {
+      if (it.streamKey) return { ...it, streamKey: undefined }
+      if (it.kind === 'msg' && it.streaming) {
+        return stopFlagRef.current ? { ...it, streaming: false, content: it.content || '（已停止生成）' } : { ...it, streaming: false }
+      }
+      return it
+    }))
     setRunning(false)
     runRef.current = null
     bumpData()
@@ -1011,6 +1044,7 @@ export default function ChatWindow({
 
   // REQ-19e/19f 对比发送：共用输入框一次提问 → N 路并行；meta 建窗格 run_id 映射，事件按 run_id 路由
   const sendCompare = async (text: string) => {
+    stopFlagRef.current = false
     const panesPayload: ComparePaneConfig[] = cmp.panes.map((p) => ({
       ...(p.agent ? { agent_id: p.agent } : {}),
       ...(p.model ? { model_conn_id: p.model } : {}),
@@ -1034,7 +1068,14 @@ export default function ChatWindow({
     try {
       await aborter.done
     } catch { /* 用户中断 */ }
-    setPaneItems((prev) => prev.map((p) => p.map((it) => (it.streamKey ? { ...it, streamKey: undefined } : it))))
+    // 主动停止断流时各窗格收不到 run.finished，兜底把残留流式消息置终态（REQ-150② 状态对齐）
+    setPaneItems((prev) => prev.map((p) => p.map((it) => {
+      if (it.streamKey) return { ...it, streamKey: undefined }
+      if (it.kind === 'msg' && it.streaming) {
+        return stopFlagRef.current ? { ...it, streaming: false, content: it.content || '（已停止生成）' } : { ...it, streaming: false }
+      }
+      return it
+    })))
     setRunning(false)
     runRef.current = null
     bumpData()
@@ -1100,6 +1141,7 @@ export default function ChatWindow({
   }
 
   const stop = () => {
+    stopFlagRef.current = true // REQ-150②：断流后终态事件收不到，收尾按此置「已停止」
     runRef.current?.abort()
     api.stopConversation(conversation.id).catch(() => {})
   }
@@ -1337,6 +1379,10 @@ export default function ChatWindow({
                 <section className="cmp-pane" aria-label={`对比窗格 ${i + 1}`}>
                   <header className="cmp-pane-head">
                     <span className="cmp-pane-title">窗格 {i + 1}</span>
+                    <span className={`cmp-pane-status st-${paneStatus(i)}`} aria-label={`窗格 ${i + 1} 状态`}>
+                      <i className="dot" aria-hidden="true" />
+                      {{ idle: '待提问', streaming: '生成中', error: '出错', stopped: '已停止', done: '完成' }[paneStatus(i)]}
+                    </span>
                     <span className="cmp-pane-agent" title={sel.agent ? '窗格级智能体（REQ-143）' : '继承对话智能体'}>
                       <AgentLogo agent={paneAgentOf(sel)} size={16} />
                       <Typography.Text strong style={{ fontSize: 12 }}>{paneAgentOf(sel)?.name ?? '—'}</Typography.Text>
