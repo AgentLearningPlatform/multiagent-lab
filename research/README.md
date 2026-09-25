@@ -18,6 +18,7 @@
 | OpenBKN借鉴映射_eino-multiagent-lab_20260922.md | OpenBKN → 本项目逐项借鉴映射 |
 | open-ontologies借鉴与引入分析.md | open-ontologies 独立集成分析（运行栏引导页沿用） |
 | 本体平台与学习资源地图_20260911.md | REQ-109 学习中心外部资源导航；docs/15 登记簿 |
+| ChatWindow渲染与SSE链路审查_20260925.md | NFR-O-6/REQ-145 前端体验优化与 REQ-150 的实现输入（ChatWindow 性能/正确性/架构审查：P1~P6、B1~B7、A1~A4 及修复优先级） |
 | 本体Agent开发上手指南.html | 本体开发教学上手材料（独立 HTML，浏览器打开） |
 | 智能体沙箱方案调研_20260925.md | M10/REQ-122 沙箱方案比选与阶段化路线（容器/Pod 运行智能体） |
 
