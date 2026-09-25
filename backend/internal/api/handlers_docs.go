@@ -1,5 +1,7 @@
-// REQ-140 内部方案文档点击查看：只读服务 docs/ 目录下的 Markdown（白名单目录 + .md 后缀，
-// fsutil 防目录穿越）。前端弹层渲染（不要求在线编辑）。
+// REQ-140 内部方案文档点击查看：只读服务 docs/ 与 research/ 目录下的 Markdown
+// （白名单目录 + .md 后缀，fsutil 防目录穿越）。前端弹层渲染（不要求在线编辑）。
+// REQ-150 扩展（2026-09-25）：白名单由 docs/ 扩至 docs/ + research/——参考资料中心
+// 源文档地图（REQ-116）覆盖 research 立项依据层文档（如 智能体沙箱方案调研）。
 package api
 
 import (
@@ -23,13 +25,25 @@ func (s *Server) docRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "仅支持 .md 文档"})
 		return
 	}
-	// 只允许 docs/ 前缀（内部方案文档范围）
+	// 白名单目录：docs/（方案/需求事实源）+ research/（立项依据层）；fsutil 双重防越界
 	clean := filepath.ToSlash(filepath.Clean(rel))
-	if !strings.HasPrefix(clean, "docs/") || strings.Contains(clean, "..") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "仅支持 docs/ 目录下的文档"})
+	const docsPrefix = "docs/"
+	const researchPrefix = "research/"
+	var root, sub string
+	switch {
+	case strings.HasPrefix(clean, docsPrefix):
+		root, sub = s.DocsRoot, strings.TrimPrefix(clean, docsPrefix)
+	case strings.HasPrefix(clean, researchPrefix):
+		root, sub = s.ResearchRoot, strings.TrimPrefix(clean, researchPrefix)
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "仅支持 docs/ 或 research/ 目录下的文档"})
 		return
 	}
-	abs, err := fsutil.SafeJoin(s.DocsRoot, strings.TrimPrefix(clean, "docs/"))
+	if strings.Contains(clean, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "路径越界"})
+		return
+	}
+	abs, err := fsutil.SafeJoin(root, sub)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "路径越界"})
 		return

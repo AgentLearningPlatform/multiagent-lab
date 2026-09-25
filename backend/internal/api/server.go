@@ -29,15 +29,16 @@ type Server struct {
 	OntoBuild *ontobuild.Service // O13：由知识库构建本体（KB→spec 编排）
 	FilesRoot string             // M11：项目文件根目录（上传/下载落盘）
 	DBPath    string             // REQ-113：SQLite 文件路径（数据与安全概览展示 DB 体积）
-	DocsRoot  string             // REQ-140：内部方案文档根目录（只读查看）
+	DocsRoot     string             // REQ-140：内部方案文档根目录（只读查看）
+	ResearchRoot string             // REQ-150：research/ 立项依据层根目录（只读查看，2026-09-25 扩展）
 	Mux       *http.ServeMux
 	mcpMu     sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
 	mcpHTTP   http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
 }
 
 // NewServer 构造并注册全部路由。
-func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service, dbPath, docsRoot string) *Server {
-	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, Mux: http.NewServeMux()}
+func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service, dbPath, docsRoot, researchRoot string) *Server {
+	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }

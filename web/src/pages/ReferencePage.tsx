@@ -61,10 +61,18 @@ const DOC_FILE_BY_NO: Record<string, string> = {
   '16': 'docs/16_部署与运行.md',
   '17': 'docs/17_产品_信息架构与界面设计.md',
   '18': 'docs/18_REQ编号注册表.md',
+  '19': 'docs/19_本体_semantica集成方案.md',
   '20': 'docs/20_回归冒烟清单.md',
+  '23': 'docs/23_本体_开源实现方案借鉴研究.md',
+  '24': 'docs/24_本体_本地工程化落地方案调研.md',
 }
 export function docFileOf(ptr: string): string | null {
-  const no = ptr.trim().slice(0, 2)
+  const s = ptr.trim()
+  // 完整路径直传（docs/xx.md 或 research/xx.md）
+  if (s.startsWith('docs/') && s.endsWith('.md')) return s
+  if (s.startsWith('research/') && s.endsWith('.md')) return s
+  // 编号指针（如 "02" / "02 §6.4" / "17 §2.2"）：取前两位编号映射
+  const no = s.slice(0, 2)
   return DOC_FILE_BY_NO[no] ?? null
 }
 
@@ -110,8 +118,9 @@ function SourceMap({ meta }: { meta: Frontmatter }) {
           <span className="ref-sourcemap-label">{r.label}</span>
           <span>
             {r.items.map((it) => {
-              const file = r.label === '文档章节' ? docFileOf(it) : null
-              return file ? (
+              const file = r.label === '文档章节' ? docFileOf(it) : docFileOf(it)
+              const clickable = r.label !== '需求编号' && file
+              return clickable ? (
                 <Tag
                   key={it}
                   style={{ marginInlineEnd: 6, cursor: 'pointer', color: '#4f46e5', borderColor: '#4f46e5' }}
