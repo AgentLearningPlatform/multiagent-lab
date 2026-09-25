@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { Avatar, Alert, Button, Collapse, Dropdown, Input, Popover, Segmented, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, Popover, Segmented, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
@@ -39,11 +39,13 @@ interface ChatItem {
   subDepth?: number // REQ-117：子智能体嵌套深度（缩进渲染）
 }
 
-// REQ-19f 对比窗格单项覆盖（UI 本地形态：''= 继承对话当前配置；提交时映射 ComparePaneConfig）
+// REQ-19f/143 对比窗格单项覆盖（UI 本地形态：''= 继承对话当前配置；提交时映射 ComparePaneConfig）
 interface PaneSel {
+  agent: string // ''= 继承对话所属/项目主智能体；否则窗格级独立装配（REQ-143）
   model: string
   kb: string
   profile: string
+  noHistory: boolean // REQ-143③：不携带对话历史（干净对照）
 }
 
 // 子 Agent 名（§6.5 subagent.enter/exit payload = 子 Agent 名；字段名做兼容取值）
@@ -470,16 +472,16 @@ export default function ChatWindow({
 
   // ---- REQ-19e/19f 对话对比模式：开关 + 2~4 窗格 + 每窗格单项覆盖（''= 继承对话当前配置）----
   const cmpKey = `eino.compare.${conversation?.id}`
-  const [cmp, setCmp] = useState<{ on: boolean; panes: PaneSel[] }>({ on: false, panes: [{ model: '', kb: '', profile: '' }, { model: '', kb: '', profile: '' }] })
+  const [cmp, setCmp] = useState<{ on: boolean; panes: PaneSel[] }>({ on: false, panes: [{ agent: '', model: '', kb: '', profile: '', noHistory: false }, { agent: '', model: '', kb: '', profile: '', noHistory: false }] })
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(cmpKey) || 'null')
       if (saved && typeof saved.on === 'boolean' && Array.isArray(saved.panes) && saved.panes.length >= 2 && saved.panes.length <= 4) {
-        setCmp({ on: saved.on, panes: saved.panes.map((p: any) => ({ model: p?.model ?? '', kb: p?.kb ?? '', profile: p?.profile ?? '' })) })
+        setCmp({ on: saved.on, panes: saved.panes.map((p: any) => ({ agent: p?.agent ?? '', model: p?.model ?? '', kb: p?.kb ?? '', profile: p?.profile ?? '', noHistory: !!p?.noHistory })) })
         return
       }
     } catch { /* 忽略坏数据 */ }
-    setCmp({ on: false, panes: [{ model: '', kb: '', profile: '' }, { model: '', kb: '', profile: '' }] })
+    setCmp({ on: false, panes: [{ agent: '', model: '', kb: '', profile: '', noHistory: false }, { agent: '', model: '', kb: '', profile: '', noHistory: false }] })
   }, [cmpKey])
   const patchCmp = (patch: Partial<{ on: boolean; panes: PaneSel[] }>) => {
     setCmp((prev) => {
@@ -488,7 +490,7 @@ export default function ChatWindow({
       return next
     })
   }
-  const setPaneSel = (i: number, field: keyof PaneSel, value: string) => {
+  const setPaneSel = (i: number, field: keyof PaneSel, value: string | boolean) => {
     setCmp((prev) => {
       if (!prev.on) return prev
       const panes = prev.panes.map((p, j) => (j === i ? { ...p, [field]: value } : p))
@@ -498,7 +500,7 @@ export default function ChatWindow({
     })
   }
   const resizePanes = (panes: PaneSel[], n: number): PaneSel[] => {
-    const blank = { model: '', kb: '', profile: '' }
+    const blank = { agent: '', model: '', kb: '', profile: '', noHistory: false }
     return Array.from({ length: n }, (_, i) => panes[i] ?? { ...blank })
   }
 
@@ -515,6 +517,17 @@ export default function ChatWindow({
   const updatePane = (i: number, updater: (prev: ChatItem[]) => ChatItem[]) => {
     setPaneItems((prev) => prev.map((p, j) => (j === i ? updater(p) : p)))
   }
+
+  // REQ-143：窗格 Agent（所选优先，缺省继承对话所属/项目主智能体）
+  const paneAgentOf = (sel: PaneSel) => (sel.agent ? agents.find((a) => a.id === sel.agent) ?? null : agent)
+  // Agent 候选：项目会话 = 项目成员（标记）+ 全局其余；Agent 会话 = 全部
+  const agentOptions = useMemo(() => {
+    const memberIds = new Set(isProjectScope ? project?.agent_ids ?? [] : [])
+    return agents.map((a) => ({
+      value: a.id,
+      label: isProjectScope ? `${a.name}${memberIds.has(a.id) ? '（项目成员）' : '（全局）'}` : a.name,
+    }))
+  }, [agents, isProjectScope, project])
 
   // 对话级配置落库（M8）：后端 PUT 为 full-replace，必须合并当前会话字段，避免重置 title/kb_id/top_k 等
   const patchConv = async (patch: Partial<Conversation>) => {
@@ -880,9 +893,11 @@ export default function ChatWindow({
   // REQ-19e/19f 对比发送：共用输入框一次提问 → N 路并行；meta 建窗格 run_id 映射，事件按 run_id 路由
   const sendCompare = async (text: string) => {
     const panesPayload: ComparePaneConfig[] = cmp.panes.map((p) => ({
+      ...(p.agent ? { agent_id: p.agent } : {}),
       ...(p.model ? { model_conn_id: p.model } : {}),
       ...(p.kb ? { kb_id: p.kb } : {}),
       ...(p.profile ? { runtime_profile_id: p.profile } : {}),
+      ...(p.noHistory ? { no_history: true } : {}),
     }))
     paneRunMapRef.current = {}
     setPaneItems((prev) =>
@@ -1184,6 +1199,10 @@ export default function ChatWindow({
                 <section key={i} className="cmp-pane" aria-label={`对比窗格 ${i + 1}`}>
                   <header className="cmp-pane-head">
                     <span className="cmp-pane-title">窗格 {i + 1}</span>
+                    <span className="cmp-pane-agent" title={sel.agent ? '窗格级智能体（REQ-143）' : '继承对话智能体'}>
+                      <AgentLogo agent={paneAgentOf(sel)} size={16} />
+                      <Typography.Text strong style={{ fontSize: 12 }}>{paneAgentOf(sel)?.name ?? '—'}</Typography.Text>
+                    </span>
                     <span className="cmp-pane-badges">
                       <span className={`cmp-badge${sel.model ? ' set' : ''}`} title={sel.model ? `模型覆盖：${conns.find((c) => c.id === sel.model)?.name ?? sel.model}` : '模型：继承对话/智能体配置'}>
                         模型{sel.model ? `·${conns.find((c) => c.id === sel.model)?.name ?? ''}` : '·继承'}
@@ -1206,6 +1225,13 @@ export default function ChatWindow({
                   {/* REQ-19f 窗格独立配置区：未设置项继承对话当前配置（Q-6 不追溯，仅影响该窗格后续消息） */}
                   <footer className="cmp-pane-cfg">
                     <Select
+                      size="small" allowClear disabled={running} showSearch
+                      optionFilterProp="label"
+                      placeholder="智能体 · 继承" value={sel.agent || undefined}
+                      onChange={(v) => setPaneSel(i, 'agent', v ?? '')}
+                      options={agentOptions}
+                    />
+                    <Select
                       size="small" allowClear disabled={running}
                       placeholder="模型 · 继承" value={sel.model || undefined}
                       onChange={(v) => setPaneSel(i, 'model', v ?? '')}
@@ -1223,6 +1249,14 @@ export default function ChatWindow({
                       onChange={(v) => setPaneSel(i, 'profile', v ?? '')}
                       options={profiles.filter((p) => p.status === 'running').map((p) => ({ value: p.id, label: p.name }))}
                     />
+                    <Checkbox
+                      checked={sel.noHistory}
+                      disabled={running}
+                      onChange={(e) => setPaneSel(i, 'noHistory', e.target.checked)}
+                      style={{ fontSize: 11 }}
+                    >
+                      不携带历史（干净对照，REQ-143）
+                    </Checkbox>
                   </footer>
                 </section>
               ))}

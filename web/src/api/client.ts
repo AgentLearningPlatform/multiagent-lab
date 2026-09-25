@@ -492,9 +492,11 @@ export const api = {
  */
 /** REQ-19f 对比窗格单项覆盖（空 = 继承对话当前配置；与后端 chat.PaneConfig 对齐） */
 export interface ComparePaneConfig {
+  agent_id?: string // REQ-143：窗格级智能体（空 = 继承对话配置）
   model_conn_id?: string
   kb_id?: string
   runtime_profile_id?: string
+  no_history?: boolean // REQ-143③：不携带对话历史（干净对照）
 }
 
 export function runConversation(

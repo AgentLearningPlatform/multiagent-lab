@@ -28,9 +28,9 @@ import (
 type Service struct {
 	Store     *store.Store
 	Assembler *Assembler
-	KB        *kb.Service           // M6：对话知识库召回（nil 时禁用）
-	Runtime   runtime.Backend       // M10：沙箱执行后端（nil=inprocess；agent.RuntimeBackend=docker 时转发）
-	Inference *inference.Registry   // M13：推理后端注册表（nil=仅 eino-adk；外部 CLI 后端走 runExternal）
+	KB        *kb.Service         // M6：对话知识库召回（nil 时禁用）
+	Runtime   runtime.Backend     // M10：沙箱执行后端（nil=inprocess；agent.RuntimeBackend=docker 时转发）
+	Inference *inference.Registry // M13：推理后端注册表（nil=仅 eino-adk；外部 CLI 后端走 runExternal）
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // conversationID -> cancel
@@ -77,11 +77,14 @@ type RunInput struct {
 	Panes []PaneConfig `json:"panes,omitempty"`
 }
 
-// PaneConfig 对比窗格单项覆盖（REQ-19f）：模型连接 / 知识库 / 本体运行方案；空 = 继承对话当前配置。
+// PaneConfig 对比窗格单项覆盖（REQ-19f/REQ-143）：模型连接 / 知识库 / 本体运行方案 / 智能体；
+// 空 = 继承对话当前配置。NoHistory = 窗格级「不携带历史」开关（干净对照，默认共享完整对话历史）。
 type PaneConfig struct {
+	AgentID          string `json:"agent_id,omitempty"`
 	ModelConnID      string `json:"model_conn_id,omitempty"`
 	KBID             string `json:"kb_id,omitempty"`
 	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
+	NoHistory        bool   `json:"no_history,omitempty"`
 }
 
 // RunResult 运行结果摘要。
@@ -189,6 +192,7 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 	startData := map[string]any{
 		"conversation_id": conv.ID,
 		"agent_name":      rt.AgentName,
+		"agent_id":        agentIDOf(agent),
 		"model":           rt.ModelLabel,
 		"backend":         "inprocess", // M10 接入执行后端后按实际后端标注
 	}
@@ -302,12 +306,8 @@ func (s *Service) RunCompare(ctx context.Context, conv *store.Conversation, agen
 	if agent == nil {
 		return groupErr("agent_missing", "conversation has no agent to run")
 	}
-	if conv.Scope == "agent" && agent.RuntimeBackend == "docker" {
-		return groupErr("compare_backend_unsupported", "对比模式暂不支持 docker 沙箱执行后端，请将该智能体切回 inprocess 后再试")
-	}
-	if s.Inference != nil && s.Inference.IsExternal(agent.InferenceBackend) {
-		return groupErr("compare_backend_unsupported", "对比模式暂不支持外部 CLI 推理后端（"+agent.InferenceBackend+"）")
-	}
+	// REQ-143：后端能力守卫从组级下沉为窗格级——各窗格按所选 Agent 独立判定（继承默认 Agent 的窗格
+	// 若为 docker/外部 CLI 后端同样报错该窗格），其余窗格不受阻
 
 	// 挂起中断组级统一放弃一次（窗格内 conv 副本已清空 InterruptState，不再重复告警/清库）
 	if conv.InterruptState != "" {
@@ -316,16 +316,18 @@ func (s *Service) RunCompare(ctx context.Context, conv *store.Conversation, agen
 	}
 
 	// 1) 共享用户消息（仅一条）
-	if _, err := s.Store.InsertMessage(&store.Message{ConversationID: conv.ID, Role: "user", Content: in.Input}); err != nil {
+	userMsg := &store.Message{ConversationID: conv.ID, Role: "user", Content: in.Input}
+	if _, err := s.Store.InsertMessage(userMsg); err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
 
-	// 2) 组级历史快照（含刚落库的提问）
+	// 2) 组级历史快照（含刚落库的提问）；NoHistory 窗格用「仅本轮提问」快照（REQ-143③ 干净对照）
 	history, err := s.Store.ListMessages(conv.ID)
 	if err != nil {
 		return nil, err
 	}
 	histMsgs := BuildHistoryMessages(history)
+	noHistMsgs := BuildHistoryMessages([]*store.Message{userMsg})
 
 	// 3) 组级取消注册（stop 整组终止）
 	runCtx, cancel := context.WithCancel(ctx)
@@ -339,20 +341,52 @@ func (s *Service) RunCompare(ctx context.Context, conv *store.Conversation, agen
 		cancel()
 	}()
 
-	// 4) 每窗格独立管线（克隆 conv/agent 应用单项覆盖；装配/执行失败各路独立报错不互相阻断）
+	// 4) 每窗格独立管线（REQ-143：按窗格解析 Agent 并独立装配；失败各路独立报错不互相阻断）
 	var wg sync.WaitGroup
 	for i := range in.Panes {
 		pc, runID := in.Panes[i], paneRunIDs[i]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = s.runOnce(runCtx, paneConversation(conv, pc), paneAgent(agent, pc), runID,
+			pa, err := s.resolvePaneAgent(agent, pc)
+			if err != nil {
+				emit(newEvent("run.error", runID, map[string]any{"code": "compare_backend_unsupported", "message": fmt.Sprintf("窗格 %d：%v", i+1, err)}))
+				return
+			}
+			hm := histMsgs
+			if pc.NoHistory {
+				hm = noHistMsgs
+			}
+			_, _ = s.runOnce(runCtx, paneConversation(conv, pc), paneAgent(pa, pc), runID,
 				in.Input, in.DebugLevel, in.DebugPersist, emit,
-				runOpts{HistMsgs: histMsgs, SkipUserMessage: true, AssistantMeta: paneMetaJSON(i, runID, pc)})
+				runOpts{HistMsgs: hm, SkipUserMessage: true, AssistantMeta: paneMetaJSON(i, runID, pa, pc)})
 		}()
 	}
 	wg.Wait()
 	return &RunResult{}, nil
+}
+
+// resolvePaneAgent 解析窗格 Agent（REQ-143②）：窗格指定 agent_id → 加载该 Agent（完整配置独立装配）；
+// 空 → 继承对话当前 Agent。docker 沙箱 / 外部 CLI 推理后端的窗格明确报错（对比窗格的单项覆盖语义
+// 在这两类后端不可保证），错误为窗格级不阻断整组。
+func (s *Service) resolvePaneAgent(def *store.Agent, pc PaneConfig) (*store.Agent, error) {
+	ag := def
+	if pc.AgentID != "" {
+		if pc.AgentID != def.ID {
+			loaded, err := s.Store.GetAgent(pc.AgentID)
+			if err != nil {
+				return nil, fmt.Errorf("所选智能体不存在或已删除（%s）", pc.AgentID)
+			}
+			ag = loaded
+		}
+	}
+	if ag.RuntimeBackend == "docker" {
+		return nil, fmt.Errorf("智能体 %q 为 docker 沙箱执行后端，不支持对比窗格", ag.Name)
+	}
+	if s.Inference != nil && s.Inference.IsExternal(ag.InferenceBackend) {
+		return nil, fmt.Errorf("智能体 %q 为外部 CLI 推理后端（%s），不支持对比窗格", ag.Name, ag.InferenceBackend)
+	}
+	return ag, nil
 }
 
 // paneConversation 应用窗格知识库/本体运行方案覆盖（空 = 继承对话配置，含继承「未开启」状态）。
@@ -386,10 +420,18 @@ func paneAgent(ag *store.Agent, pc PaneConfig) *store.Agent {
 	return &cp
 }
 
-// paneMetaJSON 窗格助手消息 meta（对照记录：pane 序号 + run_id + 单项覆盖）。
-func paneMetaJSON(idx int, runID string, pc PaneConfig) string {
+// paneMetaJSON 窗格助手消息 meta（有效配置快照：pane 序号 + run_id + Agent 引用 + 单项覆盖 + 历史口径）。
+func agentIDOf(ag *store.Agent) string {
+	if ag == nil {
+		return ""
+	}
+	return ag.ID
+}
+
+func paneMetaJSON(idx int, runID string, ag *store.Agent, pc PaneConfig) string {
 	b, err := json.Marshal(map[string]any{
 		"compare": true, "pane": idx, "run_id": runID,
+		"agent_id": agentIDOf(ag), "no_history": pc.NoHistory,
 		"overrides": map[string]any{
 			"model_conn_id": pc.ModelConnID, "kb_id": pc.KBID, "runtime_profile_id": pc.RuntimeProfileID,
 		},
@@ -511,8 +553,8 @@ type runConsumer struct {
 func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, runID string, rt *BuildResult, emit EmitFn, start time.Time) *runConsumer {
 	rc := &runConsumer{
 		s: s, ctx: ctx, conv: conv, runID: runID, rt: rt, emit: emit, start: start,
-		rootAgent: rt.AgentName,
-		toolAgg:   map[int]*pendingToolCall{},
+		rootAgent:  rt.AgentName,
+		toolAgg:    map[int]*pendingToolCall{},
 		toolCallAt: map[string]time.Time{},
 	}
 	rc.subagentLeave = func(name string) {

@@ -1,8 +1,10 @@
 // REQ-117 / M17 执行调试模式：模型调用链路采集器（装饰器）。
 // debugModel 包装 BaseChatModel，在每次 Generate/Stream 时按观测级别发 model.step 事件：
-//   level 0 简洁：不包装，零开销；
-//   level 1 详细：摘要（agent/轮次/耗时/usage/finish/输入规模/绑定工具名）；
-//   level 2 调试：另附完整输入 messages 与工具 schema（含描述）。
+//
+//	level 0 简洁：不包装，零开销；
+//	level 1 详细：摘要（agent/轮次/耗时/usage/finish/输入规模/绑定工具名）；
+//	level 2 调试：另附完整输入 messages 与工具 schema（含描述）。
+//
 // model.step 仅实时透传（不落 run_events 表，控制存储膨胀）；历史回放暂不含该事件（阶段二入库开关）。
 package chat
 
@@ -29,7 +31,7 @@ const (
 type debugRecorder struct {
 	level  DebugLevel
 	runID  string
-	emit   EmitFn // 实时透传
+	emit   EmitFn       // 实时透传
 	record func(*Event) // M17 阶段二：入库开关开启时同步落 run_events（nil = 仅透传）
 	seq    atomic.Int64
 }

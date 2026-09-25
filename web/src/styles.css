@@ -472,3 +472,7 @@ pre.raw-json {
   padding: 6px 8px; border-top: 1px solid var(--c-line); background: rgba(127, 127, 155, 0.04);
 }
 .cmp-pane-cfg .ant-select { width: 100%; }
+
+/* REQ-143 窗格头智能体标识 */
+.cmp-pane-agent { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 150px; }
+.cmp-pane-agent .ant-typography { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

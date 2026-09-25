@@ -3,9 +3,9 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"time"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -20,7 +20,7 @@ func (f *fakeInner) Generate(ctx context.Context, input []*schema.Message, opts 
 func (f *fakeInner) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	f.calls++
 	msg := schema.AssistantMessage("stream-ok", nil)
-	msg.ResponseMeta = &schema.ResponseMeta{ Usage: &schema.TokenUsage{PromptTokens: 210, CompletionTokens: 12, TotalTokens: 222}, FinishReason: "stop" }
+	msg.ResponseMeta = &schema.ResponseMeta{Usage: &schema.TokenUsage{PromptTokens: 210, CompletionTokens: 12, TotalTokens: 222}, FinishReason: "stop"}
 	sr, sw := schema.Pipe[*schema.Message](2)
 	_ = sw.Send(msg, nil)
 	sw.Close()
@@ -30,10 +30,10 @@ func (f *fakeInner) Stream(ctx context.Context, input []*schema.Message, opts ..
 func TestDebugModelEmitsStep(t *testing.T) {
 	var got []map[string]any
 	rec := &debugRecorder{level: DebugFull, runID: "r1", emit: func(ev *Event) {
-			var m map[string]any
-			_ = json.Unmarshal(ev.Data, &m)
-			got = append(got, m)
-		}}
+		var m map[string]any
+		_ = json.Unmarshal(ev.Data, &m)
+		got = append(got, m)
+	}}
 	inner := &fakeInner{}
 	m := wrapDebug(inner, "测试Agent", rec)
 	if m == inner {
