@@ -31,9 +31,24 @@ elif [ -x data/bin/oxigraph_server ]; then
   OXIGRAPH_BIN_CMD="$PWD/data/bin/oxigraph_server"   # 旧版二进制名（≤0.3）
   echo "[run-dev] 使用本地引擎二进制(旧版命名): $OXIGRAPH_BIN_CMD"
 else
-  echo "[run-dev] 警告: 未找到 oxigraph 引擎，运行方案启动(start)不可用。安装（x86_64）:" >&2
-  echo "[run-dev]   mkdir -p tools/bin && curl -fsSL https://github.com/oxigraph/oxigraph/releases/download/v0.5.11/oxigraph_v0.5.11_x86_64_linux_gnu -o tools/bin/oxigraph && chmod +x tools/bin/oxigraph" >&2
-  echo "[run-dev]   （aarch64 换 oxigraph_v0.5.11_aarch64_linux_gnu；详见 docs/13 §2）" >&2
+  # REQ-146：平台自适应安装提示（此前写死 linux 资产，macOS 照抄会得到不可用的 ELF；
+  # 且提示含相对路径，从非仓库根目录执行会散落 web/tools 等目录）
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-x86_64) OXI_ASSET="oxigraph_v0.5.11_x86_64_apple" ;;
+    Darwin-arm64)  OXI_ASSET="oxigraph_v0.5.11_aarch64_apple" ;;
+    Linux-x86_64)  OXI_ASSET="oxigraph_v0.5.11_x86_64_linux_gnu" ;;
+    Linux-aarch64) OXI_ASSET="oxigraph_v0.5.11_aarch64_linux_gnu" ;;
+    *) OXI_ASSET="" ;;
+  esac
+  echo "[run-dev] 警告: 未找到 oxigraph 引擎，运行方案启动(start)不可用。两种安装方式:" >&2
+  echo "[run-dev]   ① 推荐：本体模块「运行」页 → 引擎未安装 Alert → 「一键下载安装」（自动按平台选择官方 release，写入 data/bin 即时生效）" >&2
+  if [ -n "$OXI_ASSET" ]; then
+    echo "[run-dev]   ② 手动（须在仓库根目录执行，当前平台资产 $OXI_ASSET）:" >&2
+    echo "[run-dev]      mkdir -p tools/bin && curl -fsSL https://github.com/oxigraph/oxigraph/releases/download/v0.5.11/$OXI_ASSET -o tools/bin/oxigraph && chmod +x tools/bin/oxigraph" >&2
+  else
+    echo "[run-dev]   ② 手动：当前平台无预编译资产，参考 https://github.com/oxigraph/oxigraph/releases" >&2
+  fi
+  echo "[run-dev]   （详见 docs/13 §2）" >&2
 fi
 if [ -n "${OXIGRAPH_BIN_CMD:-}" ]; then
   export OXIGRAPH_BIN="$OXIGRAPH_BIN_CMD"
