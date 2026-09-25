@@ -9,6 +9,7 @@ import {
   Modal,
   Popconfirm,
   Result,
+  Segmented,
   Space,
   Table,
   Tabs,
@@ -31,6 +32,8 @@ import type { ArtifactMeta, Ontology, RuntimeProfile, Spec, ValidationError } fr
 import { useUI } from '../../store/ui'
 import { ERR_COLUMNS, ReloadHintAlert, sourceTag, stageDoneFlags, ontoStatus, type ValidationState } from './shared'
 import SpecGraph from './components/SpecGraph'
+import Graph3D from './components/Graph3D'
+import WebVowlView from './components/WebVowlView'
 import GraphEditor from './components/GraphEditor'
 import SourceView from './components/SourceView'
 import CsvIngestPane from './components/CsvIngestPane'
@@ -320,7 +323,7 @@ export default function AssetsPage() {
                 {
                   key: 'graph',
                   label: '可视化',
-                  children: <SpecGraph spec={spec} />,
+                  children: <VizTabs spec={spec} ontologyId={active.id} />,
                 },
                 {
                   key: 'graph-edit',
@@ -803,3 +806,30 @@ function RenameModal({ ontology, onClose, onSaved }: { ontology: Ontology; onClo
   )
 }
 
+
+
+/**
+ * M21/VIZ-1（REQ-154）：可视化 Tab 内 2D（React Flow，D-O12 默认）/ 三维（3d-force-graph 沉浸浏览）
+ * 切换。三维懒加载：首次切到「三维浏览」才挂载（WebGL 初始化成本）。两视图数据同源 spec_json，零同步。
+ */
+function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: string }) {
+  const [mode, setMode] = useState<'2d' | '3d' | 'webvowl'>('2d')
+  return (
+    <div>
+      <Segmented
+        size="small"
+        style={{ marginBottom: 8 }}
+        value={mode}
+        onChange={(v) => setMode(v as '2d' | '3d' | 'webvowl')}
+        options={[
+          { value: '2d', label: '2D 结构（React Flow）' },
+          { value: '3d', label: '三维浏览（沉浸只读）' },
+          { value: 'webvowl', label: 'WebVOWL 对照（OWL 视觉语言）' },
+        ]}
+      />
+      {mode === '2d' && <SpecGraph spec={spec} />}
+      {mode === '3d' && <Graph3D spec={spec} />}
+      {mode === 'webvowl' && <WebVowlView ontologyId={ontologyId} />}
+    </div>
+  )
+}

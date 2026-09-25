@@ -10,3 +10,4 @@ tools/bin/
 web/tools/
 runtime-manager/data/
 runtime-manager/run/
+web/public/vendor/
