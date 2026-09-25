@@ -8,7 +8,7 @@ const PAGES: { key: PageKey; label: string; icon: ReactNode }[] = [
   { key: 'ontology', label: '本体', icon: <ApartmentOutlined /> },
   { key: 'knowledge', label: '知识库', icon: <DatabaseOutlined /> },
   { key: 'skills', label: '技能', icon: <ThunderboltOutlined /> },
-  { key: 'reference', label: '参考资料', icon: <BookOutlined /> },
+  { key: 'reference', label: '平台知识', icon: <BookOutlined /> },
 ]
 
 /**

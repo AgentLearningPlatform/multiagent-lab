@@ -60,7 +60,7 @@
 
 ## 六、本体开源实现方案借鉴（技术研究专栏，REQ-155~158 配套）
 
-> 来源：docs/23《本体开源实现方案借鉴研究》（2026-09-25，7 方向全量评估）。原则：选型全都要（多方案并存）/ Go 优先排期 / 结构化分组呈现。「落地栏」= 建议并入的本体模块页面；工作量 S/M/L 为初估。
+> 来源：[docs/23《本体开源实现方案借鉴研究》](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md)（2026-09-25，7 方向全量评估）。原则：选型全都要（多方案并存）/ Go 优先排期 / 结构化分组呈现。「落地栏」= 建议并入的本体模块页面；工作量 S/M/L 为初估。
 
 | 方向 | 项目/方案 | 链接 | 一句话说明 | 落地栏 | 工作量 |
 | --- | --- | --- | --- | --- | --- |
@@ -80,12 +80,12 @@
 | AI-native | **OntoChat** | <https://github.com/King-s-Knowledge-Graph-Lab/OntoChat> | 多智能体对话式本体构建工作流 | 构建·ontochat 路径 | M |
 | AI-native | **OntoGenix** | <https://mikelval82.github.io/Portfolio/blog-ontogenix.html> | 本体自修复循环（validate→repair 迭代） | 构建·ontochat 路径 | S |
 | AI-native | **LLM4ACOE** | <https://resolve.cambridge.org/core/journals/knowledge-engineering-review/article/automating-agentic-collaborative-ontology-engineering-with-roleplaying-simulation-of-llmpowered-agents-and-rag-technology/C4DFC9BD18020226B4CC763BE7056659> | 角色扮演多智能体协作本体工程框架 | 构建·ontochat 路径 | M |
-| 存储 | **Data Pipeline 增强** | 见 docs/23 §7.1 | KG 构建管线增强（D-O14 迭代：混合策略/质量抽检） | 知识库·第六路径 | M |
-| 存储 | **语义嵌入双空间搜索** | 见 docs/23 §7.2 | 术语向量与图结构双空间检索 | 资产·检索 | M |
+| 存储 | **Data Pipeline 增强** | [见 docs/23 §7.1](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md) | KG 构建管线增强（D-O14 迭代：混合策略/质量抽检） | 知识库·第六路径 | M |
+| 存储 | **语义嵌入双空间搜索** | [见 docs/23 §7.2](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md) | 术语向量与图结构双空间检索 | 资产·检索 | M |
 | 协作 | **WebProtégé 协作** | <https://github.com/protegeproject/webprotege> | 自托管协作建模（远期） | 构建·协作 | L |
 | 协作 | **语义 Diff** | <https://www.w3.org/2001/sw/wiki/How_to_diff_RDF> | RDF diff 方法集（结构化报告先行） | 资产·版本对比 | M |
 
-> 完整评估（每方案三段式：是什么/亮点/借鉴点）与三阶段路线见 `docs/23_本体_开源实现方案借鉴研究.md` §9；吸收池方案推进时逐一立项。
+> 完整评估（每方案三段式：是什么/亮点/借鉴点）与三阶段路线见 [docs/23_本体_开源实现方案借鉴研究.md §9](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md)；吸收池方案推进时逐一立项。
 
 ### 6.A 子课题：智能体运行时动态薄本体（2026-09-25 登记）
 
