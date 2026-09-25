@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Card, Menu, Space, Splitter, Tag, Typography } from 'antd'
 import {
   ApartmentOutlined,
+  BookOutlined,
   CompassOutlined,
   DatabaseOutlined,
   ProjectOutlined,
@@ -22,6 +23,7 @@ import ONTOLOGY_MD from '../../../seeds/learning/reference/ontology.md?raw'
 import KNOWLEDGE_MD from '../../../seeds/learning/reference/knowledge.md?raw'
 import SKILLS_MD from '../../../seeds/learning/reference/skills.md?raw'
 import SETTINGS_MD from '../../../seeds/learning/reference/settings.md?raw'
+import DSH_MD from '../../../seeds/learning/reference/deepseek-harness.md?raw'
 
 /**
  * 参考资料中心（REQ-116）：
@@ -37,6 +39,7 @@ const SECTIONS: { key: string; label: string; icon: ReactNode; md: string }[] = 
   { key: 'knowledge', label: '知识库', icon: <DatabaseOutlined />, md: KNOWLEDGE_MD },
   { key: 'skills', label: '技能', icon: <ThunderboltOutlined />, md: SKILLS_MD },
   { key: 'settings', label: '设置', icon: <SettingOutlined />, md: SETTINGS_MD },
+  { key: 'deepseek-harness', label: 'DeepSeek Harness', icon: <BookOutlined />, md: DSH_MD },
 ]
 
 interface Frontmatter {
