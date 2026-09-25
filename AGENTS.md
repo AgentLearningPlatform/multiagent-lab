@@ -46,6 +46,8 @@
 
 ## 当前状态（2026-09-25，由协作 Agent 维护）
 
+- **M19 阶段一 REQ-143 跨智能体窗格已交付（df25e82，2026-09-25，01 v0.41/02 v0.58/20 v1.9）**：窗格级 Agent 选择（项目成员/全局）与独立装配（resolvePaneAgent，窗格级守卫）、窗格头 Agent 标识（logo+名称）、不携带历史开关（干净对照差分实测）、配置快照 meta（agent_id+no_history）；REQ-144/REQ-150 随 M19 后续合并实施。
+
 - **M18 WIP 已提交待续（b5de3ac，REQ-131/132/134）**：/mcp 端点链（initialize→tools/list 通、Bearer 401/200）+ AgentSidePanel 四分类页签 + Modal 分级已交付；~~阻塞：工具执行环回归~~（**2026-09-25 核验：HEAD 复测未复现**——tool.call→tool.result→二轮续跑→completed，疑为其提交前中途 WIP 态，见 02 v0.55，阻塞解除）；REQ-134 pro-components 未引入；/mcp tools/call 成功路径待回归。
 - **本会话已转为文档线**（方案/需求文档修改），不再承担开发任务。
 - **REQ-146/147 本体运行平面增强已交付（824b063，2026-09-25，03 v0.26/04 v0.22/14 v0.17/20 v1.6 S4.5/S4.6）**：①引擎自检与一键安装——GET /api/engines（oxigraph 候选序 OXIGRAPH_BIN→PATH→data/bin→tools/bin；fuseki 仅手动指引）+ POST install 异步任务（官方 release pin v0.5.11 按 GOOS/GOARCH 映射；downloadTo 原子落盘；oxigraph Start 动态解析装后免重启 runtimed）；运行页引擎缺失显红 Tag + 预检 Alert + 一键安装按钮 + 方案卡缺失标记；②方案停止态编辑——stopped/created/error 方案卡「编辑」改名称与本体集合（既有 PUT 前端入口补齐），running 置灰，引擎/端口只读。环境注：GLM 默认连接 429 余额不足首轮即 run.error（勿误判回归，测试绑可用连接）；沙箱 CDN 受限致 oxigraph 真实下载未在本机走通（机制经 httptest 单测 + 桩二进制动态解析验证），真机可用。
