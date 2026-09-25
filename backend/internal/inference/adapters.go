@@ -259,6 +259,18 @@ func newCLIAdapters() []Backend {
 			},
 			parseLine: parsePlainLine(nil),
 		},
+		// dsh --profile headless <task>：answer one task, print the result, and exit（官方示例形态，PoC 已验证）。
+		// 凭据由 dsh 侧自管（dsh web Models 页或 DEEPSEEK_API_KEY 环境变量一次性配置到 DSH_HOME）；
+		// 默认 headless profile 走 deepseek-official 路由，缺凭据时报结构化 MISSING_CREDENTIAL（run.error 透出）。
+		&cliAdapter{
+			name:        "deepseek-harness",
+			bin:         []string{"dsh"},
+			versionArgs: []string{"--version"},
+			buildArgs: func(req *RunRequest) []string {
+				return []string{"--profile", "headless", req.Prompt}
+			},
+			parseLine: parsePlainLine(nil),
+		},
 		&cliAdapter{
 			// aider --message <prompt> --no-auto-commits --no-git --yes-always
 			name:        "aider",
