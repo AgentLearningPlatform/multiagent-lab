@@ -46,6 +46,7 @@
 
 ## 当前状态（2026-09-25，由协作 Agent 维护）
 
+- **M10 阶段 10a 最小闭环实测已交付（96210e6，2026-09-25，主人装 Docker 后领取）**：agentd 镜像构建 + SANDBOX_IMAGE 全链实测跑通（manifest/SSE 透传/落库/还原/容器复用），实测修复五问题（端口错配/docker CLI 回退/tool_approval NOT NULL/runDocker 信封解包/agentd 错误静默）+ debug 沙箱透传断链补齐；02 v0.60/20 v1.11 S2.8。10b（生命周期与边界治理）待领取。
 - **M19 对话对比扩展全项完成：阶段一 REQ-143 跨智能体窗格（df25e82，01 v0.41/02 v0.58/20 v1.9）+ 阶段二 REQ-144 配置剖面与复用（f1fdc40，01 v0.42/02 v0.59/20 v1.10，2026-09-25）**：窗格级 Agent/模型/库/方案/温度/提示词改写/技能开关覆盖、不携带历史开关、剖面对话级命名保存与应用（合并序明示）、复制上一窗格、采纳转正（agent 直聊）；窗格级守卫（docker/外部 CLI 独立报错）；顺修 research 审查 B1/B3 两 P0。REQ-150（选项承载迁窗格头）待后续。
 
 - **M18 WIP 已提交待续（b5de3ac，REQ-131/132/134）**：/mcp 端点链（initialize→tools/list 通、Bearer 401/200）+ AgentSidePanel 四分类页签 + Modal 分级已交付；~~阻塞：工具执行环回归~~（**2026-09-25 核验：HEAD 复测未复现**——tool.call→tool.result→二轮续跑→completed，疑为其提交前中途 WIP 态，见 02 v0.55，阻塞解除）；REQ-134 pro-components 未引入；/mcp tools/call 成功路径待回归。
