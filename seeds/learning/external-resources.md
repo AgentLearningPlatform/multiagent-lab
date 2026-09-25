@@ -90,7 +90,7 @@
 ### 6.A 子课题：智能体运行时动态薄本体（2026-09-25 登记）
 
 > **源文档**（主人引入，仓库副本 `research/01/02-*.md`）：《01-研究报告-智能体运行时动态本体的可行性与方案》——以 MLSys 2026《Ontology-Guided Long-Term Agent Memory for Conversational RAG》为核心的可行性研究：运行时从对话数据自动归纳轻量本体图，破解"隐式召回失败"（Recall@10 0.58→0.70，成本较长上下文降 81%），四层六模块架构 + 轻量/标准/重型三档路线；《02-资料合集-动态本体与智能体记忆》——30+ 篇文献六板块合集（容量记忆线 MemGPT/Mem0/A-MEM、结构检索线 GraphRAG/HippoRAG/LightRAG、动态 schema 归纳线 AutoSchemaKG/EDC/Agentic-KGR、时序图谱线 Zep·Graphiti/Tag2Graph，附 LoCoMo/LongMemEval/BEAM 评测基准与术语表）。
-> **落地方案**：`research/智能体运行时动态薄本体可行方案_20260925.md`——取报告**轻量档**（固定种子 schema + 实例填充）映射 D-O15 后自研栈（Oxigraph named graph 会话图 / LLM 抽 KG lightweight / PROV-O / REQ-151 facade），旁路低侵入：对话主链路 0 改动、开关默认关、会话图可整体摘除；展示入口走资产栏独立页签（D-O19 边界外第三来源「对话」）；立项建议 REQ-169+（待拍板）。
+> **落地方案**：[动态薄本体_可行方案](../../platform-knowledge/智能体/动态薄本体_可行方案.md)——取报告**轻量档**（固定种子 schema + 实例填充）映射 D-O15 后自研栈（Oxigraph named graph 会话图 / LLM 抽 KG lightweight / PROV-O / REQ-151 facade），旁路低侵入：对话主链路 0 改动、开关默认关、会话图可整体摘除；展示入口走资产栏独立页签（D-O19 边界外第三来源「对话」）；**REQ-170 已立项**（2026-09-26，方案 only 待排期；子课题资料与方案均入平台知识智能体模块）。
 
 ---
 
