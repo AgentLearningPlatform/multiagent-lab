@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/companion"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontobuild"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
@@ -32,6 +33,7 @@ type Server struct {
 	DocsRoot     string             // REQ-140：内部方案文档根目录（只读查看）
 	ResearchRoot string             // REQ-150：research/ 立项依据层根目录（只读查看，2026-09-25 扩展）
 	KnowledgeRoot string            // REQ-161：platform-knowledge/ 平台知识根目录（只读查看，2026-09-25 扩展）
+	Companion  *companion.Service   // REQ-170/M28：伴生本体旁路管线（Run/Resume 收尾触发，低侵入）
 	Mux       *http.ServeMux
 	mcpMu     sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
 	mcpHTTP   http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
@@ -39,7 +41,7 @@ type Server struct {
 
 // NewServer 构造并注册全部路由。
 func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service, dbPath, docsRoot, researchRoot, knowledgeRoot string) *Server {
-	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, KnowledgeRoot: knowledgeRoot, Mux: http.NewServeMux()}
+	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, KnowledgeRoot: knowledgeRoot, Companion: companion.NewService(st, box, nil), Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -83,6 +85,13 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/agents/{id}", s.updateAgent)
 	m.HandleFunc("DELETE /api/agents/{id}", s.deleteAgent)
 
+	// REQ-170/M28：伴生本体（候选确认流 API 先行；开关经 Agent 配置 companion_ontology 字段）
+	m.HandleFunc("GET /api/companion/candidates", s.listCompanionCandidates)
+	m.HandleFunc("POST /api/companion/candidates/{id}/confirm", s.confirmCompanionCandidate)
+	m.HandleFunc("POST /api/companion/candidates/{id}/reject", s.rejectCompanionCandidate)
+	m.HandleFunc("GET /api/companion/status", s.companionStatus)
+	m.HandleFunc("POST /api/companion/conversations/{id}/reset", s.resetCompanionConversation)
+
 	// Projects
 	m.HandleFunc("GET /api/projects", s.listProjects)
 	m.HandleFunc("POST /api/projects", s.createProject)
@@ -102,7 +111,10 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/conversations/{id}/runs", s.runConversation)
 	m.HandleFunc("POST /api/conversations/{id}/stop", s.stopConversation)
 	m.HandleFunc("GET /api/conversations/{id}/export", s.exportConversation)       // REQ-113①：对话导出 Markdown
-	m.HandleFunc("GET /api/docs/read", s.docRead)                                  // REQ-140：内部方案文档只读查看
+	m.HandleFunc("GET /api/docs/read", s.docRead)
+	m.HandleFunc("GET /api/assistant/config", s.assistantConfigGet) // M27/REQ-166
+	m.HandleFunc("PUT /api/assistant/config", s.assistantConfigPut)
+	m.HandleFunc("POST /api/assistant/optimize", s.assistantOptimize) // M27/REQ-167                                  // REQ-140：内部方案文档只读查看
 	m.HandleFunc("POST /api/conversations/{id}/auto-name", s.autoNameConversation) // REQ-136：对话自动命名
 	// M11 收尾：中断恢复（ask_human 答复定向续跑）
 	m.HandleFunc("POST /api/conversations/{id}/resume", s.resumeConversation)
