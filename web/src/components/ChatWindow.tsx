@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
-import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
+import type { ReactNode } from 'react'
+import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Splitter, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
@@ -163,6 +163,47 @@ function eventSource(evType: string | undefined, evData: any): EventSource {
 /** REQ-149① 展示级别门控：简洁档（level 0）隐藏调试细节事件（model.step 等），详细/调试档展开 */
 export function levelGated(type: string, level: number): boolean {
   return level < 1 && (type === 'model.step' || type === 'debug.cli')
+}
+
+/** REQ-150 对比窗格覆盖徽标：覆盖态品牌填充显示值名，继承态浅色；点击经 Popover 选择（继承值显性化） */
+function paneBadgeSelect(opts: {
+  label: string
+  value: string
+  valueLabel: string
+  inheritText: string
+  options: { value: string; label: string }[]
+  onChange: (v: string) => void
+}) {
+  const { label, value, valueLabel, inheritText, options, onChange } = opts
+  return (
+    <Popover
+      trigger="click"
+      placement="bottomLeft"
+      arrow={false}
+      content={
+        <div style={{ width: 230 }}>
+          <Select
+            size="small"
+            style={{ width: '100%' }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder={`选择${label}（清空 = 继承）`}
+            value={value || undefined}
+            onChange={(v) => onChange(v ?? '')}
+            options={options}
+          />
+          <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
+            继承：{inheritText}
+          </Typography.Text>
+        </div>
+      }
+    >
+      <button type="button" className={`cmp-badge clickable${value ? ' set' : ''}`} title={`${label}：${value ? valueLabel : `继承（${inheritText}）`}`}>
+        {label}{value ? `·${valueLabel}` : '·继承'}
+      </button>
+    </Popover>
+  )
 }
 
 /** 会话挂起中断卡数据（run.interrupted payload → 组件状态；实时与对比窗格共用） */
@@ -1275,9 +1316,25 @@ export default function ChatWindow({
                 }]}
               />
             )}
-            <div className="cmp-grid" style={{ '--n': cmp.panes.length } as CSSProperties}>
-              {cmp.panes.map((sel, i) => (
-                <section key={i} className="cmp-pane" aria-label={`对比窗格 ${i + 1}`}>
+            <Splitter className="cmp-splitter">
+              {cmp.panes.map((sel, i) => {
+                const inh = paneAgentOf(sel)
+                // REQ-150：继承/覆盖显性化——徽标 Tooltip 显示继承的实际来源值
+                const paneInherit = {
+                  model: inh?.model_conn_id
+                    ? (conns.find((c) => c.id === inh.model_conn_id) ? connDisplayName(conns.find((c) => c.id === inh.model_conn_id)!) : '智能体默认连接')
+                    : '全局默认连接',
+                  kb: conversation.kb_id
+                    ? (kbs.find((k) => k.id === conversation.kb_id)?.name ?? '已绑定')
+                    : '未绑定（不注入）',
+                  profile: conversation.runtime_profile_id
+                    ? (profiles.find((pp) => pp.id === conversation.runtime_profile_id)?.name ?? '已绑定')
+                    : '未绑定',
+                  skills: (conversation.enable_skills ?? true) ? '开启' : '关闭',
+                }
+                return (
+                <Splitter.Panel key={i} min="15%">
+                <section className="cmp-pane" aria-label={`对比窗格 ${i + 1}`}>
                   <header className="cmp-pane-head">
                     <span className="cmp-pane-title">窗格 {i + 1}</span>
                     <span className="cmp-pane-agent" title={sel.agent ? '窗格级智能体（REQ-143）' : '继承对话智能体'}>
@@ -1296,15 +1353,34 @@ export default function ChatWindow({
                       </Tooltip>
                     )}
                     <span className="cmp-pane-badges">
-                      <span className={`cmp-badge${sel.model ? ' set' : ''}`} title={sel.model ? `模型覆盖：${conns.find((c) => c.id === sel.model)?.name ?? sel.model}` : '模型：继承对话/智能体配置'}>
-                        模型{sel.model ? `·${conns.find((c) => c.id === sel.model)?.name ?? ''}` : '·继承'}
-                      </span>
-                      <span className={`cmp-badge${sel.kb ? ' set' : ''}`} title={sel.kb ? `知识库覆盖：${kbs.find((k) => k.id === sel.kb)?.name ?? sel.kb}` : '知识库：继承对话配置'}>
-                        库{sel.kb ? `·${kbs.find((k) => k.id === sel.kb)?.name ?? ''}` : '·继承'}
-                      </span>
-                      <span className={`cmp-badge${sel.profile ? ' set' : ''}`} title={sel.profile ? `运行方案覆盖：${profiles.find((p) => p.id === sel.profile)?.name ?? sel.profile}` : '本体运行方案：继承对话配置'}>
-                        方案{sel.profile ? `·${profiles.find((p) => p.id === sel.profile)?.name ?? ''}` : '·继承'}
-                      </span>
+                      {paneBadgeSelect({
+                        label: '模型', value: sel.model,
+                        valueLabel: conns.find((c) => c.id === sel.model) ? connDisplayName(conns.find((c) => c.id === sel.model)!) : (sel.model || ''),
+                        inheritText: paneInherit.model,
+                        options: conns.map((c) => ({ value: c.id, label: connDisplayName(c) })),
+                        onChange: (v) => setPaneSel(i, 'model', v),
+                      })}
+                      {paneBadgeSelect({
+                        label: '库', value: sel.kb,
+                        valueLabel: kbs.find((k) => k.id === sel.kb)?.name ?? sel.kb,
+                        inheritText: paneInherit.kb,
+                        options: kbs.map((k) => ({ value: k.id, label: k.name })),
+                        onChange: (v) => setPaneSel(i, 'kb', v),
+                      })}
+                      {paneBadgeSelect({
+                        label: '方案', value: sel.profile,
+                        valueLabel: profiles.find((p) => p.id === sel.profile)?.name ?? sel.profile,
+                        inheritText: paneInherit.profile,
+                        options: profiles.filter((p) => p.status === 'running').map((p) => ({ value: p.id, label: p.name })),
+                        onChange: (v) => setPaneSel(i, 'profile', v),
+                      })}
+                      {paneBadgeSelect({
+                        label: '技能', value: sel.skills,
+                        valueLabel: sel.skills === 'on' ? '开' : '关',
+                        inheritText: paneInherit.skills,
+                        options: [{ value: 'on', label: '开启' }, { value: 'off', label: '关闭' }],
+                        onChange: (v) => setPaneSel(i, 'skills', v),
+                      })}
                     </span>
                   </header>
                   <div className="cmp-pane-stream">
@@ -1315,6 +1391,7 @@ export default function ChatWindow({
                     )}
                   </div>
                   {/* REQ-19f 窗格独立配置区：未设置项继承对话当前配置（Q-6 不追溯，仅影响该窗格后续消息） */}
+                  {/* REQ-150：模型/库/方案/技能 承载已迁窗格头徽标（继承/覆盖显性化）；此处留 Agent 选择与历史口径 */}
                   <footer className="cmp-pane-cfg">
                     <Select
                       size="small" allowClear disabled={running} showSearch
@@ -1322,24 +1399,6 @@ export default function ChatWindow({
                       placeholder="智能体 · 继承" value={sel.agent || undefined}
                       onChange={(v) => setPaneSel(i, 'agent', v ?? '')}
                       options={agentOptions}
-                    />
-                    <Select
-                      size="small" allowClear disabled={running}
-                      placeholder="模型 · 继承" value={sel.model || undefined}
-                      onChange={(v) => setPaneSel(i, 'model', v ?? '')}
-                      options={conns.map((c) => ({ value: c.id, label: connDisplayName(c) }))}
-                    />
-                    <Select
-                      size="small" allowClear disabled={running}
-                      placeholder="知识库 · 继承" value={sel.kb || undefined}
-                      onChange={(v) => setPaneSel(i, 'kb', v ?? '')}
-                      options={kbs.map((k) => ({ value: k.id, label: k.name }))}
-                    />
-                    <Select
-                      size="small" allowClear disabled={running}
-                      placeholder="本体方案 · 继承" value={sel.profile || undefined}
-                      onChange={(v) => setPaneSel(i, 'profile', v ?? '')}
-                      options={profiles.filter((p) => p.status === 'running').map((p) => ({ value: p.id, label: p.name }))}
                     />
                     <Checkbox
                       checked={sel.noHistory}
@@ -1365,12 +1424,9 @@ export default function ChatWindow({
                                 placeholder="温度 · 继承" value={sel.temperature ?? undefined}
                                 onChange={(v) => setPaneSel(i, 'temperature', typeof v === 'number' ? v : null)}
                               />
-                              <Select
-                                size="small" style={{ flex: 1 }} disabled={running}
-                                placeholder="技能 · 继承" value={sel.skills || undefined}
-                                onChange={(v) => setPaneSel(i, 'skills', v ?? '')}
-                                options={[{ value: 'on', label: '技能开' }, { value: 'off', label: '技能关' }]}
-                              />
+                              <Typography.Text type="secondary" style={{ fontSize: 11, alignSelf: 'center' }}>
+                                技能承载已迁窗格头徽标（REQ-150）
+                              </Typography.Text>
                             </div>
                             <Input.TextArea
                               size="small" rows={2} disabled={running} maxLength={2000}
@@ -1398,8 +1454,10 @@ export default function ChatWindow({
                     />
                   </footer>
                 </section>
-              ))}
-            </div>
+                </Splitter.Panel>
+                );
+              })}
+            </Splitter>
           </>
         ) : items.length === 0 ? (
           <div className="msg-empty">
@@ -1419,7 +1477,7 @@ export default function ChatWindow({
         )}
         {running && (
           <div className="chat-stop">
-            <button type="button" className="chat-stop-btn" onClick={stop} title="停止本次生成">
+            <button type="button" className="chat-stop-btn" onClick={stop} title={cmp.on ? `停止整组（${cmp.panes.length} 窗格一并终止，已生成内容保留）` : '停止本次生成'}>
               <span className="chat-stop-glyph" aria-hidden="true" />
               <span>停止生成</span>
             </button>
@@ -1495,6 +1553,11 @@ export default function ChatWindow({
             disabled={!canSend}
             footer={
               <div className="chat-chips">
+                {cmp.on ? (
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    对比模式 · {cmp.panes.length} 窗格独立配置（模型/知识库/本体/技能承载于各窗格头，本区不参与配置）
+                  </Typography.Text>
+                ) : (<>
                 {kbDisabled ? (
                   <Tooltip title={kbHint}><span className="chip-slot">{kbChip}</span></Tooltip>
                 ) : (
@@ -1535,6 +1598,7 @@ export default function ChatWindow({
                 )}
                 {skillsDisabled ? <Tooltip title={skillsHint}><span className="chip-slot">{skillsChip}</span></Tooltip> : skillsChip}
                 <span className="chat-chips-hint">Enter 发送 · Shift+Enter 换行</span>
+                </>)}
               </div>
             }
           />

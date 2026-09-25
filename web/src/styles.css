@@ -476,3 +476,11 @@ pre.raw-json {
 /* REQ-143 窗格头智能体标识 */
 .cmp-pane-agent { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 150px; }
 .cmp-pane-agent .ant-typography { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* REQ-150 对比窗格：徽标可点击 + Splitter 宽度可调 */
+.cmp-badge.clickable { cursor: pointer; border: none; }
+.cmp-badge.clickable:hover { filter: brightness(0.96); }
+.cmp-badge.set.clickable { cursor: pointer; }
+.cmp-splitter { flex: 1; min-height: 0; }
+.cmp-splitter .ant-splitter-panel { min-width: 0; overflow: hidden; }
+.cmp-splitter .cmp-pane { height: 100%; }
