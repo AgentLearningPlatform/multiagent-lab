@@ -1,6 +1,7 @@
 // Package facade 统一 MCP facade（方案 04 §4.4）：
-// tools/list 固定返回 4 个 onto_* 工具（契约不变）；tools/call 按 ontology_id 路由到
-// 所属 running 方案，将工具语义翻译为 SPARQL 在 Oxigraph 执行。Agent 侧无感运行时差异。
+// tools/list 固定返回 5 个 onto_* 工具（Q-14 契约 4→5，REQ-151 增 sparql_query）；
+// tools/call 按 ontology_id 路由到所属 running 方案，将工具语义翻译为 SPARQL 在
+// Oxigraph 执行。Agent 侧无感运行时差异。
 package facade
 
 import (
@@ -38,10 +39,13 @@ func (f *Facade) Mount() *server.StreamableHTTPServer {
 	return server.NewStreamableHTTPServer(s)
 }
 
+// requiredString 必填字符串入参声明（各工具共用）。
+func requiredString(name, desc string) mcp.ToolOption {
+	return mcp.WithString(name, mcp.Required(), mcp.Description(desc))
+}
+
 func (f *Facade) addTools(s *server.MCPServer) {
-	oid := func(name, desc string) mcp.ToolOption {
-		return mcp.WithString(name, mcp.Required(), mcp.Description(desc))
-	}
+	oid := requiredString
 	s.AddTool(mcp.NewTool("get_concept",
 		mcp.WithDescription("查询本体中某个概念（类）的定义：标签、描述、父概念。"),
 		oid("ontology_id", "本体仓库 id"),
@@ -65,6 +69,8 @@ func (f *Facade) addTools(s *server.MCPServer) {
 		oid("ontology_id", "本体仓库 id"),
 		oid("name", "实例名"),
 	), f.handleNeighbors())
+
+	f.addSparqlQueryTool(s)
 }
 
 // ---- SPARQL 执行与 URI 约定 ----
@@ -161,7 +167,7 @@ func jsonResult(v any) *mcp.CallToolResult {
 	return mcp.NewToolResultText(string(b))
 }
 
-// ---- 4 工具 handler（oxigraph 翻译：get_concept/get_instance→SELECT、list_instances→rdf:type、neighbors→属性路径）----
+// ---- 4 固定工具 handler（第 5 工具 sparql_query 见 sparql.go；oxigraph 翻译：get_concept/get_instance→SELECT、list_instances→rdf:type、neighbors→属性路径）----
 
 func (f *Facade) handleConcept() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

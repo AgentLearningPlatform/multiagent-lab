@@ -730,6 +730,7 @@ const ONTO_TOOLS = [
   { name: 'onto_get_instance', desc: '按名称取实例（concept / attributes / relations）', args: 'ontology_id, instance' },
   { name: 'onto_list_instances', desc: '按概念列实例', args: 'ontology_id, concept（可选）' },
   { name: 'onto_neighbors', desc: '取概念 / 实例的邻接关系', args: 'ontology_id, node' },
+  { name: 'onto_sparql_query', desc: '自定义只读 SPARQL SELECT（开放问题查询面；禁变更操作，行数上限 200）', args: 'ontology_id, query, limit?（可选）' },
 ]
 const TOOL_COLUMNS: ColumnsType<(typeof ONTO_TOOLS)[number]> = [
   { title: '工具', dataIndex: 'name', width: 220, render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
@@ -906,7 +907,7 @@ function FacadePane({ profile }: { profile: RuntimeProfile }) {
         </div>
       </Card>
       <div className="onto-sec">
-        <span className="onto-sec-title">固定签名工具（onto_*，共 4 个）</span>
+        <span className="onto-sec-title">固定签名工具（onto_*，共 5 个）</span>
       </div>
       <Table rowKey="name" columns={TOOL_COLUMNS} dataSource={ONTO_TOOLS} pagination={false} size="small" />
     </>

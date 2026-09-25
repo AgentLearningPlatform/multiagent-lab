@@ -95,15 +95,16 @@
     {
       "id": "task_s6_facade",
       "stage": "s6",
-      "title": "认识 facade：4 个固定工具",
-      "goal": "理解统一 MCP 契约对所有运行时类型一致",
+      "title": "认识 facade：4 个固定工具 + 1 个受控查询工具",
+      "goal": "理解统一 MCP 契约对所有运行时类型一致；体会受控工具面 vs 任意查询面的取舍",
       "prereq": ["task_s5_run_profile"],
       "steps": [
         "打开方案详情「facade 与工具」",
-        "阅读 4 个 onto_* 工具签名",
+        "阅读 5 个 onto_* 工具签名（4 个固定语义 + sparql_query 只读 SELECT 白名单）",
+        "用 sparql_query 跑一个聚合查询（如按概念统计实例数）",
         "展开「翻译透视」看一次调用的 SPARQL 原文"
       ],
-      "acceptance_question": "onto_neighbors 返回什么？翻译透视图里 SPARQL 是谁生成的？",
+      "acceptance_question": "onto_neighbors 返回什么？sparql_query 为什么禁止 UPDATE/DELETE？翻译透视图里 SPARQL 是谁生成的？",
       "tools": ["builtin_facade"],
       "difficulty": 2
     },
