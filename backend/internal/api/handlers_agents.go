@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
+
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
@@ -209,4 +211,71 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": id})
+}
+
+// ---- M10/10b：沙箱生命周期（状态/启动/停止，per Agent） ----
+
+// sandboxAvailable 沙箱后端是否已启用（SANDBOX_IMAGE 配置即启用）。
+func (s *Server) sandboxAvailable() bool {
+	return s.Chat != nil && s.Chat.Runtime != nil
+}
+
+// sandboxStatus GET /api/agents/{id}/sandbox：容器状态 + 资源限制 + 端点。
+func (s *Server) sandboxStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.sandboxAvailable() {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		return
+	}
+	id := r.PathValue("id")
+	agent, err := s.Store.GetAgent(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	st, err := s.Chat.Runtime.Status(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": true, "state": st.State, "detail": st.Detail,
+		"memory": agent.SandboxMemory, "cpus": agent.SandboxCPUs,
+	})
+}
+
+// sandboxStart POST /api/agents/{id}/sandbox/start：拉起（或复用）agentd 容器。
+func (s *Server) sandboxStart(w http.ResponseWriter, r *http.Request) {
+	if !s.sandboxAvailable() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "沙箱后端未启用（需配置 SANDBOX_IMAGE）"})
+		return
+	}
+	id := r.PathValue("id")
+	agent, err := s.Store.GetAgent(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if agent.RuntimeBackend != "docker" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该智能体运行后端不是 docker"})
+		return
+	}
+	ep, err := s.Chat.Runtime.Start(r.Context(), runtime.StartSpec{AgentID: id, Memory: agent.SandboxMemory, CPUs: agent.SandboxCPUs})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"endpoint": ep.URL})
+}
+
+// sandboxStop POST /api/agents/{id}/sandbox/stop：停止并移除容器。
+func (s *Server) sandboxStop(w http.ResponseWriter, r *http.Request) {
+	if !s.sandboxAvailable() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "沙箱后端未启用（需配置 SANDBOX_IMAGE）"})
+		return
+	}
+	if err := s.Chat.Runtime.Stop(r.Context(), r.PathValue("id")); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"stopped": r.PathValue("id")})
 }

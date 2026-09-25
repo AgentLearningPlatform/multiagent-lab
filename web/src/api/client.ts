@@ -387,6 +387,13 @@ export const api = {
 
   /** REQ-146 引擎自检：oxigraph/fuseki 全量呈现（未注册也返回 + 指引） */
   listEngines: () => req<{ engines: EngineStatus[] }>('/api/engines'),
+  // ---- M10/10b 沙箱生命周期（per Agent） ----
+  sandboxStatus: (id: string) => req<SandboxStatus>(`/api/agents/${encodeURIComponent(id)}/sandbox`),
+  sandboxStart: (id: string) =>
+    req<{ endpoint: string }>(`/api/agents/${encodeURIComponent(id)}/sandbox/start`, { method: 'POST' }),
+  sandboxStop: (id: string) =>
+    req<{ stopped: string }>(`/api/agents/${encodeURIComponent(id)}/sandbox/stop`, { method: 'POST' }),
+
   /** REQ-146 一键安装（仅 oxigraph；202 异步任务，结果轮询 listEngines） */
   installEngine: (name: string) =>
     req<{ started: boolean; engine: string }>(`/api/engines/${encodeURIComponent(name)}/install`, { method: 'POST' }),
@@ -579,6 +586,15 @@ function streamRun(
     }
   })()
   return { abort: () => ctrl.abort(), done }
+}
+
+/** M10/10b 沙箱状态（per Agent；enabled=false = 平台未配置 SANDBOX_IMAGE） */
+export interface SandboxStatus {
+  enabled: boolean
+  state?: 'running' | 'stopped' | 'error'
+  detail?: string
+  memory?: string
+  cpus?: number
 }
 
 /** REQ-148 供应商分组元数据（分组 ID + 展示别名；成员连接经 provider_group_id 归属） */

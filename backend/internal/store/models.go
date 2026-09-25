@@ -4,30 +4,33 @@ package store
 
 // Agent 智能体配置实体。
 type Agent struct {
-	ID             string      `json:"id"`
-	Name           string      `json:"name"`
-	Description    string      `json:"description"`
-	Instruction    string      `json:"instruction"`
-	ModelConnID    *string     `json:"model_conn_id"` // 空 = 跟随全局默认（P1）
-	Temperature    *float64    `json:"temperature"`
-	MaxTokens      *int        `json:"max_tokens"`
-	MaxIteration   int         `json:"max_iteration"`
-	Tools          []string    `json:"tools"`
-	Skills         []string    `json:"skills"`      // P2 生效
-	MCPServers     []MCPServer `json:"mcp_servers"` // P2 生效
+	ID               string      `json:"id"`
+	Name             string      `json:"name"`
+	Description      string      `json:"description"`
+	Instruction      string      `json:"instruction"`
+	ModelConnID      *string     `json:"model_conn_id"` // 空 = 跟随全局默认（P1）
+	Temperature      *float64    `json:"temperature"`
+	MaxTokens        *int        `json:"max_tokens"`
+	MaxIteration     int         `json:"max_iteration"`
+	Tools            []string    `json:"tools"`
+	Skills           []string    `json:"skills"`      // P2 生效
+	MCPServers       []MCPServer `json:"mcp_servers"` // P2 生效
 	RuntimeBackend   string      `json:"runtime_backend"`
-	InferenceBackend string      `json:"inference_backend"` // M13 §6.16：空 = eino-adk 自研默认
-	LogoURL          string      `json:"logo_url,omitempty"`  // REQ-137：非内置后端登记的原 logo 图标 URL
-	ToolApproval    string      `json:"tool_approval"`  // REQ-14 恢复②：工具调用人工审批（""=off | "all"）
-	McpServe        McpServe    `json:"mcp_serve"`          // REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name）
-	CreatedAt      string      `json:"created_at"`
-	UpdatedAt      string      `json:"updated_at"`
+	InferenceBackend string      `json:"inference_backend"`  // M13 §6.16：空 = eino-adk 自研默认
+	LogoURL          string      `json:"logo_url,omitempty"` // REQ-137：非内置后端登记的原 logo 图标 URL
+	ToolApproval     string      `json:"tool_approval"`      // REQ-14 恢复②：工具调用人工审批（""=off | "all"）
+	// M10/10b：docker 沙箱资源限制（runtime_backend=docker 时生效；空/0 = 默认 512m/1CPU）
+	SandboxMemory string   `json:"sandbox_memory,omitempty"`
+	SandboxCPUs   float64  `json:"sandbox_cpus,omitempty"`
+	McpServe      McpServe `json:"mcp_serve"` // REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name）
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
 }
 
 // McpServe Agent 对外服务配置（REQ-131/M18）：开启后经平台 /mcp 端点以 agent_{id} 工具暴露。
 type McpServe struct {
 	Enabled  bool   `json:"enabled"`
-	Token    string `json:"token,omitempty"`    // Agent 级 Bearer Token（开启时自动生成，可重置）
+	Token    string `json:"token,omitempty"`     // Agent 级 Bearer Token（开启时自动生成，可重置）
 	ToolName string `json:"tool_name,omitempty"` // 覆盖默认工具名 agent_{id}
 }
 
@@ -77,7 +80,7 @@ type Conversation struct {
 	RuntimeProfileID *string `json:"runtime_profile_id"` // 本体运行方案（外部引用，O-6）
 	OntologyEnabled  bool    `json:"ontology_enabled"`
 	// EnableSkills 会话级技能开关（nil=未指定：创建默认开、更新保留原值）
-	EnableSkills *bool   `json:"enable_skills,omitempty"`
+	EnableSkills *bool `json:"enable_skills,omitempty"`
 	// InterruptState 中断挂起信息 JSON（ask_human 等 HIL 中断；空=无。M11 收尾）
 	InterruptState string `json:"interrupt_state,omitempty"`
 	// ToolApproval 对话级工具审批覆盖（REQ-135②：nil=不改 | ''=跟随 Agent 级 | on | off）
@@ -124,8 +127,8 @@ type ModelConnection struct {
 	ProviderGroupID string `json:"provider_group_id,omitempty"`
 	// ProviderAlias 组别名的连接级快照（List/Get 联查 provider_group 计算返回，展示层用；请求携带会被忽略）
 	ProviderAlias string `json:"provider_alias,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 	// 请求体携带、不落库不回显
 	// ---- write-only 字段（请求可携带，响应不回传明文） ----
 	APIKey string `json:"api_key,omitempty"`

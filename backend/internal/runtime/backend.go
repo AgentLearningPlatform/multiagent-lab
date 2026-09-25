@@ -17,11 +17,17 @@ type BackendStatus struct {
 	Detail string `json:"detail,omitempty"` // 补充信息（容器 ID、错误原因等）
 }
 
+// StartSpec 启动规格（M10/10b：资源限制参数化，per Agent）。
+type StartSpec struct {
+	AgentID string
+	Memory  string  // 容器内存上限（如 512m）；空 = 默认 512m
+	CPUs    float64 // CPU 核数上限；0 = 默认 1
+}
+
 // Backend Agent 执行后端接口（§6.3）。
 type Backend interface {
-	// Start 确保 agentID 对应的运行实例就绪并返回端点。
-	// 沙箱后端负责容器/实例生命周期与对账（已存在且健康则复用）。
-	Start(ctx context.Context, agentID string) (Endpoint, error)
+	// Start 确保实例就绪并返回端点（沙箱后端负责生命周期与对账，已存在且健康则复用）。
+	Start(ctx context.Context, spec StartSpec) (Endpoint, error)
 	// Stop 停止并清理实例。
 	Stop(ctx context.Context, agentID string) error
 	// Status 查询实例状态。

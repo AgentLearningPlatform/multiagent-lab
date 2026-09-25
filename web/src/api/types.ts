@@ -17,6 +17,9 @@ export interface Agent {
   inference_backend: string
   // REQ-137：非内置后端登记的原 logo 图标 URL（未配置回退默认图标）
   logo_url?: string
+  /** M10/10b：docker 沙箱资源限制（runtime_backend=docker 时生效；空/0 = 默认 512m/1CPU） */
+  sandbox_memory?: string
+  sandbox_cpus?: number
   /** REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name；token 为 Agent 级 Bearer） */
   mcp_serve?: { enabled: boolean; token?: string; tool_name?: string }
   created_at: string

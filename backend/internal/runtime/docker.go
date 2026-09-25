@@ -74,8 +74,9 @@ func (d *DockerBackend) docker(ctx context.Context, args ...string) (string, err
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Start 启动（或复用）agentd 容器并等待其就绪。
-func (d *DockerBackend) Start(ctx context.Context, agentID string) (Endpoint, error) {
+// Start 启动（或复用）agentd 容器并等待其就绪（资源限制按 spec，空 = 默认 512m/1CPU）。
+func (d *DockerBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error) {
+	agentID := spec.AgentID
 	name := d.containerName(agentID)
 	// 对账：容器已在跑则复用（进程重启后注册表丢失的场景）
 	if st, _ := d.Status(ctx, agentID); st.State == "running" {
@@ -94,9 +95,18 @@ func (d *DockerBackend) Start(ctx context.Context, agentID string) (Endpoint, er
 		return Endpoint{}, fmt.Errorf("issue manifest token: %w", err)
 	}
 
+	// M10/10b：资源限制参数化（per Agent；空 = 默认）
+	mem := spec.Memory
+	if mem == "" {
+		mem = "512m"
+	}
+	cpus := spec.CPUs
+	if cpus <= 0 {
+		cpus = 1
+	}
 	runArgs := []string{
 		"run", "-d", "--name", name,
-		"--memory=512m", "--cpus=1",
+		"--memory=" + mem, fmt.Sprintf("--cpus=%g", cpus),
 		"-e", "AGENT_ID=" + agentID,
 		"-e", "PLATFORM_URL=" + d.PlatformURL,
 		"-e", "MANIFEST_TOKEN=" + token,

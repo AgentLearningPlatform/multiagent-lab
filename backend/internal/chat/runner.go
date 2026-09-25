@@ -114,7 +114,7 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend == "docker" {
 		if s.Runtime != nil {
 			return s.runDocker(ctx, conv, agent, runID, input, debug, debugPersist, emit)
-		}
+		} // 资源限制经 StartSpec 传入（10b）
 		emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了 docker 执行后端但沙箱后端未启用，已回退 inprocess"}))
 	}
 
@@ -977,7 +977,7 @@ func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent
 	}
 
 	// 2) 确保沙箱实例就绪
-	ep, err := s.Runtime.Start(ctx, agent.ID)
+	ep, err := s.Runtime.Start(ctx, runtime.StartSpec{AgentID: agent.ID, Memory: agent.SandboxMemory, CPUs: agent.SandboxCPUs})
 	if err != nil {
 		s.emitAndRecord(ctx, conv, runID, newEvent("run.error", runID, map[string]any{
 			"code": "sandbox_start_failed", "message": err.Error(), "elapsed_ms": time.Since(start).Milliseconds(),

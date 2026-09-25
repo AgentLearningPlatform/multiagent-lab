@@ -28,8 +28,8 @@ type Server struct {
 	Ontology  *ontology.Service  // M8：本体对接（反代/facade 探测）
 	OntoBuild *ontobuild.Service // O13：由知识库构建本体（KB→spec 编排）
 	FilesRoot string             // M11：项目文件根目录（上传/下载落盘）
-	DBPath   string             // REQ-113：SQLite 文件路径（数据与安全概览展示 DB 体积）
-	DocsRoot string             // REQ-140：内部方案文档根目录（只读查看）
+	DBPath    string             // REQ-113：SQLite 文件路径（数据与安全概览展示 DB 体积）
+	DocsRoot  string             // REQ-140：内部方案文档根目录（只读查看）
 	Mux       *http.ServeMux
 	mcpMu     sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
 	mcpHTTP   http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
@@ -99,8 +99,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/conversations/{id}/events", s.listEvents)
 	m.HandleFunc("POST /api/conversations/{id}/runs", s.runConversation)
 	m.HandleFunc("POST /api/conversations/{id}/stop", s.stopConversation)
-	m.HandleFunc("GET /api/conversations/{id}/export", s.exportConversation) // REQ-113①：对话导出 Markdown
-	m.HandleFunc("GET /api/docs/read", s.docRead) // REQ-140：内部方案文档只读查看
+	m.HandleFunc("GET /api/conversations/{id}/export", s.exportConversation)       // REQ-113①：对话导出 Markdown
+	m.HandleFunc("GET /api/docs/read", s.docRead)                                  // REQ-140：内部方案文档只读查看
 	m.HandleFunc("POST /api/conversations/{id}/auto-name", s.autoNameConversation) // REQ-136：对话自动命名
 	// M11 收尾：中断恢复（ask_human 答复定向续跑）
 	m.HandleFunc("POST /api/conversations/{id}/resume", s.resumeConversation)
@@ -114,6 +114,10 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/model-connections/{id}/default", s.setDefaultConnection)
 	m.HandleFunc("POST /api/model-connections/test", s.testConnection)
 	m.HandleFunc("POST /api/model-connections/{id}/list-models", s.listConnectionModels)
+	// M10/10b：沙箱生命周期（状态/启动/停止，per Agent）
+	m.HandleFunc("GET /api/agents/{id}/sandbox", s.sandboxStatus)
+	m.HandleFunc("POST /api/agents/{id}/sandbox/start", s.sandboxStart)
+	m.HandleFunc("POST /api/agents/{id}/sandbox/stop", s.sandboxStop)
 	// REQ-148 供应商分组：同一供应商可多实例（分组标识与 BaseURL 解耦）+ 别名（展示层）
 	m.HandleFunc("GET /api/provider-groups", s.listProviderGroups)
 	m.HandleFunc("POST /api/provider-groups", s.createProviderGroup)

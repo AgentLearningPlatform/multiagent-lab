@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Button, Collapse, Divider, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Badge, Button, Card, Collapse, Divider, Form, FormInstance, Input, InputNumber, Popconfirm, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   ApiOutlined,
   BranchesOutlined,
@@ -13,6 +13,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons'
 import { api, connDisplayName } from '../api/client'
+import type { SandboxStatus } from '../api/client'
 import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
@@ -155,6 +156,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   )
   // 当前选中连接（含已停用的历史绑定，便于如实展示身份）
   const modelConnId = Form.useWatch('model_conn_id', form)
+  const runtimeBackend = (Form.useWatch('runtime_backend', form) as string | undefined) ?? agent.runtime_backend
   const selectedConn = modelConnId ? allConns.find((c) => c.id === modelConnId) ?? null : null
 
   const save = async () => {
@@ -170,6 +172,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         max_tokens: v.max_tokens ?? null,
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
+        sandbox_memory: v.sandbox_memory ?? '',
+        sandbox_cpus: v.sandbox_cpus ?? 0, // M10/10b：沙箱资源限制
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
         logo_url: (v.logo_url ?? '').trim(), // REQ-137
         tools: v.tools ?? [],
@@ -287,9 +291,29 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
                     <InputNumber min={1} max={100} style={{ width: '100%' }} />
                   </Form.Item>
-                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M2 默认 inprocess；subprocess/容器后端在 M5 开放">
-                    <Input disabled />
+                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱（需平台配置 SANDBOX_IMAGE），容器内同一套装配代码">
+                    <Select
+                      options={[
+                        { value: 'inprocess', label: 'inprocess（进程内）' },
+                        { value: 'docker', label: 'docker（沙箱容器）' },
+                      ]}
+                    />
                   </Form.Item>
+                  {runtimeBackend === 'docker' && (
+                    <>
+                      <Form.Item name="sandbox_memory" label="沙箱内存上限" extra="M10/10b：留空 = 默认 512m">
+                        <Select
+                          allowClear
+                          placeholder="512m（默认）"
+                          options={[{ value: '256m', label: '256m' }, { value: '512m', label: '512m' }, { value: '1g', label: '1g' }, { value: '2g', label: '2g' }]}
+                        />
+                      </Form.Item>
+                      <Form.Item name="sandbox_cpus" label="沙箱 CPU 核数" extra="留空 = 默认 1 CPU">
+                        <InputNumber min={0.5} max={8} step={0.5} style={{ width: '100%' }} placeholder="1（默认）" />
+                      </Form.Item>
+                      <SandboxPanel agentId={agent.id} form={form} />
+                    </>
+                  )}
                   <Form.Item
                     name="inference_backend"
                     label="推理后端"
@@ -423,6 +447,97 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
 // ---------------------------------------------------------------------------
 // 对外服务（REQ-131/M18）：开关/工具名随本表单保存提交；Token 经专用端点管理
 // ---------------------------------------------------------------------------
+
+/**
+ * M10/10b 沙箱面板：容器状态可见 + 启动/停止（docker 运行后端的 Agent）。
+ * 状态经 /api/agents/{id}/sandbox 轮询（10s），启停后即时刷新；未启用 SANDBOX_IMAGE 时降级提示。
+ */
+function SandboxPanel({ agentId, form }: { agentId: string; form: FormInstance }) {
+  const { showToast } = useUI()
+  const [st, setSt] = useState<SandboxStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    api
+      .sandboxStatus(agentId)
+      .then((r) => setSt(r))
+      .catch(() => setSt(null))
+  }, [agentId])
+  useEffect(() => {
+    load()
+    const t = setInterval(load, 10000)
+    return () => clearInterval(t)
+  }, [load])
+
+  const act = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true)
+    try {
+      await fn()
+      showToast(ok)
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setBusy(false)
+      load()
+    }
+  }
+
+  if (!st?.enabled) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message="沙箱后端未启用"
+        description="平台未配置 SANDBOX_IMAGE——配置后此处可管理该智能体的 agentd 容器。"
+      />
+    )
+  }
+  const running = st.state === 'running'
+  return (
+    <Card size="small" style={{ marginBottom: 12 }}>
+      <Space size={8} wrap style={{ marginBottom: 6 }}>
+        <Badge status={running ? 'success' : 'default'} text={running ? '容器运行中' : st.state === 'error' ? `异常：${st.detail ?? ''}` : '容器未运行'} />
+        {st.memory || st.cpus ? (
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            限制 {st.memory || '512m'} / {st.cpus || 1} CPU
+          </Typography.Text>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>限制 512m / 1 CPU（默认）</Typography.Text>
+        )}
+      </Space>
+      <div>
+        {running ? (
+          <Button size="small" loading={busy} onClick={() => act(() => api.sandboxStop(agentId), '沙箱容器已停止并移除')}>
+            停止沙箱
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            type="primary"
+            loading={busy}
+            onClick={async () => {
+              // 保存表单中的资源限制再启动（Start 读取最新字段）
+              const v = form.getFieldsValue()
+              await act(async () => {
+                await api.updateAgent(agentId, {
+                  sandbox_memory: v.sandbox_memory ?? '',
+                  sandbox_cpus: v.sandbox_cpus ?? 0,
+                })
+                await api.sandboxStart(agentId)
+              }, '沙箱容器已启动（per-Agent agentd）')
+            }}
+          >
+            启动沙箱
+          </Button>
+        )}
+        <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+          每 Agent 一个 agentd 容器（agt-{agentId.slice(0, 8)}…）；对话时自动拉起，此处可手动管理
+        </Typography.Text>
+      </div>
+    </Card>
+  )
+}
 
 function McpServeTab({ agent }: { agent: Agent }) {
   const { showToast, bumpData } = useUI()
