@@ -1384,7 +1384,7 @@ export default function ChatWindow({
                       {{ idle: '待提问', streaming: '生成中', error: '出错', stopped: '已停止', done: '完成' }[paneStatus(i)]}
                     </span>
                     <span className="cmp-pane-agent" title={sel.agent ? '窗格级智能体（REQ-143）' : '继承对话智能体'}>
-                      <AgentLogo agent={paneAgentOf(sel)} size={16} />
+                      <AgentLogo agent={paneAgentOf(sel)} size={16} context="runtime" />
                       <Typography.Text strong style={{ fontSize: 12 }}>{paneAgentOf(sel)?.name ?? '—'}</Typography.Text>
                     </span>
                     {/* REQ-144 可选增强：采纳该窗格配置写回对话（仅 agent 直聊；运行中禁用） */}
@@ -1509,7 +1509,7 @@ export default function ChatWindow({
           <div className="msg-empty">
             <Welcome
               variant="borderless"
-              icon={<span className="agent-tile"><AgentLogo agent={agent} size={30} /></span>}
+              icon={<span className="agent-tile"><AgentLogo agent={agent} size={30} context="runtime" /></span>}
               title={`开始与「${subjectName ?? '智能体'}」对话`}
               description={
                 isProjectScope

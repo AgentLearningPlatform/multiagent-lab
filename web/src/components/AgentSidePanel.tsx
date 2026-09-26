@@ -15,7 +15,7 @@ import {
 import { api, connDisplayName } from '../api/client'
 import AIOptimizeButton from './AIOptimizeButton'
 import type { SandboxStatus } from '../api/client'
-import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, ToolInfo } from '../api/types'
+import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, Skill, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
 
@@ -123,6 +123,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   const [allConns, setAllConns] = useState<ModelConnection[]>([])
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [toolsErr, setToolsErr] = useState(false)
+  const [skills, setSkills] = useState<Skill[]>([]) // REQ-164：技能勾选候选（注册表来源，仅启用项）
   const [backends, setBackends] = useState<InferenceBackendStatus[]>([]) // M13：推理后端探测清单
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -149,6 +150,14 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
     // M13：推理后端探测清单（失败降级为仅 eino-adk 默认项）
     api.listInferenceBackends().then((r) => setBackends(r.backends ?? [])).catch(() => {})
   }, [agent.id, form])
+
+  // REQ-164：技能注册表加载（勾选候选；失败静默，能力页签仍可用工具/MCP）
+  useEffect(() => {
+    api
+      .listSkills()
+      .then((ls) => setSkills(ls.filter((x) => x.enabled)))
+      .catch(() => setSkills([]))
+  }, [])
 
   // 可选 chat 连接（启用中）与生效的全局默认（默认连接须启用，与后端 GetDefaultConnection 语义一致）
   const conns = useMemo(() => allConns.filter((c) => c.conn_type === 'chat' && c.enabled), [allConns])
@@ -243,6 +252,45 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="instruction" label={<Space size={6}>系统提示词（Instruction）<AIOptimizeButton kind="agent_instruction" value={instructionValue} onApply={(v) => form.setFieldValue('instruction', v)} /></Space>}>
                     <Input.TextArea autoSize={{ minRows: 6, maxRows: 14 }} placeholder="定义角色、能力边界、回答风格…" />
                   </Form.Item>
+                  {sec('后端身份（在哪儿跑 · 谁来推理）——REQ-164 分区调整：Agent 身份属性入基本分区')}
+                  <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
+                    <InputNumber min={1} max={100} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱（需平台配置 SANDBOX_IMAGE），容器内同一套装配代码">
+                    <Select
+                      options={[
+                        { value: 'inprocess', label: 'inprocess（进程内）' },
+                        { value: 'docker', label: 'docker（沙箱容器）' },
+                      ]}
+                    />
+                  </Form.Item>
+                  {runtimeBackend === 'docker' && (
+                    <>
+                      <Form.Item name="sandbox_memory" label="沙箱内存上限" extra="M10/10b：留空 = 默认 512m">
+                        <Select
+                          allowClear
+                          placeholder="512m（默认）"
+                          options={[{ value: '256m', label: '256m' }, { value: '512m', label: '512m' }, { value: '1g', label: '1g' }, { value: '2g', label: '2g' }]}
+                        />
+                      </Form.Item>
+                      <Form.Item name="sandbox_cpus" label="沙箱 CPU 核数" extra="留空 = 默认 1 CPU">
+                        <InputNumber min={0.5} max={8} step={0.5} style={{ width: '100%' }} placeholder="1（默认）" />
+                      </Form.Item>
+                      <SandboxPanel agentId={agent.id} form={form} />
+                    </>
+                  )}
+                  <Form.Item
+                    name="inference_backend"
+                    label="推理后端"
+                    extra="「在哪儿跑」由运行后端决定，「谁来推理」由此决定：eino-adk 为平台自研（完整能力）；外部 CLI 后端模型由其自身配置决定（Agent 模型连接不生效），技能/MCP 降级为提示注入，不支持多 Agent 编排"
+                  >
+                    <Select
+                      options={inferenceBackendOptions(backends)}
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder="eino-adk（自研默认）"
+                    />
+                  </Form.Item>
                   <Form.Item
                     name="logo_url"
                     label="自定义后端 Logo URL（REQ-137）"
@@ -289,45 +337,6 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="max_tokens" label="最大回复 tokens">
                     <InputNumber min={1} style={{ width: '100%' }} placeholder="默认" />
                   </Form.Item>
-                  {sec('执行')}
-                  <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
-                    <InputNumber min={1} max={100} style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱（需平台配置 SANDBOX_IMAGE），容器内同一套装配代码">
-                    <Select
-                      options={[
-                        { value: 'inprocess', label: 'inprocess（进程内）' },
-                        { value: 'docker', label: 'docker（沙箱容器）' },
-                      ]}
-                    />
-                  </Form.Item>
-                  {runtimeBackend === 'docker' && (
-                    <>
-                      <Form.Item name="sandbox_memory" label="沙箱内存上限" extra="M10/10b：留空 = 默认 512m">
-                        <Select
-                          allowClear
-                          placeholder="512m（默认）"
-                          options={[{ value: '256m', label: '256m' }, { value: '512m', label: '512m' }, { value: '1g', label: '1g' }, { value: '2g', label: '2g' }]}
-                        />
-                      </Form.Item>
-                      <Form.Item name="sandbox_cpus" label="沙箱 CPU 核数" extra="留空 = 默认 1 CPU">
-                        <InputNumber min={0.5} max={8} step={0.5} style={{ width: '100%' }} placeholder="1（默认）" />
-                      </Form.Item>
-                      <SandboxPanel agentId={agent.id} form={form} />
-                    </>
-                  )}
-                  <Form.Item
-                    name="inference_backend"
-                    label="推理后端"
-                    extra="「在哪儿跑」由运行后端决定，「谁来推理」由此决定：eino-adk 为平台自研（完整能力）；外部 CLI 后端模型由其自身配置决定（Agent 模型连接不生效），技能/MCP 降级为提示注入，不支持多 Agent 编排"
-                  >
-                    <Select
-                      options={inferenceBackendOptions(backends)}
-                      showSearch
-                      optionFilterProp="label"
-                      placeholder="eino-adk（自研默认）"
-                    />
-                  </Form.Item>
                 </>
               ),
             },
@@ -337,6 +346,30 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
               forceRender: true,
               children: (
                 <>
+                  <Form.Item
+                    name="skills"
+                    label="技能"
+                    extra="技能 = 指令 + 工具集 + 资源的打包能力单元（M9，REQ-120/121）；勾选后按对话级开关挂载注入，外部 CLI 后端降级为提示注入。"
+                  >
+                    <Select
+                      mode="multiple"
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder="不挂载技能"
+                      options={skills.map((k) => ({ value: k.id, label: k.name, title: k.description }))}
+                      notFoundContent="技能注册表为空（到「技能」模块创建）"
+                      optionRender={(opt) => (
+                        <div className="tool-option">
+                          <div className="tool-option-name">
+                            <span>{opt.data?.label}</span>
+                          </div>
+                          {opt.data?.title ? <div className="tool-option-desc">{opt.data.title}</div> : null}
+                        </div>
+                      )}
+                    />
+                  </Form.Item>
+
                   <Form.Item
                     name="tools"
                     label="工具白名单"

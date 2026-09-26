@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Button, Col, Collapse, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Switch } from 'antd'
 import { api, connDisplayName } from '../api/client'
 import AIOptimizeButton from './AIOptimizeButton'
-import type { InferenceBackendStatus, ModelConnection, ToolInfo } from '../api/types'
+import type { InferenceBackendStatus, ModelConnection, Skill, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
 
@@ -46,6 +46,7 @@ export default function AgentModal({
   const [allConns, setAllConns] = useState<ModelConnection[]>([])
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [toolsErr, setToolsErr] = useState(false)
+  const [skills, setSkills] = useState<Skill[]>([]) // REQ-164：技能勾选候选
   const [backends, setBackends] = useState<InferenceBackendStatus[]>([]) // M13：推理后端探测清单
   const [saving, setSaving] = useState(false)
 
@@ -60,6 +61,14 @@ export default function AgentModal({
         setToolsErr(false)
       })
       .catch(() => setToolsErr(true))
+  }, [])
+
+  // REQ-164：技能注册表加载（仅启用项；失败静默）
+  useEffect(() => {
+    api
+      .listSkills()
+      .then((ls) => setSkills(ls.filter((x) => x.enabled)))
+      .catch(() => setSkills([]))
   }, [])
 
   // 可选 chat 连接（启用中）与生效的全局默认（默认连接须启用，与后端 GetDefaultConnection 语义一致）
@@ -136,6 +145,25 @@ export default function AgentModal({
           <Input.TextArea autoSize={{ minRows: 6, maxRows: 14 }} placeholder="定义角色、能力边界、回答风格…" />
         </Form.Item>
 
+        <Section>后端身份（在哪儿跑 · 谁来推理）——REQ-164 分区调整</Section>
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M2 默认 inprocess；subprocess/容器后端在 M5 开放">
+              <Input disabled />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              name="inference_backend"
+              label="推理后端"
+              initialValue="eino-adk"
+              extra="「谁来推理」：eino-adk 自研默认；外部 CLI 后端模型由其自身配置决定，技能/MCP 降级为提示注入"
+            >
+              <Select options={inferenceBackendOptions(backends)} showSearch optionFilterProp="label" />
+            </Form.Item>
+          </Col>
+        </Row>
+
         <Section>模型</Section>
         <Form.Item
           name="model_conn_id"
@@ -183,7 +211,30 @@ export default function AgentModal({
           </Col>
         </Row>
 
-        <Section>工具</Section>
+        <Section>工具与技能</Section>
+        <Form.Item
+          name="skills"
+          label="技能"
+          extra="技能 = 指令 + 工具集 + 资源的打包能力单元（M9，REQ-120/121）；留空不挂载，创建后可在侧边栏调整。"
+        >
+          <Select
+            mode="multiple"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="不挂载技能"
+            options={skills.map((k) => ({ value: k.id, label: k.name, title: k.description }))}
+            notFoundContent="技能注册表为空（到「技能」模块创建）"
+            optionRender={(opt) => (
+              <div className="tool-option">
+                <div className="tool-option-name">
+                  <span>{opt.data?.label}</span>
+                </div>
+                {opt.data?.title ? <div className="tool-option-desc">{opt.data.title}</div> : null}
+              </div>
+            )}
+          />
+        </Form.Item>
         <Form.Item
           name="tools"
           label="工具白名单"
@@ -216,21 +267,6 @@ export default function AgentModal({
           <Col span={12}>
             <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
               <InputNumber min={1} max={100} style={{ width: '100%' }} />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M2 默认 inprocess；subprocess/容器后端在 M5 开放">
-              <Input disabled />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item
-              name="inference_backend"
-              label="推理后端"
-              initialValue="eino-adk"
-              extra="「谁来推理」：eino-adk 自研默认；外部 CLI 后端模型由其自身配置决定，技能/MCP 降级为提示注入"
-            >
-              <Select options={inferenceBackendOptions(backends)} showSearch optionFilterProp="label" />
             </Form.Item>
           </Col>
           <Col span={12}>

@@ -18,6 +18,7 @@ import {
 } from 'antd'
 import { EyeOutlined, MinusCircleOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
+import EmptyGuide from '../components/EmptyGuide'
 import type { Agent, Skill, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
 
@@ -177,10 +178,21 @@ export default function SkillsPage() {
             </div>
           ) : filtered.length === 0 ? (
             <div className="work-empty">
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={skills.length === 0 ? '暂无技能，点击右上「新建技能」' : '该筛选下暂无技能'}
-              />
+              {skills.length === 0 ? (
+                <EmptyGuide
+                  title="还没有技能"
+                  steps={[
+                    '点下方「新建技能」：命名并写一段指令（如「严谨回答模式：回答前先复述约束」）',
+                    '按需绑定工具白名单与资源链接，保存为可复用的配置级能力包',
+                    '到「智能体」配置的「能力」页签勾选挂载，对话时按开关注入',
+                  ]}
+                  actionLabel="新建第一个技能"
+                  onAction={() => setModal('new')}
+                  footer="技能与智能体解耦：一份技能可被多个智能体挂载（REQ-120/121）"
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该筛选下暂无技能" />
+              )}
             </div>
           ) : (
             <div className="skill-grid">
