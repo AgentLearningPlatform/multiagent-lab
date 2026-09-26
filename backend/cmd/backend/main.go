@@ -71,16 +71,31 @@ func main() {
 	svc := chat.NewService(st, asm, kbSvc)
 	svc.Inference = inference.NewRegistry() // M13/D-O13 §6.16：推理后端注册表（eino-adk + 外部 CLI）
 	srv := api.NewServer(st, box, svc, reg, kbSvc, asm.Ontology, dbPath, getenv("DOCS_ROOT", "../docs"), getenv("RESEARCH_ROOT", "../research"), getenv("KNOWLEDGE_ROOT", "../platform-knowledge"))
-	// M10 §6.3：Docker 沙箱执行后端（SANDBOX_IMAGE 配置即启用；PLATFORM_URL_EXTERNAL 为容器内回访主平台地址）
+	// M10 §6.3：沙箱执行后端（SANDBOX_IMAGE 配置即启用；SANDBOX_BACKEND=docker|k8s，默认 docker）
 	if img := getenv("SANDBOX_IMAGE", ""); img != "" {
 		platformURL := getenv("PLATFORM_URL_EXTERNAL", "http://host.docker.internal"+addr)
-		svc.Runtime = &runtime.DockerBackend{
-			Image:       img,
-			Bin:         getenv("DOCKER_BIN", ""),
-			PlatformURL: platformURL,
-			TokenIssue:  srv.IssueManifestToken,
+		switch getenv("SANDBOX_BACKEND", "docker") {
+		case "k8s":
+			// M10 10d：K8s Pod 后端（kubectl CLI，零新依赖；端点模式 SANDBOX_K8S_ENDPOINT_MODE=port-forward|pod-ip；
+			// Pod 内回访主平台经 PLATFORM_URL_IN_CLUSTER，缺省回退 PLATFORM_URL_EXTERNAL）
+			svc.Runtime = &runtime.K8sBackend{
+				Image:       img,
+				Bin:         getenv("KUBECTL_BIN", ""),
+				Namespace:   getenv("SANDBOX_K8S_NAMESPACE", ""),
+				Context:     getenv("SANDBOX_K8S_CONTEXT", ""),
+				PlatformURL: getenv("PLATFORM_URL_IN_CLUSTER", platformURL),
+				TokenIssue:  srv.IssueManifestToken,
+			}
+			log.Printf("[backend] k8s sandbox backend enabled: image=%s namespace=%q endpoint_mode=%s", img, getenv("SANDBOX_K8S_NAMESPACE", ""), getenv("SANDBOX_K8S_ENDPOINT_MODE", "port-forward"))
+		default:
+			svc.Runtime = &runtime.DockerBackend{
+				Image:       img,
+				Bin:         getenv("DOCKER_BIN", ""),
+				PlatformURL: platformURL,
+				TokenIssue:  srv.IssueManifestToken,
+			}
+			log.Printf("[backend] docker sandbox backend enabled: image=%s platform_url=%s", img, platformURL)
 		}
-		log.Printf("[backend] docker sandbox backend enabled: image=%s platform_url=%s", img, platformURL)
 	}
 
 	httpSrv := &http.Server{
