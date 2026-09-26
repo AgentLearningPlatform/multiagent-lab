@@ -13,6 +13,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons'
 import { api, connDisplayName } from '../api/client'
+import AIOptimizeButton from './AIOptimizeButton'
 import type { SandboxStatus } from '../api/client'
 import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
@@ -118,6 +119,7 @@ export default function AgentSidePanel({
 function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
   const { showToast, bumpData } = useUI()
   const [form] = Form.useForm()
+  const instructionValue = Form.useWatch('instruction', form) ?? ''
   const [allConns, setAllConns] = useState<ModelConnection[]>([])
   const [tools, setTools] = useState<ToolInfo[]>([])
   const [toolsErr, setToolsErr] = useState(false)
@@ -238,7 +240,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="description" label="描述（用于多智能体协作时互相理解）">
                     <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} />
                   </Form.Item>
-                  <Form.Item name="instruction" label="系统提示词（Instruction）">
+                  <Form.Item name="instruction" label={<Space size={6}>系统提示词（Instruction）<AIOptimizeButton kind="agent_instruction" value={instructionValue} onApply={(v) => form.setFieldValue('instruction', v)} /></Space>}>
                     <Input.TextArea autoSize={{ minRows: 6, maxRows: 14 }} placeholder="定义角色、能力边界、回答风格…" />
                   </Form.Item>
                   <Form.Item

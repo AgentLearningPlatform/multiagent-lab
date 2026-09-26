@@ -191,6 +191,13 @@ export const api = {
   updateConversation: (id: string, c: Partial<Conversation>) => req<Conversation>(`/api/conversations/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
   deleteConversation: (id: string) => req<{ deleted: string }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   listMessages: (id: string) => req<Message[]>(`/api/conversations/${id}/messages`),
+  // M27/REQ-166：平台助手配置与 AI 内容优化
+  assistantConfigGet: () =>
+    req<{ system_prompt?: string; model_conn_id?: string; temperature?: number | null }>('/api/assistant/config'),
+  assistantConfigPut: (body: { system_prompt?: string; model_conn_id?: string; temperature?: number | null }) =>
+    req<any>('/api/assistant/config', { method: 'PUT', body: JSON.stringify(body) }),
+  assistantOptimize: (kind: 'agent_instruction' | 'project_constraints', content: string) =>
+    req<{ optimized: string }>('/api/assistant/optimize', { method: 'POST', body: JSON.stringify({ kind, content }) }),
   /** REQ-140：内部方案文档只读查看（限 docs/ 下 .md，fsutil 防越界） */
   docRead: (path: string) =>
     req<{ path: string; title: string; content: string }>('/api/docs/read?path=' + encodeURIComponent(path)),

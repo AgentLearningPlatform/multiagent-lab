@@ -131,3 +131,52 @@ func extractJSON(content string) json.RawMessage {
 	}
 	return nil
 }
+
+// GenerateText 通用自由文本生成（M27/REQ-166 平台助手用）：默认或指定连接 +
+// system/user 双消息 + 可选温度 → 纯文本输出（不走 JSON schema 契约）。
+func GenerateText(ctx context.Context, st *store.Store, box *secrets.Box, connID, system, user string, temperature *float64) (string, error) {
+	var rec *store.ConnectionRecord
+	var err error
+	if connID != "" {
+		rec, err = st.GetConnectionRecord(connID)
+		if err != nil {
+			return "", fmt.Errorf("resolve model connection %s: %w", connID, err)
+		}
+	} else {
+		def, derr := st.GetDefaultConnection("chat")
+		if derr != nil {
+			return "", derr
+		}
+		if def == nil {
+			return "", &ModelNotConfiguredError{}
+		}
+		rec, err = st.GetConnectionRecord(def.ID)
+		if err != nil {
+			return "", err
+		}
+	}
+	if !rec.Conn.Enabled {
+		return "", fmt.Errorf("模型连接 %q 已停用，请在「设置-模型连接」启用或更换", rec.Conn.Name)
+	}
+	apiKey := ""
+	if len(rec.Encrypted) > 0 {
+		apiKey, err = box.Decrypt(rec.Encrypted)
+		if err != nil {
+			return "", fmt.Errorf("decrypt api key: %w", err)
+		}
+	}
+	cfg := &openai.ChatModelConfig{APIKey: apiKey, BaseURL: rec.Conn.BaseURL, Model: rec.Conn.ModelName}
+	if temperature != nil {
+		t := float32(*temperature)
+		cfg.Temperature = &t
+	}
+	cm, err := openai.NewChatModel(ctx, cfg)
+	if err != nil {
+		return "", fmt.Errorf("create chat model: %w", err)
+	}
+	msg, err := cm.Generate(ctx, []*schema.Message{schema.SystemMessage(system), schema.UserMessage(user)})
+	if err != nil {
+		return "", fmt.Errorf("generate: %w", err)
+	}
+	return strings.TrimSpace(msg.Content), nil
+}

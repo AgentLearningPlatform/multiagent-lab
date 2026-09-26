@@ -12,6 +12,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
+import AIOptimizeButton from './AIOptimizeButton'
 import type { Agent, DirValidation, GitBranch, GitCommit, GitFileChange, GitWorkingFile, Project, ProjectDirEntry } from '../api/types'
 import DirCheckResult from './DirCheckResult'
 import { useUI } from '../store/ui'
@@ -585,6 +586,7 @@ function GitView({ project }: { project: Project }) {
 function ConfigView({ project, agents, onChanged }: { project: Project; agents: Agent[]; onChanged?: () => void }) {
   const { showToast, bumpData } = useUI()
   const [form] = Form.useForm()
+  const constraintsValue = Form.useWatch('constraints', form) ?? ''
   const [selected, setSelected] = useState<Record<string, 'coordinator' | 'member'>>(() => initMembers(project))
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -762,7 +764,7 @@ function ConfigView({ project, agents, onChanged }: { project: Project; agents: 
         </div>
 
         <Section>项目级约束</Section>
-        <Form.Item name="constraints" label="项目级约束（统一注入成员提示词，P1）">
+        <Form.Item name="constraints" label={<Space size={6}>项目级约束（统一注入成员提示词，P1）<AIOptimizeButton kind="project_constraints" value={constraintsValue} onApply={(v) => form.setFieldValue('constraints', v)} /></Space>}>
           <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} />
         </Form.Item>
       </Form>

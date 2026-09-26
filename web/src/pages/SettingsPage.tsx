@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Checkbox, DatePicker, Form, Input, Menu, Modal, Popconfirm, Result, Segmented, Select, Space, Splitter, Spin, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Checkbox, DatePicker, Form, Input, InputNumber, Menu, Modal, Popconfirm, Result, Segmented, Select, Slider, Space, Splitter, Spin, Switch, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import { api } from '../api/client'
@@ -8,7 +8,7 @@ import { PROVIDER_PRESETS } from '../api/providerPresets'
 import type { InferenceBackendStatus, ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
 import { useUI } from '../store/ui'
 
-type Category = 'models' | 'stats' | 'inference' | 'global' | 'security'
+type Category = 'models' | 'stats' | 'inference' | 'assistant' | 'global' | 'security'
 /** 统计维度：供应商为前端归并（后端无提供商实体），其余直接映射后端 group_by */
 type StatsDimension = 'model' | 'supplier' | 'agent' | 'project'
 
@@ -289,6 +289,7 @@ export default function SettingsPage() {
             items={[
               { key: 'models', label: '模型管理' },
               { key: 'inference', label: '推理后端' },
+              { key: 'assistant', label: '平台助手' },
               { key: 'stats', label: '使用统计' },
               { key: 'global', label: <Space size={6}>全局参数<Tag style={{ margin: 0 }}>P1 预留</Tag></Space>, disabled: true },
               { key: 'security', label: '数据与安全' },
@@ -304,6 +305,8 @@ export default function SettingsPage() {
         <div className="settings-main">
           {category === 'inference' ? (
             <InferencePanel />
+          ) : category === 'assistant' ? (
+            <AssistantPanel />
           ) : category === 'security' ? (
             <SecurityPanel />
           ) : category === 'stats' ? (
@@ -1241,6 +1244,89 @@ function SecurityPanel() {
         ]}
         locale={{ emptyText: '暂无会话' }}
       />
+    </>
+  )
+}
+
+
+/** 内置系统级 Agent「平台助手」配置（M27/REQ-166）：提示词微调/模型覆盖/温度。 */
+function AssistantPanel() {
+  const { showToast } = useUI()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [prompt, setPrompt] = useState('')
+  const [connID, setConnID] = useState<string | null>(null)
+  const [temp, setTemp] = useState<number | null>(null)
+  const [conns, setConns] = useState<{ id: string; name: string; model_name: string }[]>([])
+
+  useEffect(() => {
+    Promise.all([api.assistantConfigGet(), api.listConnections()])
+      .then(([cfg, cs]) => {
+        setPrompt(cfg.system_prompt ?? '')
+        setConnID(cfg.model_conn_id ?? null)
+        setTemp(cfg.temperature ?? null)
+        setConns(cs.filter((c) => c.conn_type === 'chat'))
+      })
+      .catch((e) => showToast(e.message, 'err'))
+      .finally(() => setLoading(false))
+  }, [showToast])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.assistantConfigPut({ system_prompt: prompt, model_conn_id: connID ?? '', temperature: temp })
+      showToast('平台助手配置已保存')
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="settings-head">
+        <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>平台助手</Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          内置系统级 Agent（REQ-166）：不占用智能体列表、不可删除；为「AI 优化」按钮（系统提示词/项目约束，REQ-167）等 AI 辅助能力提供模型与提示词。
+        </Typography.Paragraph>
+      </div>
+      {loading ? (
+        <Spin style={{ marginTop: 12 }} />
+      ) : (
+        <div style={{ maxWidth: 640, marginTop: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <Typography.Text style={{ fontSize: 12 }}>系统提示词微调（追加到内置提示词后；留空 = 使用内置默认）</Typography.Text>
+            <Input.TextArea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              autoSize={{ minRows: 4, maxRows: 10 }}
+              placeholder="内置角色：平台使用助手（解释模块机制/优化文本内容/执行配置操作）……"
+              style={{ marginTop: 4 }}
+            />
+          </div>
+          <div>
+            <Typography.Text style={{ fontSize: 12 }}>模型覆盖（留空 = 跟随全局默认对话连接）</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              value={connID || undefined}
+              onChange={(v) => setConnID(v || '')}
+              allowClear
+              placeholder="默认 chat 连接"
+              options={conns.map((c) => ({ value: c.id, label: c.name + ' · ' + c.model_name }))}
+            />
+          </div>
+          <div>
+            <Typography.Text style={{ fontSize: 12 }}>温度（0~2；留空 = 跟随连接默认采样）</Typography.Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Slider min={0} max={2} step={0.1} value={temp ?? undefined} onChange={(v) => setTemp(v)} style={{ flex: 1 }} />
+              <InputNumber min={0} max={2} step={0.1} value={temp ?? undefined} onChange={(v) => setTemp(v)} style={{ width: 90 }} />
+              <Button size="small" onClick={() => setTemp(null)}>清除</Button>
+            </div>
+          </div>
+          <Button type="primary" loading={saving} onClick={save} style={{ alignSelf: 'flex-start' }}>保存配置</Button>
+        </div>
+      )}
     </>
   )
 }
