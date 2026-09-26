@@ -67,11 +67,15 @@ func TestGraphEngineSmoke(t *testing.T) {
 		t.Fatalf("标签查询失败: %v", err)
 	}
 	// 种子 schema 在全局默认图（跨会话共享），会话 named graph 只含实例数据——labels 不应含种子类名
+	// REQ-170 P2 起 SelectLabels 限定 bot:Concept：实体标签不含关系边名（引发=bot:Relation 的 rdfs:label）
 	labels := extractLabelsJSON(raw)
-	for _, want := range []string{"Pod 扩容", "HPA 调整", "引发"} {
+	for _, want := range []string{"Pod 扩容", "HPA 调整"} {
 		if !strings.Contains(labels, want) {
-			t.Fatalf("图中缺标签 %q: %s", want, labels)
+			t.Fatalf("图中缺实体标签 %q: %s", want, labels)
 		}
+	}
+	if strings.Contains(labels, "引发") {
+		t.Fatalf("关系边名不应出现在实体标签: %s", labels)
 	}
 	if strings.Contains(labels, "概念") {
 		t.Fatalf("种子类不应落在会话图: %s", labels)

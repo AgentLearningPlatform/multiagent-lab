@@ -128,6 +128,28 @@ func (e *Engine) ensureStarted(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("伴生图引擎健康等待超时（%s）", endpoint)
 }
 
+// AdoptRunning 读侧领养（REQ-170 P2 检索源并入）：探测预期端点是否已有伴生引擎在运行
+// （如 backend 重启后遗留的独立引擎进程），存活则直接复用并登记端点；不负责拉起——
+// 引擎生命周期仍由写侧（confirm/抽取）ensureStarted 驱动，读侧空图/无引擎时静默返回。
+func (e *Engine) AdoptRunning(ctx context.Context) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.endpoint != "" {
+		if err := e.ping(ctx); err == nil {
+			return true
+		}
+		// 端点失活：清状态待写侧重拉
+		e.endpoint = ""
+		e.cmd = nil
+	}
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/query", e.Port)
+	if err := e.pingLocked(endpoint); err != nil {
+		return false
+	}
+	e.endpoint = endpoint
+	return true
+}
+
 // Stop 显式停止伴生图引擎（整体摘除路径）。
 func (e *Engine) Stop() {
 	e.mu.Lock()

@@ -163,15 +163,49 @@ SELECT ?s ?p ?o WHERE {
 } ORDER BY ?s LIMIT 500`, GraphURI(convID))
 }
 
-// SelectLabels 会话图实体标签清单（状态回显用）。
+// SelectLabels 会话图概念实体标签清单（状态回显 + KG 检索源匹配用；
+// 限定 bot:Concept——bot:Relation 边节点同样带 rdfs:label（关系名），不属实体）。
 func SelectLabels(convID string) string {
-	return fmt.Sprintf(`PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 SELECT ?label WHERE {
-  GRAPH <%s> { ?s rdfs:label ?label }
-} ORDER BY ?label LIMIT 200`, GraphURI(convID))
+  GRAPH <%s> { ?s a bot:Concept ; rdfs:label ?label }
+} ORDER BY ?label LIMIT 200`, BotNS, GraphURI(convID))
 }
 
 // DropGraph 会话图整体摘除（低侵入三原则③；引擎数据目录随 reset 一并清理由调用方决定）。
 func DropGraph(convID string) string {
 	return fmt.Sprintf(`DROP SILENT GRAPH <%s>`, GraphURI(convID))
+}
+
+// SelectEntityInfo 实体定义与置信度（KG 检索源并入：命中实体详情，OPTIONAL 兼容薄建实体）。
+func SelectEntityInfo(convID, label string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?def ?conf WHERE {
+  GRAPH <%s> {
+    <%s> rdfs:label %q .
+    OPTIONAL { <%s> bot:definition ?def }
+    OPTIONAL { <%s> bot:confidence ?conf }
+  }
+} LIMIT 1`, BotNS, GraphURI(convID), EntityURI(label), turtleEscape(label), EntityURI(label), EntityURI(label))
+}
+
+// SelectEntityEdges 实体的活跃关系边（双向：作为主体或客体；失效边不召回）。
+func SelectEntityEdges(convID, label string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?relName ?otherLabel ?dir WHERE {
+  GRAPH <%s> {
+    {
+      ?edge bot:subject <%s> ; bot:relName ?relName ; bot:object ?other .
+      BIND("out" AS ?dir)
+    } UNION {
+      ?edge bot:object <%s> ; bot:relName ?relName ; bot:subject ?other .
+      BIND("in" AS ?dir)
+    }
+    ?other rdfs:label ?otherLabel .
+    FILTER NOT EXISTS { ?edge bot:invalidAt ?any }
+  }
+} ORDER BY ?relName LIMIT 20`, BotNS, GraphURI(convID), EntityURI(label), EntityURI(label))
 }

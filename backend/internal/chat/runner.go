@@ -31,9 +31,19 @@ type Service struct {
 	KB        *kb.Service         // M6：对话知识库召回（nil 时禁用）
 	Runtime   runtime.Backend     // M10：沙箱执行后端（nil=inprocess；agent.RuntimeBackend=docker 时转发）
 	Inference *inference.Registry // M13：推理后端注册表（nil=仅 eino-adk；外部 CLI 后端走 runExternal）
+	// Companion REQ-170 P2「KG 检索源并入」：伴生图检索源（nil=未接入）。
+	// companion 包已依赖 chat，经接口反转注入避免包环（api 装配层接线）。
+	Companion CompanionSource
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // conversationID -> cancel
+}
+
+// CompanionSource 伴生图检索源接口（REQ-170 P2 / REQ-127~130 检索源矩阵扩展）。
+// 实现方按会话伴生图实体标签匹配输入，返回注入文本（空=无命中）与 retrieval 事件明细；
+// 引擎通信失败返回错误（chat 层降级为 run.warning，不阻断）。
+type CompanionSource interface {
+	RetrievalContext(ctx context.Context, conv *store.Conversation, input string) (text string, entities []map[string]any, err error)
 }
 
 // NewService 构造。
@@ -232,6 +242,9 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 
 	// 知识库召回（M6，§11/§6.9：提问先检索 → retrieval 事件 → 上下文注入；失败降级不阻断）
 	histMsgs = s.recallKB(runCtx, conv, runID, input, histMsgs, emit)
+
+	// 伴生图检索源并入（REQ-170 P2，agent.companion_ontology 开且注入器在位时生效；低侵入，失败降级不阻断）
+	histMsgs = s.recallCompanion(runCtx, conv, agent, runID, input, histMsgs, emit)
 
 	// 中断恢复（M11 收尾）：新消息运行会放弃既有挂起中断（checkpoint 清理 + 状态清除）
 	if conv.InterruptState != "" {
@@ -1140,4 +1153,28 @@ func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, runID,
 		}
 	}
 	return histMsgs
+}
+
+// recallCompanion 伴生图检索源并入（REQ-170 P2 / REQ-127~130 检索源矩阵）：agent.companion_ontology
+// 开且检索源注入器在位时，按会话伴生图实体标签匹配本次输入，命中实体的定义与活跃关系边作为
+// System 消息追加；retrieval 事件带 source=companion（过程可观测，与 KB retrieval 同形）。
+// 失败降级不阻断（与 recallKB 同口径；低侵入三原则——对话主链路 0 改动语义，仅配置增量生效）。
+func (s *Service) recallCompanion(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, input string, histMsgs []*schema.Message, emit EmitFn) []*schema.Message {
+	if s.Companion == nil || agent == nil || !agent.CompanionOntology {
+		return histMsgs
+	}
+	text, entities, err := s.Companion.RetrievalContext(ctx, conv, input)
+	if err != nil {
+		s.emitAndRecord(ctx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "伴生图检索失败，本次回答未注入伴生图内容: " + err.Error()}), emit)
+		return histMsgs
+	}
+	if text == "" {
+		return histMsgs
+	}
+	s.emitAndRecord(ctx, conv, runID, newEvent("retrieval", runID, map[string]any{
+		"source":          "companion",
+		"conversation_id": conv.ID,
+		"entities":        entities,
+	}), emit)
+	return append(histMsgs, schema.SystemMessage(text))
 }
