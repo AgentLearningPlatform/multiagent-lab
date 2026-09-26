@@ -38,7 +38,7 @@ import type { EngineStatus } from '../../api/client'
 import type { Conversation, Ontology, RuntimeProfile } from '../../api/types'
 import { useUI } from '../../store/ui'
 import { StatusBadge } from './shared'
-import YasguiPane from './components/SparqlConsole'
+import SparqlWorkbench from './components/SparqlWorkbench'
 import TraceTable from './components/TraceTable'
 
 // ---------------------------------------------------------------------------
@@ -959,7 +959,7 @@ function QueryMountPane({ profile, profilesErr }: { profile: RuntimeProfile; pro
               端点 <Typography.Text code style={{ fontSize: 12 }}>{api.sparqlEndpointUrl(profile.id)}</Typography.Text>
             </Typography.Text>
           </div>
-          <YasguiPane endpoint={api.sparqlEndpointUrl(profile.id)} persistenceId={`onto-detail-${profile.id}`} />
+          <SparqlWorkbench profileId={profile.id} persistenceId={`onto-detail-${profile.id}`} />
         </>
       ) : (
         <Alert

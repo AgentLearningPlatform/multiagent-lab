@@ -113,11 +113,11 @@ async function reqText(url: string): Promise<string> {
   return text
 }
 
-/** SPARQL 工作台请求：Accept JSON 结果；失败解析 {error} 或透传引擎原文片段 */
-async function reqSparql(url: string, query: string): Promise<{ raw: string; json: any }> {
+/** SPARQL 工作台请求：Accept 默认 JSON 结果；失败解析 {error} 或透传引擎原文片段 */
+async function reqSparql(url: string, query: string, accept?: string): Promise<{ raw: string; json: any }> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/sparql-query', Accept: 'application/sparql-results+json' },
+    headers: { 'Content-Type': 'application/sparql-query', Accept: accept ?? 'application/sparql-results+json' },
     body: query,
   })
   const text = await res.text()
@@ -452,8 +452,9 @@ export const api = {
     }),
   /** 翻译透视（最近 N 条，含失败留痕；limit≤200） */
   listTraces: (profileId: string, limit = 50) => req<TraceResponse>(`/api/runtime-profiles/${profileId}/trace?limit=${limit}`),
-  /** SPARQL 工作台：POST application/sparql-query；非 running → 409；状态码/错误透传引擎 */
-  runSparql: (profileId: string, query: string) => reqSparql(`/api/runtime-profiles/${profileId}/sparql`, query),
+  /** SPARQL 工作台：POST application/sparql-query；非 running → 409；状态码/错误透传引擎；accept 可覆盖（CONSTRUCT/DESCRIBE 传 text/turtle） */
+  runSparql: (profileId: string, query: string, accept?: string) =>
+    reqSparql(`/api/runtime-profiles/${profileId}/sparql`, query, accept),
   /**
    * SPARQL 工作台端点 URL（REQ-92，Yasgui 自行发起请求，不经 req 封装）。
    * 运行平面反代支持 GET ?query= 与 POST application/sparql-query；非 running → 409。

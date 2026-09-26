@@ -247,20 +247,31 @@
 .onto-learn-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid #f0f0f0; border-radius: 8px; }
 .onto-learn-row .ant-btn { flex-shrink: 0; }
 
-/* ---- P1：SPARQL 工作台（Yasgui，REQ-92）---- */
-.onto-yasgui {
-  height: clamp(420px, 62vh, 640px);
-  margin-top: 10px;
+/* ---- SPARQL 工作台 v2（CM6 + AntD 自组装，REQ-92 实现升级）---- */
+.onto-sparql-workbench {
+  margin-top: 4px;
+  padding: 10px 10px 8px;
   border: 1px solid var(--c-line);
   border-radius: 10px;
-  overflow: auto;
   background: #fff;
 }
-/* Yasgui 自带样式较素，收敛圆角与字号以贴合工作台观感 */
-.onto-yasgui .yasgui { border-radius: 10px; }
-.onto-yasgui .tabsList { background: #f6f7fb; }
-.onto-yasgui .yasqe .CodeMirror { font-family: var(--mono); font-size: 12.5px; }
-.onto-yasgui .yasr { font-size: 12.5px; }
+.onto-sparql-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.onto-sparql-meta { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.onto-sparql-workbench .cm-editor { border: 1px solid var(--c-line); border-radius: 8px; font-size: 12.5px; }
+.onto-sparql-workbench .cm-editor.cm-focused { outline: none; border-color: var(--c-brand); }
+.onto-sparql-workbench .ant-table-cell { font-family: var(--mono); font-size: 12px; }
+.onto-sparql-graph {
+  margin: 10px 0 0;
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: #fafafd;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre;
+}
 
 /* 未启用态占位（无 running 方案时的「查询」页签） */
 .onto-disabled-pane {
