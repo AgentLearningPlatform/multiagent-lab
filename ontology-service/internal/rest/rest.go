@@ -61,6 +61,7 @@ func (s *Server) Mount(m *http.ServeMux) {
 	// 质量门禁与词表搜索（REQ-171 P1，26 号方案 §9 P1 底座 A + LOV 薄层；路径沿用方案原文 /api/ontology/ 前缀）
 	m.HandleFunc("POST /api/ontology/quality/check", s.qualityCheck)
 	m.HandleFunc("GET /api/ontology/quality/report", s.qualityReport)
+	m.HandleFunc("POST /api/ontology/toolchain/{tool}", s.toolchain)
 	m.HandleFunc("GET /api/ontology/vocabularies/search", s.vocabSearch)
 	m.HandleFunc("GET /api/ontologies/seed-learning", s.listLearning)
 	m.HandleFunc("POST /api/ontologies/seed-learning", s.seedLearning)
@@ -1006,42 +1007,15 @@ func (s *Server) diffVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	concepts := diffConcepts(fromSpec.Concepts, toSpec.Concepts)
-	relations := diffRelations(fromSpec.Relations, toSpec.Relations)
-	instances := diffInstances(fromSpec.Instances, toSpec.Instances)
-
-	refs := conceptReferences(*toSpec)
-	impact := []diffImpact{}
-	seen := map[string]bool{}
-	addImpact := func(name string) {
-		if name == "" || seen[name] {
-			return
-		}
-		seen[name] = true
-		impact = append(impact, diffImpact{Name: name, ReferencedBy: refs[name]})
-	}
-	for _, c := range concepts.Removed {
-		if cc, ok := c.(pkgspec.Concept); ok {
-			addImpact(cc.Name)
-		}
-	}
-	for _, c := range concepts.Changed {
-		addImpact(c.Name)
-	}
-	sort.SliceStable(impact, func(i, j int) bool {
-		if impact[i].ReferencedBy != impact[j].ReferencedBy {
-			return impact[i].ReferencedBy > impact[j].ReferencedBy
-		}
-		return impact[i].Name < impact[j].Name
-	})
+	d := buildSpecDiff(fromSpec, toSpec)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"from_version": fromV,
 		"to_version":   toV,
-		"concepts":     concepts,
-		"relations":    relations,
-		"instances":    instances,
-		"impact":       impact,
+		"concepts":     d.Concepts,
+		"relations":    d.Relations,
+		"instances":    d.Instances,
+		"impact":       d.Impact,
 	})
 }
 
