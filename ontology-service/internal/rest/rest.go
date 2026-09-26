@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,8 +20,10 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/llmcreate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/ontochat"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/pipeline"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/qualitygate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/repo"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/seed"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/vocabsearch"
 )
 
 type Server struct {
@@ -29,8 +32,9 @@ type Server struct {
 	LLM      *llmcreate.Creator
 	OntoChat *ontochat.Engine
 
-	ontoChatDB *ontochat.Store   // 惰性初始化（rest_ontochat.go）
-	pipelineDB *pipeline.Store   // 惰性初始化（rest_pipeline.go）
+	ontoChatDB *ontochat.Store     // 惰性初始化（rest_ontochat.go）
+	pipelineDB *pipeline.Store     // 惰性初始化（rest_pipeline.go）
+	vocab      *vocabsearch.Client // REQ-171 P1：LOV 词表搜索（惰性初始化；LOV_API_BASE 可注入测试桩）
 }
 
 func New(st *repo.Store, sc *importer.Sidecar, llm *llmcreate.Creator) *Server {
@@ -53,6 +57,11 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/ontologies/{id}/guide", s.guide)
 	m.HandleFunc("POST /api/ontologies/seed-sample", s.seedSample)
 	m.HandleFunc("POST /api/ontologies/ai-draft", s.aiDraft)
+
+	// 质量门禁与词表搜索（REQ-171 P1，26 号方案 §9 P1 底座 A + LOV 薄层；路径沿用方案原文 /api/ontology/ 前缀）
+	m.HandleFunc("POST /api/ontology/quality/check", s.qualityCheck)
+	m.HandleFunc("GET /api/ontology/quality/report", s.qualityReport)
+	m.HandleFunc("GET /api/ontology/vocabularies/search", s.vocabSearch)
 	m.HandleFunc("GET /api/ontologies/seed-learning", s.listLearning)
 	m.HandleFunc("POST /api/ontologies/seed-learning", s.seedLearning)
 	m.HandleFunc("GET /api/ontologies/{id}/versions", s.listVersions)
@@ -218,6 +227,92 @@ func (s *Server) validate(w http.ResponseWriter, r *http.Request) {
 		errs = []pkgspec.ValidationError{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": len(errs) == 0, "validation_errors": errs})
+}
+
+// qualityCheck REQ-171 P1 质量门禁检查点（旁路：不嵌入生成主链路）。
+// 入参三选：{ontology_id} 检已存 spec_json（默认落 quality-report artifact）；
+// {spec} 内联草稿检查（llmcreate 修复循环用，不落库）；strict=true 时报告以错误级命中判定 Pass。
+func (s *Server) qualityCheck(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OntologyID string             `json:"ontology_id"`
+		Spec       *pkgspec.Spec      `json:"spec"`
+		Strict     bool               `json:"strict"`
+		Config     qualitygate.Config `json:"config"`
+		Save       *bool              `json:"save"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var sp *pkgspec.Spec
+	if req.Spec != nil {
+		sp = req.Spec
+	} else if req.OntologyID != "" {
+		raw, _, err := s.Store.GetArtifact(req.OntologyID, "spec_json")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		sp = &pkgspec.Spec{}
+		if err := json.Unmarshal([]byte(raw), sp); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "spec_json 解析失败: " + err.Error()})
+			return
+		}
+	} else {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ontology_id 或 spec 必填其一"})
+		return
+	}
+	rep := qualitygate.Check(sp, req.Config)
+	rep.Strict = req.Strict
+	if !req.Strict {
+		rep.Pass = true // 宽松模式（默认）：仅告警不阻断
+	}
+	out := map[string]any{"report": rep}
+	// 落库：已存本体默认写 quality-report artifact（可摘除=删该形态 artifact）；内联草稿不落
+	if req.OntologyID != "" && (req.Save == nil || *req.Save) {
+		if b, err := json.Marshal(rep); err == nil {
+			if err := s.Store.PutArtifact(req.OntologyID, "quality-report", string(b), false); err != nil {
+				writeJSON(w, http.StatusOK, map[string]any{"report": rep, "artifact_error": err.Error()})
+				return
+			}
+		}
+		out["artifact_saved"] = true
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// qualityReport 读取最近一次质量报告 artifact（GET /api/ontology/quality/report?ontology_id=）。
+func (s *Server) qualityReport(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("ontology_id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ontology_id 必填"})
+		return
+	}
+	raw, importedAt, err := s.Store.GetArtifact(id, "quality-report")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	writeJSON(w, http.StatusOK, map[string]any{"ontology_id": id, "imported_at": importedAt, "report": json.RawMessage(raw)})
+}
+
+// vocabSearch REQ-171 P1 LOV 词表搜索薄层（GET /api/ontology/vocabularies/search?q=）。
+func (s *Server) vocabSearch(w http.ResponseWriter, r *http.Request) {
+	if s.vocab == nil {
+		s.vocab = vocabsearch.New(os.Getenv("LOV_API_BASE"))
+	}
+	q := r.URL.Query().Get("q")
+	if strings.TrimSpace(q) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q 必填"})
+		return
+	}
+	cards, err := s.vocab.Search(r.Context(), q)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"q": q, "count": len(cards), "results": cards})
 }
 
 func (s *Server) artifacts(w http.ResponseWriter, r *http.Request) {

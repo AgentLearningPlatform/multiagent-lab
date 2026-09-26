@@ -1,5 +1,8 @@
 // Package llmcreate LLM 辅助创建（REQ-82）：生成-校验循环（最多 3 轮），草稿必须经用户预览确认。
 // 模型能力归主平台（/api/ontology-llm/generate 代理），校验归构建平面（与人工编辑共用 Validate）。
+// REQ-171 P1 循环升级（26 号方案 §9 P1 / 设计铁律）：校验源从结构 Validate 扩展为
+// 「结构 Validate + 质量门禁 qualitygate」双源——错误级命中回喂修复（≤3 轮），
+// 3 轮未过转人工预览（既有语义），全程不静默放行。
 package llmcreate
 
 import (
@@ -11,6 +14,8 @@ import (
 	"time"
 
 	pkgspec "github.com/xiaoyao/eino-multiagent-lab/pkg/ontology/spec"
+
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/qualitygate"
 )
 
 const specSchemaHint = `{
@@ -45,9 +50,11 @@ func New(platformURL string) *Creator {
 
 // GenerateResult 生成-校验循环结果。
 type GenerateResult struct {
-	Spec   *pkgspec.Spec `json:"spec"`
-	Rounds int           `json:"rounds"`
-	Usage  any           `json:"usage,omitempty"`
+	Spec        *pkgspec.Spec       `json:"spec"`
+	Rounds      int                 `json:"rounds"`
+	Usage       any                 `json:"usage,omitempty"`
+	Quality     *qualitygate.Report `json:"quality,omitempty"` // REQ-171 P1：终稿质量报告（告警级命中不阻断但透出）
+	QualityPass bool                `json:"quality_pass"`      // 错误级命中是否清零（false=已达轮数上限转人工）
 }
 
 // Draft 领域描述 → spec_json 草稿；校验失败把错误列表回喂模型修正。
@@ -70,7 +77,18 @@ func (c *Creator) Draft(description, extraHint string) (*GenerateResult, error) 
 		}
 		errs := sp.Validate()
 		if len(errs) == 0 {
-			return &GenerateResult{Spec: &sp, Rounds: round, Usage: usage}, nil
+			// REQ-171 P1：结构合法后过质量门禁——错误级命中回喂修复，告警级透出不阻断
+			rep := qualitygate.Check(&sp, nil)
+			if fix := rep.ErrorMessages(); len(fix) == 0 {
+				return &GenerateResult{Spec: &sp, Rounds: round, Usage: usage, Quality: rep, QualityPass: true}, nil
+			} else if round == c.MaxRounds {
+				return &GenerateResult{Spec: &sp, Rounds: round, Usage: usage, Quality: rep, QualityPass: false},
+					fmt.Errorf("已达最大修正轮数，仍有 %d 处质量门禁错误级问题，草稿转人工确认（铁律：不静默放行）", len(fix))
+			} else {
+				fix = append(fix, "（以上为质量门禁检查，请修正后重新输出完整 spec_json）")
+				prompt = buildPrompt(description, extraHint, fix)
+				continue
+			}
 		}
 		if round == c.MaxRounds {
 			return &GenerateResult{Spec: &sp, Rounds: round, Usage: usage},
