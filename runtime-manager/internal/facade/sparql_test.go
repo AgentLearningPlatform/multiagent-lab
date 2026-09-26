@@ -162,12 +162,12 @@ func TestHandleSparqlQueryEndToEnd(t *testing.T) {
 		t.Fatalf("下游请求不符: ct=%s accept=%s body=%s", gotCT, gotAccept, gotQuery)
 	}
 	var out struct {
-		Columns   []string          `json:"columns"`
-		Rows      []map[string]any  `json:"rows"`
-		Count     int               `json:"count"`
-		Total     int               `json:"total"`
-		Truncated bool              `json:"truncated"`
-		Limit     int               `json:"limit"`
+		Columns   []string         `json:"columns"`
+		Rows      []map[string]any `json:"rows"`
+		Count     int              `json:"count"`
+		Total     int              `json:"total"`
+		Truncated bool             `json:"truncated"`
+		Limit     int              `json:"limit"`
 	}
 	if err := json.Unmarshal([]byte(res.Content[0].(mcp.TextContent).Text), &out); err != nil {
 		t.Fatalf("结果解析: %v", err)
@@ -209,5 +209,78 @@ func TestHandleSparqlQueryEndToEnd(t *testing.T) {
 	}
 	if len(traces) != 1 || traces[0].Tool != "sparql_query" || traces[0].Ok != true || traces[0].ResultCount != 2 {
 		t.Fatalf("透视落库不符: %+v", traces)
+	}
+}
+
+// M28/P2a（REQ-170）：sparql_query graph=companion 伴生图分支——协议参数转发/参数校验/失败语义。
+func TestHandleSparqlQueryCompanion(t *testing.T) {
+	var gotPath, gotRawQuery string
+	sparqlSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotRawQuery = r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/sparql-results+json")
+		io.WriteString(w, `{"head":{"vars":["label"]},"results":{"bindings":[
+			{"label":{"type":"literal","value":"Pod 扩容"}}]}}`)
+	}))
+	defer sparqlSrv.Close()
+	t.Setenv("COMPANION_GRAPH_ENDPOINT", sparqlSrv.URL)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), filepath.Join("..", "..", "migrations"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	f := New(st, func(string) (string, error) { return "", nil })
+	h := f.handleSparqlQuery()
+
+	newReq := func(args map[string]any) mcp.CallToolRequest {
+		req := mcp.CallToolRequest{}
+		req.Params.Name = "sparql_query"
+		req.Params.Arguments = args
+		return req
+	}
+
+	// 1) 成功路径：default-graph-uri 指向会话图；ontology_id 可缺省
+	res, err := h(context.Background(), newReq(map[string]any{
+		"query":           "SELECT ?label WHERE { ?s rdfs:label ?label }",
+		"graph":           "companion",
+		"conversation_id": "conv-abc",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("伴生查询失败: %v / %v", err, res)
+	}
+	if gotPath != "/query" || !strings.Contains(gotRawQuery, "default-graph-uri=") || !strings.Contains(gotRawQuery, "conv-conv-abc") {
+		t.Fatalf("转发 URL 不符: %s?%s", gotPath, gotRawQuery)
+	}
+	// 结果带 graph 溯源字段
+	txt, _ := json.Marshal(res)
+	if !strings.Contains(string(txt), "http://eino-lab/graph/conv-conv-abc") {
+		t.Fatalf("结果缺 graph 字段: %s", txt)
+	}
+
+	// 2) 缺 conversation_id → 明确报错
+	res, err = h(context.Background(), newReq(map[string]any{"query": "SELECT ?x WHERE { ?s ?p ?x }", "graph": "companion"}))
+	if err != nil || res.IsError != true || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "conversation_id 必填") {
+		t.Fatalf("缺 conversation_id 应报错: %v / %v", err, res)
+	}
+
+	// 3) graph 非法值 → 报错
+	res, err = h(context.Background(), newReq(map[string]any{"query": "SELECT ?x WHERE { ?s ?p ?x }", "graph": "nan"}))
+	if err != nil || res.IsError != true || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "default | companion") {
+		t.Fatalf("非法 graph 应报错: %v / %v", err, res)
+	}
+
+	// 4) 引擎失联 → COMPANION_GRAPH_UNAVAILABLE（含自助指引）
+	t.Setenv("COMPANION_GRAPH_ENDPOINT", "http://127.0.0.1:1")
+	res, err = h(context.Background(), newReq(map[string]any{
+		"query": "SELECT ?x WHERE { ?s ?p ?x }", "graph": "companion", "conversation_id": "c1"}))
+	if err != nil || res.IsError != true || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "COMPANION_GRAPH_UNAVAILABLE") {
+		t.Fatalf("引擎失联应报 COMPANION_GRAPH_UNAVAILABLE: %v / %v", err, res)
+	}
+
+	// 5) 变更查询仍拒绝（白名单照旧）
+	res, err = h(context.Background(), newReq(map[string]any{
+		"query": "DELETE WHERE { ?s ?p ?o }", "graph": "companion", "conversation_id": "c1"}))
+	if err != nil || res.IsError != true || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "QUERY_REJECTED") {
+		t.Fatalf("伴生分支也应拒绝变更查询: %v / %v", err, res)
 	}
 }

@@ -394,7 +394,7 @@ func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(&b, "%s(%s→%s)", rel.Name, rel.From, rel.To)
 	}
-	fmt.Fprintf(&b, "\n实例共 %d 个。查询工具使用：get_concept/get_instance 按名称精确查，list_instances 列出某概念全部实例，neighbors 查实例关系邻居，sparql_query 可执行自定义只读 SPARQL SELECT 查询（开放性问题如「哪些概念没有任何注释」，入参 query + 可选 limit，仅允许 SELECT 禁变更操作）。所有工具入参 ontology_id 固定为 %s。", len(sp.Instances), o.ID)
+	fmt.Fprintf(&b, "\n实例共 %d 个。查询工具使用：get_concept/get_instance 按名称精确查，list_instances 列出某概念全部实例，neighbors 查实例关系邻居，sparql_query 可执行自定义只读 SPARQL SELECT 查询（开放性问题如「哪些概念没有任何注释」，入参 query + 可选 limit，仅允许 SELECT 禁变更操作；graph=companion + conversation_id 可查询该会话的伴生本体图——对话中沉淀的动态知识，跨会话记忆查询）。所有工具入参 ontology_id 固定为 %s。", len(sp.Instances), o.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"ontology_id": o.ID, "guide": b.String()})
 }
 

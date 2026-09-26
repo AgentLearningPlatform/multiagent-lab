@@ -8,6 +8,7 @@ import { sourceTag, type ValidationState } from './shared'
 import CsvIngestPane from './components/CsvIngestPane'
 import GraphEditor from './components/GraphEditor'
 import SourceView from './components/SourceView'
+import CompanionPane from './components/companion/CompanionPane'
 import SpecEditorPane from './components/assets/SpecEditorPane'
 import { ArtifactsPane, ExportPane, ValidatePane } from './components/assets/AssetPanes'
 import { OntologyPicker, RenameModal, VizTabs } from './components/assets/AssetExtras'
@@ -307,6 +308,15 @@ export default function AssetsPage() {
                       onIngested={() => refreshAfterSave()}
                     />
                   ),
+                },
+                {
+                  key: 'companion',
+                  label: (
+                    <span>
+                      伴生本体 <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>对话</Tag>
+                    </span>
+                  ),
+                  children: <CompanionPane />,
                 },
               ]}
             />

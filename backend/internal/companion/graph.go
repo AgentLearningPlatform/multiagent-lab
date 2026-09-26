@@ -59,8 +59,11 @@ func (e *Engine) candidatePaths() []string {
 			add(p)
 		}
 	}
-	add(filepath.Join("data", "bin", "oxigraph_server"))
-	add(filepath.Join("data", "bin", "oxigraph"))
+	// backend 进程 cwd 为 backend/（run-dev.sh cd backend），仓库根 data/bin 以 ../data/bin 命中
+	for _, base := range []string{"data/bin", "../data/bin"} {
+		add(filepath.Join(base, "oxigraph_server"))
+		add(filepath.Join(base, "oxigraph"))
+	}
 	add(filepath.Join("tools", "bin", "oxigraph"))
 	return out
 }
