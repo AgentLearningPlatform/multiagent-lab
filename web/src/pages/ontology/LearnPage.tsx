@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Card, Collapse, Progress, Skeleton, Space, Tabs, Tag, Typography } from 'antd'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Card, Collapse, Progress, Skeleton, Space, Tabs, Tag, Typography } from 'antd'
 import {
   BookOutlined,
   CheckCircleOutlined,
@@ -10,9 +10,6 @@ import { api } from '../../api/client'
 import { useUI } from '../../store/ui'
 import { STAGE_DEFS } from './shared'
 import PipelinePane from './components/PipelinePane'
-import XMarkdown from '@ant-design/x-markdown'
-// REQ-109 外部资源导航：仓库随版本维护的内容资产（构建期内联，改 md 即生效无需改代码）
-import RESOURCES_MD from '../../../../seeds/learning/external-resources.md?raw'
 
 // ---------------------------------------------------------------------------
 // 学习中心（LearnPage，REQ-104 ①，默认页）：本体模块 = 学习各种本体构建、运行方式的模块
@@ -317,6 +314,7 @@ export default function LearnPage() {
   const { showToast } = useUI()
   const [checklist, setChecklist] = useState<Record<string, string>>(readChecklist)
   const [learningExamples, setLearningExamples] = useState<{ key: string; name: string; description: string }[] | null>(null)
+  const [activeStage, setActiveStage] = useState<string>('s1') // REQ-162①：方块步骤条选中阶段
 
   useEffect(() => {
     api
@@ -359,19 +357,9 @@ export default function LearnPage() {
     const isBuildStage = i <= 3
     return {
       key: s.key,
-      label: (
-        <Space size={8} wrap>
-          <Tag color={STAGE_COLORS[s.key]} style={{ margin: 0 }}>{s.key.toUpperCase()}</Tag>
-          <span>{s.short}</span>
-          {prog.total > 0 && (
-            <Badge
-              count={`${prog.done}/${prog.total}`}
-              style={{ backgroundColor: prog.done === prog.total ? '#16a34a' : '#8b91a7' }}
-            />
-          )}
-          {!isBuildStage && <Tag style={{ margin: 0, fontSize: 10 }}>运行段 · 见运行栏</Tag>}
-        </Space>
-      ),
+      short: s.short,
+      color: STAGE_COLORS[s.key],
+      isBuildStage,
       children: (
         <div className="onto-learn-stage">
           {methods.map((m) => (
@@ -479,10 +467,39 @@ export default function LearnPage() {
       </div>
 
       <Card className="work-card" size="small" title="七阶段学习路径（S1 → S7）">
-        <Collapse
-          defaultActiveKey={['s1']}
-          items={stagePanels}
-        />
+        <div className="onto-learn-steps" role="tablist" aria-label="七阶段学习路径步骤条">
+          {stagePanels.map((st, i) => {
+            const prog = stageProgress.get(st.key) ?? { total: 0, done: 0 }
+            const allDone = prog.total > 0 && prog.done === prog.total
+            return (
+              <Fragment key={st.key}>
+                {i > 0 && <RightOutlined className="onto-learn-step-arrow" aria-hidden="true" />}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStage === st.key}
+                  className={`onto-learn-step${activeStage === st.key ? ' active' : ''}${allDone ? ' done' : ''}`}
+                  onClick={() => setActiveStage(st.key)}
+                  title={st.isBuildStage ? `${st.short}（构建段）` : `${st.short}（运行段 · 见运行栏）`}
+                >
+                  <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key] }}>{st.key.toUpperCase()}</span>
+                  <span className="onto-learn-step-name">{st.short}</span>
+                  {prog.total > 0 && (
+                    <span className={`onto-learn-step-badge${allDone ? ' done' : ''}`}>{prog.done}/{prog.total}</span>
+                  )}
+                </button>
+              </Fragment>
+            )
+          })}
+        </div>
+        {(() => {
+          const panel = stagePanels.find((x) => x.key === activeStage) ?? stagePanels[0]
+          return (
+            <div className="onto-learn-stage-detail" role="tabpanel">
+              {panel.children}
+            </div>
+          )
+        })()}
       </Card>
 
       <Tabs
@@ -584,24 +601,6 @@ export default function LearnPage() {
             key: 'pipeline',
             label: '工具链配置',
             children: <PipelinePane />,
-          },
-          {
-            key: 'external-resources',
-            label: '外部资源',
-            children: (
-              <>
-                <Alert
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 10 }}
-                  message="可直接访问的平台与典型开源项目导航（REQ-109）"
-                  description="内容由仓库随版本维护的 seeds/learning/external-resources.md 渲染——编辑该文件并提交后即生效（构建期内联，无需改代码）。全局台账与登记状态见 docs/15_开源项目及论文登记簿.md。"
-                />
-                <div className="onto-learn-extres">
-                  <XMarkdown content={RESOURCES_MD} openLinksInNewTab />
-                </div>
-              </>
-            ),
           },
         ]}
         style={{ marginTop: 2 }}

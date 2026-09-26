@@ -7,12 +7,14 @@ import type { Conversation } from '../../../../api/types'
 import { companionApi } from '../../../../api/companion'
 import type { CompanionCandidate } from '../../../../api/companion'
 import LoadErrorAlert from '../../../../components/LoadErrorAlert'
+import CompanionGraph3D from './CompanionGraph3D'
 
 // ---------------------------------------------------------------------------
 // REQ-170/M28 P2：伴生本体页签（资产栏第九 Tab，D-O19 第三来源「对话」边界——
 // 不入第五栏 KG 检索区；来源徽标「对话」）。
 // 能力：会话选择 → 管线状态（引擎/游标/pending/图内实体标签）→ 候选人工确认流
-//（confirm 入图 / reject）→ 会话级整体摘除（DROP GRAPH + 清表）。
+//（confirm 入图 / reject）→ 会话级整体摘除（DROP GRAPH + 清表）
+// → REQ-154 成长图 3D 可视化（本会话伴生图 force 视图，入图时间=成长序）。
 // ---------------------------------------------------------------------------
 
 const KIND_META: Record<CompanionCandidate['kind'], { color: string; text: string }> = {
@@ -37,6 +39,7 @@ export default function CompanionPane() {
   const [deciding, setDeciding] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [actionErr, setActionErr] = useState<string | null>(null)
+  const [view, setView] = useState<'candidates' | 'graph3d'>('candidates') // REQ-154 成长可视化开关
 
   const loadConvs = useCallback(() => {
     setConvsLoading(true)
@@ -248,21 +251,38 @@ export default function CompanionPane() {
           </Card>
 
           <div className="onto-sec">
-            <span className="onto-sec-title">候选（人工确认 = 入图门控，REQ-82 草稿必审）</span>
+            <span className="onto-sec-title">
+              {view === 'candidates' ? '候选（人工确认 = 入图门控，REQ-82 草稿必审）' : '伴生图成长可视化（REQ-154，3d-force 只读视图）'}
+            </span>
             <span className="hit-spacer" />
             <Segmented
               size="small"
-              value={bucket}
-              onChange={(v) => setBucket(v as 'pending' | 'confirmed' | 'rejected')}
+              value={view}
+              onChange={(v) => setView(v as 'candidates' | 'graph3d')}
               options={[
-                { value: 'pending', label: '待确认' },
-                { value: 'confirmed', label: '已入图' },
-                { value: 'rejected', label: '已拒绝' },
+                { value: 'candidates', label: '候选确认流' },
+                { value: 'graph3d', label: '成长图 3D' },
               ]}
             />
+            {view === 'candidates' && (
+              <Segmented
+                size="small"
+                value={bucket}
+                onChange={(v) => setBucket(v as 'pending' | 'confirmed' | 'rejected')}
+                options={[
+                  { value: 'pending', label: '待确认' },
+                  { value: 'confirmed', label: '已入图' },
+                  { value: 'rejected', label: '已拒绝' },
+                ]}
+              />
+            )}
           </div>
 
-          {candsErr ? (
+          {view === 'graph3d' ? (
+            convId ? (
+              <CompanionGraph3D convId={convId} />
+            ) : null
+          ) : candsErr ? (
             <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={() => convId && loadAll(convId)} />
           ) : candsLoading ? (
             <div style={{ padding: '16px 0' }}>

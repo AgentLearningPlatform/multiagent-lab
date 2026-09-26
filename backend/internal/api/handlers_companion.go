@@ -17,6 +17,21 @@ import (
 // 边界（D-O19 第三来源）：伴生图独立于第五栏 KG 检索区，前端页签属资产栏（后续轮次）。
 // ---------------------------------------------------------------------------
 
+// companionGraph GET /api/companion/graph?conversation_id=（REQ-154 成长可视化数据源）。
+func (s *Server) companionGraph(w http.ResponseWriter, r *http.Request) {
+	convID := r.URL.Query().Get("conversation_id")
+	if convID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation_id 必填"})
+		return
+	}
+	out, err := s.Companion.Graph(r.Context(), convID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) listCompanionCandidates(w http.ResponseWriter, r *http.Request) {
 	convID := r.URL.Query().Get("conversation_id")
 	status := r.URL.Query().Get("status")
@@ -75,4 +90,6 @@ func (s *Server) resetCompanionConversation(w http.ResponseWriter, r *http.Reque
 }
 
 // errBadRequest 简单 400 错误（与既有 writeErr 语义对齐）。
-func errBadRequest(msg string) error { return &store.HTTPError{Status: http.StatusBadRequest, Msg: msg} }
+func errBadRequest(msg string) error {
+	return &store.HTTPError{Status: http.StatusBadRequest, Msg: msg}
+}

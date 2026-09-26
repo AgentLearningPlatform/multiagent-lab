@@ -92,7 +92,7 @@ func (s *Server) addAgentTool(mcpSrv *mcpserver.MCPServer, agentID, name string)
 		}
 		// Bearer 精确匹配（middleware 已校验 token 属于某 enabled Agent，这里再校验就是本 Agent 的）
 		if tok, _ := ctx.Value(mcpBearerKey{}).(string); tok == "" || tok != a.McpServe.Token {
-				return mcp.NewToolResultError("unauthorized: token 与该智能体不匹配"), nil
+			return mcp.NewToolResultError("unauthorized: token 与该智能体不匹配"), nil
 		}
 		// 审批默认拒绝（server 模式无 UI 交互面，§6.13 安全边界）
 		if a.ToolApproval != "" && a.ToolApproval != "off" {
@@ -245,4 +245,3 @@ func (s *Server) normalizeMcpServe(a *store.Agent, prev store.Agent) bool {
 
 // mcpSync 由 handlers 在 Agent 增删改后调用：重建 /mcp 工具表。
 func (s *Server) mcpSync() { s.invalidateMCP() }
-

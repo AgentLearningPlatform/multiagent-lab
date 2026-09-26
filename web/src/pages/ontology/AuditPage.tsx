@@ -60,13 +60,14 @@ export default function AuditPage() {
                 消费与审计
               </Typography.Title>
               <Tag color="purple" style={{ margin: 0 }}>
-                消费 + 审计
+                本体消费侧观测台
               </Tag>
               <Tag style={{ margin: 0 }}>自研 KG · 零外部进程</Tag>
             </div>
             <p className="work-head-desc">
               本体叙事的「构建 → 运行 → <strong>消费</strong> → <strong>审计</strong>」环节载体（D-O15 改造自原
-              Semantica 独立栏）：知识库语料抽取为自存 KG 供图谱浏览与 GraphRAG 检索，构建/抽取决策全程留痕可溯源。
+              Semantica 独立栏；D-O19 定位厘清）：第五栏 = <strong>本体消费侧观测台</strong>——KG 检索默认走本体
+              TTL 装载链路（带来源徽标，KB 文本抽取来源可切换、永不混排），构建/抽取决策全程留痕可溯源。
             </p>
           </div>
           <Space size={8} wrap>
@@ -126,7 +127,7 @@ export default function AuditPage() {
           onChange={setTab}
           items={[
             { key: 'graph', label: 'KG 图谱', children: <AuditGraphTab kbId={kbId} /> },
-            { key: 'query', label: 'GraphRAG 试查', children: <AuditQueryTab kbId={kbId} /> },
+            { key: 'query', label: 'KG 检索', children: <AuditQueryTab kbId={kbId} /> },
             { key: 'audit', label: '决策审计', children: <AuditDecisionTab kbId={kbId} /> },
             { key: 'home', label: '学习引导', children: <AuditHomeTab /> },
           ]}

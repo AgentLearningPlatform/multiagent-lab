@@ -64,4 +64,3 @@ func (s *Server) docRead(w http.ResponseWriter, r *http.Request) {
 		"content": string(b),
 	})
 }
-

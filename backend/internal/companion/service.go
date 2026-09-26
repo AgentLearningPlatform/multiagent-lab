@@ -287,6 +287,69 @@ func (s *Service) RejectCandidate(ctx context.Context, candID string) (*store.Co
 	return s.Store.DecideCompanionCandidate(candID, "rejected")
 }
 
+// GraphNode / GraphEdge 成长可视化数据（REQ-154；3d-force-graph 前端渲染）。
+type GraphNode struct {
+	Label      string  `json:"label"`
+	Kind       string  `json:"kind"` // Concept | Event
+	Definition string  `json:"definition,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+	CreatedAt  string  `json:"created_at,omitempty"`
+}
+
+type GraphEdge struct {
+	Source    string `json:"source"`
+	Target    string `json:"target"`
+	Rel       string `json:"rel"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+// Graph 会话伴生图全量读取（REQ-154 成长可视化数据源；节点=概念/事件实体，边=活跃关系）。
+// 引擎不在位（未启动且无存活实例）返回空图——读侧不拉起（与检索同口径）。
+func (s *Service) Graph(ctx context.Context, convID string) (map[string]any, error) {
+	out := map[string]any{"conversation_id": convID, "graph": GraphURI(convID), "nodes": []GraphNode{}, "edges": []GraphEdge{}, "engine_running": false}
+	if s.Engine.Endpoint() == "" && !s.Engine.AdoptRunning(ctx) {
+		return out, nil
+	}
+	out["engine_running"] = true
+	nodes := []GraphNode{}
+	raw, err := s.Engine.Query(ctx, SelectNodes(convID))
+	if err == nil {
+		var res struct {
+			Results struct {
+				Bindings []map[string]struct {
+					Value string `json:"value"`
+				} `json:"bindings"`
+			} `json:"results"`
+		}
+		if json.Unmarshal(raw, &res) == nil {
+			for _, b := range res.Results.Bindings {
+				conf := 0.0
+				fmt.Sscanf(b["conf"].Value, "%f", &conf)
+				kind := strings.TrimPrefix(b["kind"].Value, BotNS)
+				nodes = append(nodes, GraphNode{Label: b["label"].Value, Kind: kind, Definition: b["def"].Value, Confidence: conf, CreatedAt: b["at"].Value})
+			}
+		}
+	}
+	edges := []GraphEdge{}
+	raw, err = s.Engine.Query(ctx, SelectEdges(convID))
+	if err == nil {
+		var res struct {
+			Results struct {
+				Bindings []map[string]struct {
+					Value string `json:"value"`
+				} `json:"bindings"`
+			} `json:"results"`
+		}
+		if json.Unmarshal(raw, &res) == nil {
+			for _, b := range res.Results.Bindings {
+				edges = append(edges, GraphEdge{Source: b["src"].Value, Target: b["dst"].Value, Rel: b["rel"].Value, CreatedAt: b["at"].Value})
+			}
+		}
+	}
+	out["nodes"], out["edges"] = nodes, edges
+	return out, nil
+}
+
 // ResetConversation 会话级整体摘除：DROP GRAPH + 清候选/游标 +（可选）停引擎。
 func (s *Service) ResetConversation(ctx context.Context, convID string) error {
 	if err := s.Engine.Update(ctx, DropGraph(convID)); err != nil {

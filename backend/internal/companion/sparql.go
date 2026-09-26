@@ -163,6 +163,37 @@ SELECT ?s ?p ?o WHERE {
 } ORDER BY ?s LIMIT 500`, GraphURI(convID))
 }
 
+// SelectNodes 会话图节点（概念/事件实体，含定义/置信度/入图时间——REQ-154 成长可视化数据源）。
+func SelectNodes(convID string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+SELECT ?kind ?label ?def ?conf ?at WHERE {
+  GRAPH <%s> {
+    ?s a ?kind ; rdfs:label ?label .
+    FILTER(?kind IN (bot:Concept, bot:Event))
+    OPTIONAL { ?s bot:definition ?def }
+    OPTIONAL { ?s bot:confidence ?conf }
+    OPTIONAL { ?s prov:generatedAtTime ?at }
+  }
+} ORDER BY ?at LIMIT 300`, BotNS, GraphURI(convID))
+}
+
+// SelectEdges 会话图活跃关系边（两端标签 + 关系名 + 入图时间；失效边不返回）。
+func SelectEdges(convID string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+SELECT ?src ?rel ?dst ?at WHERE {
+  GRAPH <%s> {
+    ?e a bot:Relation ; bot:relName ?rel ; bot:subject ?s ; bot:object ?o ; prov:generatedAtTime ?at .
+    ?s rdfs:label ?src .
+    ?o rdfs:label ?dst .
+    FILTER NOT EXISTS { ?e bot:invalidAt ?any }
+  }
+} ORDER BY ?at LIMIT 300`, BotNS, GraphURI(convID))
+}
+
 // SelectLabels 会话图概念实体标签清单（状态回显 + KG 检索源匹配用；
 // 限定 bot:Concept——bot:Relation 边节点同样带 rdfs:label（关系名），不属实体）。
 func SelectLabels(convID string) string {

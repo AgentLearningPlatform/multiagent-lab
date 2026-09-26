@@ -33,6 +33,28 @@ export interface CompanionStatus {
   labels?: string[]
 }
 
+/** REQ-154 成长可视化图数据（GET /api/companion/graph） */
+export interface CompanionGraphNode {
+  label: string
+  kind: 'Concept' | 'Event'
+  definition?: string
+  confidence?: number
+  created_at?: string
+}
+export interface CompanionGraphEdge {
+  source: string
+  target: string
+  rel: string
+  created_at?: string
+}
+export interface CompanionGraph {
+  conversation_id: string
+  graph: string
+  engine_running: boolean
+  nodes: CompanionGraphNode[]
+  edges: CompanionGraphEdge[]
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...init })
   const text = await res.text()
@@ -62,4 +84,5 @@ export const companionApi = {
   status: (conversationId: string) => req<CompanionStatus>(`/api/companion/status?conversation_id=${encodeURIComponent(conversationId)}`),
   resetConversation: (conversationId: string) =>
     req<{ reset: boolean }>(`/api/companion/conversations/${conversationId}/reset`, { method: 'POST', body: '{}' }),
+  graph: (conversationId: string) => req<CompanionGraph>(`/api/companion/graph?conversation_id=${encodeURIComponent(conversationId)}`),
 }

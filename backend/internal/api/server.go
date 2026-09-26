@@ -21,22 +21,22 @@ import (
 
 // Server 聚合依赖并持有路由。
 type Server struct {
-	Store     *store.Store
-	Box       *secrets.Box
-	Chat      *chat.Service
-	Tools     *tool.Registry
-	KB        *kb.Service
-	Ontology  *ontology.Service  // M8：本体对接（反代/facade 探测）
-	OntoBuild *ontobuild.Service // O13：由知识库构建本体（KB→spec 编排）
-	FilesRoot string             // M11：项目文件根目录（上传/下载落盘）
-	DBPath    string             // REQ-113：SQLite 文件路径（数据与安全概览展示 DB 体积）
-	DocsRoot     string             // REQ-140：内部方案文档根目录（只读查看）
-	ResearchRoot string             // REQ-150：research/ 立项依据层根目录（只读查看，2026-09-25 扩展）
-	KnowledgeRoot string            // REQ-161：platform-knowledge/ 平台知识根目录（只读查看，2026-09-25 扩展）
-	Companion  *companion.Service   // REQ-170/M28：伴生本体旁路管线（Run/Resume 收尾触发，低侵入）
-	Mux       *http.ServeMux
-	mcpMu     sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
-	mcpHTTP   http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
+	Store         *store.Store
+	Box           *secrets.Box
+	Chat          *chat.Service
+	Tools         *tool.Registry
+	KB            *kb.Service
+	Ontology      *ontology.Service  // M8：本体对接（反代/facade 探测）
+	OntoBuild     *ontobuild.Service // O13：由知识库构建本体（KB→spec 编排）
+	FilesRoot     string             // M11：项目文件根目录（上传/下载落盘）
+	DBPath        string             // REQ-113：SQLite 文件路径（数据与安全概览展示 DB 体积）
+	DocsRoot      string             // REQ-140：内部方案文档根目录（只读查看）
+	ResearchRoot  string             // REQ-150：research/ 立项依据层根目录（只读查看，2026-09-25 扩展）
+	KnowledgeRoot string             // REQ-161：platform-knowledge/ 平台知识根目录（只读查看，2026-09-25 扩展）
+	Companion     *companion.Service // REQ-170/M28：伴生本体旁路管线（Run/Resume 收尾触发，低侵入）
+	Mux           *http.ServeMux
+	mcpMu         sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
+	mcpHTTP       http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
 }
 
 // NewServer 构造并注册全部路由。
@@ -92,6 +92,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/companion/candidates/{id}/confirm", s.confirmCompanionCandidate)
 	m.HandleFunc("POST /api/companion/candidates/{id}/reject", s.rejectCompanionCandidate)
 	m.HandleFunc("GET /api/companion/status", s.companionStatus)
+	m.HandleFunc("GET /api/companion/graph", s.companionGraph)
 	m.HandleFunc("POST /api/companion/conversations/{id}/reset", s.resetCompanionConversation)
 
 	// Projects
@@ -112,11 +113,11 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/conversations/{id}/events", s.listEvents)
 	m.HandleFunc("POST /api/conversations/{id}/runs", s.runConversation)
 	m.HandleFunc("POST /api/conversations/{id}/stop", s.stopConversation)
-	m.HandleFunc("GET /api/conversations/{id}/export", s.exportConversation)       // REQ-113①：对话导出 Markdown
+	m.HandleFunc("GET /api/conversations/{id}/export", s.exportConversation) // REQ-113①：对话导出 Markdown
 	m.HandleFunc("GET /api/docs/read", s.docRead)
 	m.HandleFunc("GET /api/assistant/config", s.assistantConfigGet) // M27/REQ-166
 	m.HandleFunc("PUT /api/assistant/config", s.assistantConfigPut)
-	m.HandleFunc("POST /api/assistant/optimize", s.assistantOptimize) // M27/REQ-167                                  // REQ-140：内部方案文档只读查看
+	m.HandleFunc("POST /api/assistant/optimize", s.assistantOptimize)              // M27/REQ-167                                  // REQ-140：内部方案文档只读查看
 	m.HandleFunc("POST /api/conversations/{id}/auto-name", s.autoNameConversation) // REQ-136：对话自动命名
 	// M11 收尾：中断恢复（ask_human 答复定向续跑）
 	m.HandleFunc("POST /api/conversations/{id}/resume", s.resumeConversation)

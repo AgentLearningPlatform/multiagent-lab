@@ -138,7 +138,7 @@ func (s *Server) kgNeighborhood(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-if claims == nil {
+	if claims == nil {
 		claims = []*store.KGClaimTrace{}
 	}
 	if inRels == nil {

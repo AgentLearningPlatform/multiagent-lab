@@ -111,4 +111,3 @@ func (s *Server) kgMergeSuggestions(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": list})
 }
-
