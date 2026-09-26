@@ -1,6 +1,6 @@
 # eino-multiagent-lab · 智能体平台 需求文档（PRD）
 
-> 状态：Draft v0.54
+> 状态：Draft v0.55
 > 日期：2026-09-26
 > 负责人：董奎
 > 文档性质：**活文档**。每个迭代开始前更新「迭代记录」与「需求池」，已确认需求不要直接删除，改为在条目后标注 `（已变更/已移交，见 vX.X）`。
@@ -162,8 +162,8 @@
 | REQ-161（v0.45 新增；✅ 结构基座已交付 2026-09-25：文档体系迁移+页面目录驱动二级树+相对引用点击 Drawer；交互完善/构建验证/内容扩充矩阵主人本地开发） | **参考资料升级「平台知识」——二级主题树与内容扩充**（REQ-116 v2）：①**更名**——模块名「参考资料」→「**平台知识**」（导航 label/侧边栏标题/17 口径同步；PageKey 不变）；定位=平台知识与技术的**学习视图层**（17 §1.4）。②**二级主题树**——左栏升级为可收缩两级菜单（AntD Menu inline SubMenu 原生折叠，零自研）：L1 模块 / L2 主题页；内容文件沿用 frontmatter module+topic 组织，前端按模块分组建树。③**内容扩充（首批矩阵，素材源=research/ 调研与 docs/ 模块档，文档线可先行产出）**——智能体：[总览 / Eino ADK 与 ChatModelAgent / 推理后端与 DeepSeek Harness 适配器 / 沙箱方案（10a 实测与边界治理）/ 多 Agent 协作装配]；本体：[总览 / 六条构建路径 / 运行方案与引擎（Oxigraph/Fuseki）/ 开源项目调研集（OntoChat/OntoExtend/open-ontologies/WebVOWL/Protégé）/ 消费与审计（KG/PROV-O）]；知识库：[总览 / RAG 管道与向量后端 / GraphRAG 与知识图谱 / 开源选型对比（WeKnora/RAGFlow/Qdrant）]；项目/技能/设置/平台总览：既有页保留+按需增补（Git 视图/SKILL.md 对照/多实例与别名/推理后端探测）。**验收**：左栏两级可收缩树；每 L2 页保持四段骨架+源文档地图；模块更名后导航/口径一致；20 号 S1.4 更新 | P2 |
 | REQ-162（v0.46 新增，待开发） | **本体学习中心七阶段方块化 + 外部资源迁移**：①学习中心「七阶段学习路径（S1→S7）」由 Collapse 折叠面板改为**一排方块 + 从左到右箭头连接**的步骤条形态（每阶段一方块：编号+名称+状态色，点击展开该阶段方法论卡与任务卡）；②**外部资源迁移**——学习中心「外部资源」Tab（REQ-109）藏得过深，迁移至**平台知识模块**（作为「平台知识」下独立主题页，内容仍为 seeds/learning/external-resources.md 构建期内联；REQ-109 交付物不废弃只挪位）；本体模块左侧边栏相应瘦身 | P2 |
 | REQ-163（v0.46 新增，待开发） | **「消费与审计」第五栏定位厘清与 KG 内容边界**：现状混淆点——第五栏同时呈现 KG 增强检索展示与决策审计，而知识库 GraphRAG 子模块（REQ-107/M16）也管理 KG（实体/关系/claims），两处 KG 来源（本体 TTL 装载 vs KB 文本抽取）与受众未在界面区分。**梳理结论（文档线 2026-09-25）**：第五栏定位=「本体消费侧观测台」——仅展示**本体 TTL 装载来源的 KG** 检索与 onto_* 消费审计；KB 文本抽取 KG 的展示归知识库 GraphRAG 子模块。改造：①第五栏 KG 检索区数据源限定本体 TTL 装载（来源徽标注 TTL/文本）；②界面文案与 03/17 口径同步「本体消费侧」；③不删除能力只厘清边界 | P2 |
-| REQ-164（v0.46 新增，待开发） | **智能体配置补齐技能 UI + 分区调整**（REQ-132 分区细化）：①**补齐技能配置界面**——「能力」分区现状只有工具白名单与 MCP servers，缺技能勾选（save 仅透传 agent.skills 无 UI）；补多选技能列表（注册表来源，含已挂载状态）；②**分区调整**——「运行后端」「推理后端」从「模型与参数」移至**「基本」分区**（后端=Agent 身份属性而非模型参数，主人指示）；③同步 REQ-132 四分区定义（基本含后端身份项） | P2 |
-| REQ-165（v0.46 新增，待开发） | **推理后端官方 Logo 自动匹配**（REQ-137 增强）：①为已支持的推理后端（claude-code/opencode/aider/deepseek-harness/eino-adk）内置官方 logo 资源；②Agent 选择某后端 → 对话/详情等运行上下文中 Agent 图标自动切换为该后端 logo（现为 glyph 占位）；③**智能体导航树保持智能体默认标识**（glyph 或登记 logo_url，不随后端变化）——导航树表达 Agent 身份，运行上下文表达执行身份；AgentLogo 组件扩展双态渲染 | P3 |
+| REQ-164（v0.46 新增；**✅ 已排期 M26/P2**，02 v0.82 M26 扩容） | **智能体配置补齐技能 UI + 分区调整**（REQ-132 分区细化）：①**补齐技能配置界面**——「能力」分区现状只有工具白名单与 MCP servers，缺技能勾选（save 仅透传 agent.skills 无 UI）；补多选技能列表（注册表来源，含已挂载状态）；②**分区调整**——「运行后端」「推理后端」从「模型与参数」移至**「基本」分区**（后端=Agent 身份属性而非模型参数，主人指示）；③同步 REQ-132 四分区定义（基本含后端身份项） | P2 |
+| REQ-165（v0.46 新增；**✅ 已排期 M26/P3 尾**，02 v0.82 M26 扩容） | **推理后端官方 Logo 自动匹配**（REQ-137 增强）：①为已支持的推理后端（claude-code/opencode/aider/deepseek-harness/eino-adk）内置官方 logo 资源；②Agent 选择某后端 → 对话/详情等运行上下文中 Agent 图标自动切换为该后端 logo（现为 glyph 占位）；③**智能体导航树保持智能体默认标识**（glyph 或登记 logo_url，不随后端变化）——导航树表达 Agent 身份，运行上下文表达执行身份；AgentLogo 组件扩展双态渲染 | P3 |
 | REQ-19g（v0.12 新增） | 会话级技能开关 | 输入框内「技能」chip 控制该对话是否注入智能体已挂技能（`enable_skills`，默认开；关闭仅影响后续消息，Q-6 不追溯）；智能体未挂载技能时置灰并引导至智能体属性配置；后端已实现（迁移 006 + 装配 skillGated 门控） | P1 |
 
 ### 3.3 Agent 配置表单（创建/编辑）
@@ -204,10 +204,10 @@
 
 > 以下 REQ-155~158 为 v0.43 立项（2026-09-25 主人指令：本体开源实现方案借鉴研究（docs/23，7 方向 18 方案）全部排期无损推进；三原则：①开源方案选型**全都要**——同一功能点多方案并存不做二选一；②**Go 优先排期**——Go 后端原生可实现优先，Java/Python CLI 依赖以 sidecar 隔离后置；③**结构化交互界面**——多路径多方案分组化呈现、一目了然）
 
-| REQ-155（v0.43 新增） | **AI-native 本体工具链**（调研报告 Top1，docs/23） | 参考 Open Ontologies（Rust/Oxigraph，70+ MCP 工具；实验依据：结构化 MCP 工具访问 F1=0.717 ≫ LLM 直读 OWL 的 0.323）——LLM 生成→工具链验证→迭代修复闭环；工具集按 Go 栈裁剪（mcp-go 实现 validate/query/diff/lint/version），query 衔接 REQ-151 facade sparql_query；Terraform 式生命周期（plan/enforce/apply/monitor/drift）映射运行栏「方案生命周期面板」（Phase 3）；映射构建+资产+运行三栏 | P1 |
-| REQ-156（v0.43 新增） | **本体资产质量门禁**（调研报告 Top2） | 参考 OLIVAW（保存钩子/导入门禁/CLI 批检三模式）+ Semantica QualityGate——Go 规则引擎实现检查器（TTL 可解析性/IRI 引用一致性/概念区分度/覆盖率阈值/基础 SHACL 约束；完整 SHACL 走 pyshacl 类 sidecar 后置可选）；结果落资产详情「质量卡」页签；保存/导入时 pass/fail 门禁可配置 | P1 |
-| REQ-157（v0.43 新增） | **本体导入审查 UI**（调研报告 Top3） | 参考 OrionBelt——补齐 oo/ontoextend 路径「敢导入」体验：导入合并三策略（replace/merge/merge-overwrite）+ 冲突检测（类/属性 IRI 冲突、前缀冲突）+ 前缀自动协调 + 变更报告 diff 预览（结构化报告先行，语义 diff 后置）；Go 合并逻辑 + React 审查向导 | P1 |
-| REQ-158（v0.43 新增） | **本体技术研究专栏与参考资料接入** | 学习中心参考资料页开辟「技术研究」专栏（REQ-109 模式：内容单源 seeds/learning/external-resources.md §六，18 方案卡片化，改 md 即生效）+ 本体栏专栏入口；卡片结构化呈现（方向分组/落地栏徽标/工作量 S·M·L），多方案并存一目了然；其余 14 方案（ROBOT Template/ODP/Domain-OntoGen/LinkML/OLS/BioPortal/OntoChat 完善/OntoGenix/LLM4ACOE/Data Pipeline 增强/语义嵌入/WebProtégé 协作/语义 Diff/OntoGraf）全量纳入**吸收池**按三阶段路线推进（Phase1 Go 原生夯实：质量门禁+LOV 词表+自修复循环；Phase2：AI 工具链核心+导入审查 UI；Phase3：生命周期面板+plan/apply/drift+ODP 推荐+可视化——WebVOWL 已随 REQ-154/M21 排期不重复立项），推进时逐一立项，详见 docs/23 §9 | P2 |
+| REQ-155（v0.43 新增；**✅ 已排期 M-O15 阶段一**，02 v0.82——工具链核心先行，生命周期面板归阶段二） | **AI-native 本体工具链**（调研报告 Top1，docs/23） | 参考 Open Ontologies（Rust/Oxigraph，70+ MCP 工具；实验依据：结构化 MCP 工具访问 F1=0.717 ≫ LLM 直读 OWL 的 0.323）——LLM 生成→工具链验证→迭代修复闭环；工具集按 Go 栈裁剪（mcp-go 实现 validate/query/diff/lint/version），query 衔接 REQ-151 facade sparql_query；Terraform 式生命周期（plan/enforce/apply/monitor/drift）映射运行栏「方案生命周期面板」（Phase 3）；映射构建+资产+运行三栏 | P1 |
+| REQ-156（v0.43 新增；**✅ 已排期 M-O15 阶段一**，02 v0.82——剩余面=质量卡+门禁接入，规则引擎已随 REQ-171 交付不重复建设） | **本体资产质量门禁**（调研报告 Top2） | 参考 OLIVAW（保存钩子/导入门禁/CLI 批检三模式）+ Semantica QualityGate——Go 规则引擎实现检查器（TTL 可解析性/IRI 引用一致性/概念区分度/覆盖率阈值/基础 SHACL 约束；完整 SHACL 走 pyshacl 类 sidecar 后置可选）；结果落资产详情「质量卡」页签；保存/导入时 pass/fail 门禁可配置 | P1 |
+| REQ-157（v0.43 新增；**✅ 已排期 M-O15 阶段一**，02 v0.82，自 M-O14 P2 移交） | **本体导入审查 UI**（调研报告 Top3） | 参考 OrionBelt——补齐 oo/ontoextend 路径「敢导入」体验：导入合并三策略（replace/merge/merge-overwrite）+ 冲突检测（类/属性 IRI 冲突、前缀冲突）+ 前缀自动协调 + 变更报告 diff 预览（结构化报告先行，语义 diff 后置）；Go 合并逻辑 + React 审查向导 | P1 |
+| REQ-158（v0.43 新增；**✅ 已排期 M-O15 尾项**，P2 内容随内容排期，02 v0.82） | **本体技术研究专栏与参考资料接入** | 学习中心参考资料页开辟「技术研究」专栏（REQ-109 模式：内容单源 seeds/learning/external-resources.md §六，18 方案卡片化，改 md 即生效）+ 本体栏专栏入口；卡片结构化呈现（方向分组/落地栏徽标/工作量 S·M·L），多方案并存一目了然；其余 14 方案（ROBOT Template/ODP/Domain-OntoGen/LinkML/OLS/BioPortal/OntoChat 完善/OntoGenix/LLM4ACOE/Data Pipeline 增强/语义嵌入/WebProtégé 协作/语义 Diff/OntoGraf）全量纳入**吸收池**按三阶段路线推进（Phase1 Go 原生夯实：质量门禁+LOV 词表+自修复循环；Phase2：AI 工具链核心+导入审查 UI；Phase3：生命周期面板+plan/apply/drift+ODP 推荐+可视化——WebVOWL 已随 REQ-154/M21 排期不重复立项），推进时逐一立项，详见 docs/23 §9 | P2 |
 
 
 | 编号 | 需求 | 优先级 |
@@ -288,7 +288,7 @@
 
 | 编号 | 需求 | 优先级 |
 | --- | --- | --- |
-| REQ-111（自 17 v0.1 转正） | **全局导航收敛与模块首屏规范**：①顶部导航维持五项，OpenOntologies 不设独立导航，双轨能力由本体构建路径 + 运行引导页承载（REQ-99 已随之修订，REQ-100 双轨原则不变）；②各模块首屏空态统一引导卡规范——无数据时不留白，引导至学习中心/对应创建动作；全产品唯一 onboarding 主线是学习中心任务卡 | P2 |
+| REQ-111（自 17 v0.1 转正） | **全局导航收敛与模块首屏规范**：①顶部导航维持五项，OpenOntologies 不设独立导航，双轨能力由本体构建路径 + 运行引导页承载（REQ-99 已随之修订，REQ-100 双轨原则不变）；②各模块首屏空态统一引导卡规范——无数据时不留白，引导至学习中心/对应创建动作；全产品唯一 onboarding 主线是学习中心任务卡；②收口注（v0.55）：已排期 M26/P3——以 REQ-112 EmptyGuide 为基线盘点各模块首屏缺口补齐 | P2 |
 | REQ-112（自 17 v0.1 转正） | **模块空态与首用引导**：各模块首用引导矩阵——智能体无 Agent → 引导建第一个 Agent（附示例配置）；本体无资产 → 引导学习中心示例；知识库无库 → 引导建库+示例文档；对话 chip 无可用项 → 置灰+Tooltip（REQ-19b/d 范式推广）｜✅ v0.26 已实现：共享 EmptyGuide 引导卡组件接入智能体/项目/知识库三左栏（17 §9.1 实现注记） | P2 |
 | REQ-113 | **数据导出与生命周期管理**：①对话导出为 Markdown（消息 + 可选过程事件附录，供学习笔记归档）；②设置页「数据与安全」激活最小版——按对话/项目删除并提示级联范围（现仅"停服删库"一种手段，见 16）；③SQLite 增长声明：会话/事件/KG 数据量级与清理建议写入 16 号文档｜✅ v0.25 已实现：①`GET /api/conversations/{id}/export?events=1` + 对话头部「导出」下拉；②`GET /api/stats/storage` + 设置「数据与安全」激活（DB 体积/各表行数概览 + 会话/项目列表带级联规模与删除确认）；③16 号 §9 增长声明（各表来源/量级/清理建议） | P2 |
 | REQ-114 | **绑定目录安全口径**：项目绑定本地目录即授予模型在该目录范围内的读写权限（list_files/read_file/save_file + Git 只读）——①绑定/修改目录时界面明示授权范围与风险；②模型文件操作在过程时间线可审计（工具事件已覆盖）；③路径越界由 fsutil.SafeJoin 强制（02 v0.33）；§7 安全行随之更新 | P2 |
@@ -341,15 +341,15 @@
 | REQ-97 | **本体对接**（MCP facade 接入、挂载运行方案、降级、双反代） | P1 | LG-12, LG-13 |
 | REQ-98 | **模型能力代理**（支撑本体 LLM 辅助创建） | P1 | LG-14 |
 | REQ-100 | **OpenOntologies 集成**（独立双轨：工作台 + oo-worker + Agent 挂载其 MCP 推理） | P2 | LG-12, LG-13 |
-| REQ-13 进阶 | 子 Agent 内部事件实时透传展示（EmitInternalEvents） | P1 | LG-6, LG-9 |
+| REQ-13 进阶 | 子 Agent 内部事件实时透传展示（EmitInternalEvents）——**✅ 已交付（v0.55 以实现为准收口）**：EmitInternalEvents 已开启（chat/assembler.go）+ subagent.enter/exit 事件流 + 前端嵌套缩进/靛色事件卡（M4 事件基座 + M17 观测载体） | P1 | LG-6, LG-9 |
 | REQ-122 | **Agent 执行后端**：inprocess（P0 默认）/ Docker 沙箱 / K8s Pod | P0 / P1 / P2 | LG-15 |
 | REQ-123, REQ-121 | **Agent 级独立配置**（模型/技能/MCP）与技能挂载生效 | P2 | LG-16, LG-13 |
 | REQ-131, REQ-132 | **Agent 对外 MCP 服务化（/mcp 端点 + 工具式先行）与配置页改版（SidePanel 四分区 + 创建分级）**——v0.28 立项；已排期 M18；**🚧 WIP（b5de3ac）：/mcp 端点链与四分类页签已交付；阻塞于工具执行环回归（先修）** | P2 | LG-13, LG-16 |
 | REQ-133, REQ-134 | **项目配置本地目录改造与配置界面组件化（pro-components 重构，不手搓）**——133 ✅ 已交付（v0.31）；134 ✅ 已排期 M18（与 REQ-132 合并实施） | P2 | — |
-| REQ-135~142 | **对话窗口配置分级与平台细节优化批次**——135/136/137/138/139/140 ✅ 已交付（v0.33~v0.35）；141（知识库能力调研）/142（多类型智能体研究）✅ 已排期 M19 调研轨道 | P2~P4 | — |
+| REQ-135~142 | **对话窗口配置分级与平台细节优化批次**——135/136/137/138/139/140 ✅ 已交付（v0.33~v0.35）；141（知识库能力调研）/142（多类型智能体研究）✅ 已排期 M19 调研轨道（141 调研报告已产出 platform-knowledge/知识库/21 号，待主人评估立项——v0.55 注） | P2~P4 | — |
 | REQ-14(恢复) | Interrupt/Resume + 审批 | P2 | LG-8 |
-| — | Callback 落 Trace 视图（耗时/token/调用链） | P2 | LG-5 |
-| — | DeepAgents 预构建模式体验（write_todos/task） | P2 | 多 Agent 对照 |
+| — | Callback 落 Trace 视图（耗时/token/调用链）——**✅ 已被 M17 覆盖收口（v0.55 核验注）**：model.step 调用链详情卡（耗时/分步 usage）+ 事件流重放 Drawer + JSON 导出（M17 阶段一/二交付） | P2 | LG-5 |
+| — | DeepAgents 预构建模式体验（write_todos/task）——**归 REQ-142 研究轨道（v0.55 注）**：多类型智能体方案研究产出立项时一并评估，不单独排期 | P2 | 多 Agent 对照 |
 | REQ-125/126, REQ-19 | **项目文件管理 + 对话产物右侧文件面板** | P3 | LG-15 |
 
 | — | 知识库进阶：Rerank/混合检索/PDF 解析（开源组件接入） | P2/P3 | LG-11 |
@@ -541,4 +541,6 @@
 | v0.51 | 2026-09-26 | **REQ-172 立项即交付（主人提出：模型管理支持 anthropic 协议 + 二级配置界面优化）**：①协议新增 `anthropic`——连接协议从仅 openai_compat 扩为双通道，后端按协议建模（internal/modelproto 纯函数包 + chat 三处建模收口 `buildChatModel`；anthropic 走 eino-ext/components/model/claude v0.1.20，15 v2.13 登记；网关根地址归一自动拼 /v1/messages；温度钳 [0,1]；anthropic+embedding 组合拒绝）；测试连接/自动发现（REQ-43/48）增 anthropic 分支；②二级配置界面——ProviderModal/ModelModal/DiscoverPanel 抽取 `web/src/pages/settings/` 组件 + 分组化布局 + 协议感知动态表单 + 预设清单 +4 条 Anthropic 系。02 v0.76（§12 M29 行）/15 v2.13/20 v1.24（S6.6）/18 v1.37 同步 | 董奎 × 协作 Agent |
 | v0.52 | 2026-09-26 | **REQ-169 交付（主人四点体验反馈驱动收尾，平台知识文档互引阅读）**：①平台知识页侧栏菜单区自身滚动；②侧栏 L1 分组改规划序（平台总览置顶 → 五业务模块按导航栏顺序 → 产品设计/DeepSeek Harness/外部资源 → 设置殿后；组内「模块导读」置顶、专题按文档编号升序、展示标题去编号前缀——不再照搬目录存放顺序）；③右侧阅读抽屉默认关、点击互引才展开、可手动关闭；④互引链接点击全链修复——根因：DocViewerModal 误作 Splitter 直接子元素被 AntD Splitter 吞成空白面板（「右侧默认空白栏」与「01_PRD 链接点击无反应」共同根因），移出 Splitter；抽屉内 XMarkdown 补 openLinksInNewTab（默认渲染器对中文 href 做 encodeURI 致 docRead 按字面路径找不到）+ resolveRef 百分号编码防御解码（抽共享 web/src/lib/docref.ts）+ 抽屉内互引可续点（按当前文档目录解析，跨目录跳转实测 docs/03→platform-knowledge/智能体）+ 抽屉剥 frontmatter 头。20 v1.25（S1.4）/18 v1.39/17 v0.23 同步；截图 smoke/req169/ | 董奎 × 协作 Agent |
 | v0.54 | 2026-09-27 | **M10 10d K8s Pod 后端桩级交付**（主人指令批量开发非前端任务；REQ-122 沙箱族延伸）：runtime.K8sBackend 同接口实现（kubectl CLI 零新依赖，与 docker CLI 同学习尺度口径）——Pod 覆盖式重建/进程重启对账复用/资源限制（512m→512Mi·CPU）/端点双模式（port-forward 默认+pod-ip）/转发进程回收；SANDBOX_BACKEND=k8s 接线 + SANDBOX_K8S_* 参数族；stub kubectl 桩测试 4 组；**诚实边界：本机无 K8s 集群，真机验证待主人侧环境（S2.9 ⏳）** | 董奎 × 协作 Agent |
-| v0.53 | 2026-09-26 || v0.54 | 2026-09-27 | **REQ-173 立项即交付 P1（主人指令：全站交互体验统一优化，重点弹窗/配置页/子页面）**：全局审计（18 Modal 10 种宽度、5 默认 footer、52 Select 仅 5 处可搜、防双击基本到位）→ P1 批次——①弹窗 centered 补齐 5 处 + PipelinePane confirmLoading 防双击 + ModelModal 宽度对齐 620（宽度口径落档）；②动态实体下拉 showSearch 10 处（模型/工具/本体/会话/预设/概念——REQ-153 后百级清单可搜可选）。开源组件口径：全部基于 AntD 6 现成能力零新依赖；P2 池登记（Descriptions 化/LoadErrorAlert 铺开/pro-components 评估）。18 v1.40/14 v0.24 同步 | 董奎 × 协作 Agent |
+| v0.53 | 2026-09-26 | **REQ-169 二轮挂载调整交付回写**（平台知识页 L1 十组收敛为七组——平台总览/五业务模块/设置，TOPIC_MOUNT 显式映射 + 组内主页置顶 + 互引 Drawer 默认关；17 v0.24/20 v1.26 S1.4；本行内容据 AGENTS 状态行重建——原行因并行编辑合并受损） | 董奎 × 协作 Agent |
+| v0.54 | 2026-09-27 | **REQ-173 立项即交付 P1（主人指令：全站交互体验统一优化，重点弹窗/配置页/子页面）**：全局审计（18 Modal 10 种宽度、5 默认 footer、52 Select 仅 5 处可搜、防双击基本到位）→ P1 批次——①弹窗 centered 补齐 5 处 + PipelinePane confirmLoading 防双击 + ModelModal 宽度对齐 620（宽度口径落档）；②动态实体下拉 showSearch 10 处（模型/工具/本体/会话/预设/概念——REQ-153 后百级清单可搜可选）。开源组件口径：全部基于 AntD 6 现成能力零新依赖；P2 池登记（Descriptions 化/LoadErrorAlert 铺开/pro-components 评估）。18 v1.40/14 v0.24 同步 | 董奎 × 协作 Agent |
+| v0.55 | 2026-09-27 | **已立项未排期需求集中排期（主人指令，视为排期拍板，无实现代码）**：①REQ-155/156/157 → **M-O15 阶段一**（02 §12 新建，=docs/23 §9.3 Phase 2；REQ-157 自 M-O14 P2 移交；REQ-156 标注剩余面——qualitygate 引擎已随 REQ-171 交付）；REQ-158 → M-O15 尾项（P2 内容）；②REQ-164/165/REQ-111② 空态规范收口 → **M26 扩容**（02 v0.82）；③REQ-13 进阶标 ✅ 已交付、Callback 落 Trace 标被 M17 覆盖收口（均以实现为准核验）、DeepAgents 体验归 REQ-142 研究轨道；④REQ-141 注调研已交付（21 号）待主人评估立项；⑤顺修迭代表 v0.53/v0.54 行并行编辑合并损伤 | 董奎 × 协作 Agent |
