@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Col, Collapse, Divider, Form, Input, InputNumber, Modal, Row, Select, Space } from 'antd'
+import { Button, Col, Collapse, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Switch } from 'antd'
 import { api, connDisplayName } from '../api/client'
 import AIOptimizeButton from './AIOptimizeButton'
 import type { InferenceBackendStatus, ModelConnection, ToolInfo } from '../api/types'
@@ -85,6 +85,7 @@ export default function AgentModal({
         max_iteration: v.max_iteration ?? 25,
         runtime_backend: v.runtime_backend ?? 'inprocess',
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
+        companion_ontology: !!v.companion_ontology, // M28/REQ-170：伴生本体开关
         logo_url: (v.logo_url ?? '').trim(), // REQ-137：非内置后端登记原 logo
         tools: v.tools ?? [],
       })
@@ -252,6 +253,17 @@ export default function AgentModal({
               extra="推理后端为自定义/外部部署（非内置）时，会话列表与对话界面将展示此图标；未配置回退默认图标"
             >
               <Input placeholder="https://…/logo.png" allowClear />
+            </Form.Item>
+          </Col>
+          <Col span={24}>
+            <Form.Item
+              name="companion_ontology"
+              label="伴生本体"
+              valuePropName="checked"
+              initialValue={false}
+              extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；资产栏「伴生本体」页签可查询；默认关闭"
+            >
+              <Switch checkedChildren="开" unCheckedChildren="关" />
             </Form.Item>
           </Col>
         </Row>

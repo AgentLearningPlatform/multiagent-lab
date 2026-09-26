@@ -412,6 +412,14 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                       ]}
                     />
                   </Form.Item>
+                  <Form.Item
+                    name="companion_ontology"
+                    label="伴生本体"
+                    valuePropName="checked"
+                    extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；资产栏「伴生本体」页签可查询；默认关闭"
+                  >
+                    <Switch checkedChildren="开" unCheckedChildren="关" />
+                  </Form.Item>
                 </>
               ),
             },

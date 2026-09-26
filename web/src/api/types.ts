@@ -22,6 +22,8 @@ export interface Agent {
   sandbox_cpus?: number
   /** REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name；token 为 Agent 级 Bearer） */
   mcp_serve?: { enabled: boolean; token?: string; tool_name?: string }
+  /** M28/REQ-170：伴生本体开关（对话收尾旁路抽取 KG 入伴生引擎；默认关） */
+  companion_ontology?: boolean
   created_at: string
   updated_at: string
 }
