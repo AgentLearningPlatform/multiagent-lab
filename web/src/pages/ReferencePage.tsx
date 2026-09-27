@@ -2,10 +2,8 @@ import { useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { Card, Menu, Space, Splitter, Tag, Typography } from 'antd'
 import {
   ApartmentOutlined,
-  BookOutlined,
   CompassOutlined,
   DatabaseOutlined,
-  HighlightOutlined,
   LinkOutlined,
   ProjectOutlined,
   RobotOutlined,
@@ -101,7 +99,7 @@ const TOPICS: Topic[] = (() => {
       file,
       title: mount?.label ?? topicTitle(dir, file),
       md: raw,
-      base: `platform-knowledge/${dir}`,
+      base: `platform-knowledge/${dir}/${file}`.split('/').slice(0, -1).join('/'),
       group: effGroup,
       groupLabel: effMod.label,
       icon: effMod.icon,
@@ -276,7 +274,21 @@ export default function ReferencePage() {
                       key: g.group,
                       icon: g.icon,
                       label: g.label,
-                      children: g.topics.map((t) => ({ key: t.key, label: t.title })),
+                      children: (() => {
+                        const roots = g.topics.filter((t) => !t.file.includes('/'))
+                        const subMap = new Map<string, Topic[]>()
+                        for (const t of g.topics) {
+                          if (!t.file.includes('/')) continue
+                          const sub = t.file.slice(0, t.file.indexOf('/'))
+                          if (!subMap.has(sub)) subMap.set(sub, [])
+                          subMap.get(sub)!.push(t)
+                        }
+                        const items: any = roots.map((t) => ({ key: t.key, label: t.title }))
+                        for (const sub of [...subMap.keys()].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))) {
+                          items.push({ key: `${g.group}/${sub}`, label: sub, children: subMap.get(sub)!.map((t) => ({ key: t.key, label: t.title })) })
+                        }
+                        return items
+                      })(),
                     },
               )}
             />
