@@ -18,7 +18,7 @@ import { docFileOf, resolveRef } from '../lib/docref'
 
 // 平台知识内容（REQ-116 / REQ-161 v2）：构建期内联扫描 platform-knowledge/ 全目录，
 // 主题页发现仍是目录驱动（新增或迁移文档后重建即生效）；但页面组织不照搬存放顺序——
-// L1 分组按 GROUP_ORDER 规划（导航栏模块及其顺序，平台总览置顶、设置殿后），
+// L1 分组按 GROUP_ORDER 规划（导航栏模块及其顺序，整体设计置顶、设置殿后）；目录=页面树 1:1（G-5 增补），
 // 个别专题跨目录挂载见 TOPIC_MOUNT（REQ-169 二轮，2026-09-26 开发者指定）；
 // 组内主页置顶（模块导读/平台总览）、专题按文档编号序。
 // 每篇头部 frontmatter（module/topic/desc/req/docs/decisions/synced）为页面元信息与源指针约定，
@@ -34,31 +34,27 @@ import EXTERNAL_RESOURCES_MD from '../../../seeds/learning/external-resources.md
 
 /** 模块注册表：目录名 → 页面显示名 + 图标（platform-knowledge/README.md 同源维护） */
 const MODULES: { dir: string; label: string; icon: ReactNode }[] = [
-  { dir: '总览', label: '平台总览', icon: <CompassOutlined /> },
+  { dir: '整体设计', label: '整体设计', icon: <CompassOutlined /> },
   { dir: '智能体', label: '智能体', icon: <RobotOutlined /> },
   { dir: '项目', label: '项目', icon: <ProjectOutlined /> },
   { dir: '本体', label: '本体', icon: <ApartmentOutlined /> },
   { dir: '知识库', label: '知识库', icon: <DatabaseOutlined /> },
   { dir: '技能', label: '技能', icon: <ThunderboltOutlined /> },
   { dir: '设置', label: '设置', icon: <SettingOutlined /> },
-  { dir: 'DeepSeek-Harness', label: 'DeepSeek Harness', icon: <BookOutlined /> },
-  { dir: '产品设计', label: '产品设计', icon: <HighlightOutlined /> },
 ]
 
 /** L1 分组顺序（规划态，非目录存放顺序）：平台总览置顶为入口 → 五业务模块按导航栏顺序 →
  *  设置对应导航栏最右齿轮殿后；跨目录挂载的专题随目标组出现，不单列 L1 */
-const GROUP_ORDER = ['总览', '智能体', '项目', '本体', '知识库', '技能', '设置']
+const GROUP_ORDER = ['整体设计', '智能体', '项目', '本体', '知识库', '技能', '设置']
 
 /** 跨目录挂载（REQ-169 二轮，开发者指定）：键=主题 key（存放目录/文件），value=挂载的 L1 组 + 展示名。
  *  仅改页面归属与标题；互引解析基准 base 仍按真实存放目录，保证文内相对链接不失效 */
 const TOPIC_MOUNT: Record<string, { group: string; label: string }> = {
-  '产品设计/17_产品_信息架构与界面设计': { group: '总览', label: '产品设计' },
-  'DeepSeek-Harness/DeepSeek-Harness': { group: '智能体', label: 'DeepSeek Harness' },
   '外部资源/外部资源导航': { group: '本体', label: '本体学习外部资源导航' },
 }
 
 /** 各组主页文件（组内置顶；默认 `${dir}模块` 即「模块导读」，总览组为 平台总览） */
-const HOME_FILE: Record<string, string> = { 总览: '平台总览' }
+const HOME_FILE: Record<string, string> = { 整体设计: '整体设计' }
 
 interface Topic {
   key: string
@@ -270,7 +266,7 @@ export default function ReferencePage() {
             <Menu
               mode="inline"
               selectedKeys={[active]}
-              defaultOpenKeys={groups.filter((g) => g.topics.length > 1).map((g) => g.group)}
+              defaultOpenKeys={[]}
               onClick={({ key }) => setActive(String(key))}
               style={{ background: 'transparent' }}
               items={groups.map((g) =>

@@ -84,11 +84,11 @@ platform-knowledge/   平台知识（按模块：调研/开发/产品设计 + �
 | `docs/03_本体_需求文档.md` / `docs/04_本体_方案设计.md` | 本体模块需求与方案（独立维护） |
 | `docs/11` / `docs/12` | 知识库模块需求与方案 |
 | `docs/14_本体_前端改造方案.md` | 前端结构与改造史 |
-| `platform-knowledge/总览/16_部署与运行.md` | 部署事实源（本地 / Docker Compose / Helm / 环境变量速查） |
+| `platform-knowledge/整体设计/16_部署与运行.md` | 部署事实源（本地 / Docker Compose / Helm / 环境变量速查） |
 | `docs/18_REQ编号注册表.md` | REQ 编号唯一分配权威（全局台账） |
 | `docs/20_回归冒烟清单.md` | 交付质量资产（按模块节执行冒烟动线） |
 | `platform-knowledge/智能体/27_外部MCP客户端直连验证包.md` | Claude Desktop / Cursor 直连配置与实测 |
-| `platform-knowledge/产品设计/17_产品_信息架构与界面设计.md` | 界面/产品口径事实源 |
+| `platform-knowledge/整体设计/17_产品_信息架构与界面设计.md` | 界面/产品口径事实源 |
 
 ## Roadmap
 
