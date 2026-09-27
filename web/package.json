@@ -23,6 +23,7 @@
     "react": "^18.3.1",
     "react-diff-viewer-continued": "^4.4.0",
     "react-dom": "^18.3.1",
+    "react-force-graph-3d": "^1.27.0",
     "three": "0.186.1",
     "zustand": "^5.0.2"
   },
