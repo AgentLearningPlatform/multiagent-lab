@@ -415,6 +415,10 @@ pre.raw-json {
 }
 .chip-picker-item:hover, .chip-picker-item:focus-visible { background: #eef0f6; color: var(--c-ink); outline: none; }
 .chip-picker-item.current { background: #eef0fe; color: var(--c-brand); font-weight: 600; }
+/* REQ-174：列表底部「模型管理」入口（分隔线 + 品牌色动作行） */
+.chip-picker-divider { height: 1px; background: var(--c-line); margin: 6px 2px; }
+.chip-picker-manage { color: var(--c-brand); font-weight: 600; }
+.chip-picker-manage:hover { background: #eef0fe; }
 .chip-picker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip-picker-meta { flex: none; font-size: 11px; color: var(--c-ink-3); }
 

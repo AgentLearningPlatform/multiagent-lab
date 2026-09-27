@@ -60,6 +60,10 @@ func (s *Server) runConversation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// REQ-174：单路模型覆盖（对话输入区模型快捷切换逐次下发；对比模式走窗格级覆盖，此处不介入）
+	if in.ModelConnID != "" && len(in.Panes) < 2 {
+		agent = chat.WithModelOverride(agent, in.ModelConnID)
+	}
 
 	sw, err := sse.NewWriter(w)
 	if err != nil {

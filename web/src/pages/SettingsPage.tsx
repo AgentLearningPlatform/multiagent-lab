@@ -27,7 +27,8 @@ const fmtNum = (n?: number) => (n ?? 0).toLocaleString()
 export default function SettingsPage() {
   const { showToast } = useUI()
   const [conns, setConns] = useState<ModelConnection[]>([])
-  const [category, setCategory] = useState<Category>('models')
+  // REQ-174：支持外部深链（对话输入区「模型管理」入口经 localStorage 预置分类）
+  const [category, setCategory] = useState<Category>(() => (localStorage.getItem('eino.settings.section') as Category) || 'models')
   // undefined = 关闭；'new' = 新建；对象 = 编辑
   const [providerModal, setProviderModal] = useState<ProviderGroup | 'new' | undefined>(undefined)
   const [modelModal, setModelModal] = useState<ModelConnection | 'new' | undefined>(undefined)

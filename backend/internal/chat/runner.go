@@ -83,8 +83,20 @@ type RunInput struct {
 	Input        string `json:"input"`
 	DebugLevel   int    `json:"debug_level"`   // REQ-117：观测级别 0 简洁 / 1 详细 / 2 调试
 	DebugPersist bool   `json:"debug_persist"` // M17 阶段二：调试事件入库开关（model.step 等落 run_events）
+	// ModelConnID 单路模型覆盖（REQ-174）：对话输入区模型快捷切换逐次下发；空 = 跟随智能体默认。
+	// 对比模式不读取此字段（窗格级承载于 Panes[].model_conn_id）。
+	ModelConnID string `json:"model_conn_id,omitempty"`
 	// Panes 对比模式窗格配置（REQ-19e/19f）：≥2 时一次提问 N 路并行；nil/1 = 单路（现状）
 	Panes []PaneConfig `json:"panes,omitempty"`
+}
+
+// WithModelOverride 单路模型覆盖（REQ-174）：复制 Agent 并改写模型连接（复用 REQ-144 paneAgent 机制）；
+// 空覆盖原样返回。docker/外部 CLI 推理后端的模型由其自身配置决定——覆盖字段不生效（如实语义）。
+func WithModelOverride(ag *store.Agent, modelConnID string) *store.Agent {
+	if ag == nil || modelConnID == "" {
+		return ag
+	}
+	return paneAgent(ag, PaneConfig{ModelConnID: modelConnID})
 }
 
 // PaneConfig 对比窗格单项覆盖（REQ-19f/143/144）：智能体 / 模型连接 / 知识库 / 本体运行方案 /
@@ -286,9 +298,11 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("stopped")), emit)
 		res.Stopped = true
 	case rc.runErr != "":
-		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, map[string]any{
-			"code": "run_failed", "message": rc.runErr, "elapsed_ms": time.Since(start).Milliseconds(),
-		}), emit)
+		errData := map[string]any{"code": "run_failed", "message": rc.runErr, "elapsed_ms": time.Since(start).Milliseconds()}
+		if rc.lastFinish != "" { // 截断类失败的关键证据（max_tokens/length），排障可见
+			errData["finish_reason"] = rc.lastFinish
+		}
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, errData), emit)
 		res.Error = rc.runErr
 	case rc.interrupted:
 		// M11 收尾：挂起等待答复（区别于 completed / stopped）
@@ -630,6 +644,27 @@ func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, r
 	return rc
 }
 
+// humanizeRunErr 把「输出被截断」类底层失败翻译为带修复指引的可读信息，其余错误原样返回。
+// 背景：Anthropic 协议下思考、回复与流式工具调用参数共享 max_tokens 输出预算，复杂任务在
+// 低预算下工具参数 JSON 未写完即断流，eino ToolsNode 解析报 "failed to unmarshal arguments
+// ... eof"——用户观感是「回答到一半卡住」。finish_reason=max_tokens/length（Anthropic 的
+// stop_reason 原样透传）与参数解析失败是两个互补的截断信号。原始错误始终附在末尾便于排障。
+func humanizeRunErr(msg, finishReason string) string {
+	if msg == "" {
+		return msg
+	}
+	argsBroken := strings.Contains(msg, "failed to unmarshal arguments")
+	truncated := argsBroken || finishReason == "max_tokens" || finishReason == "length"
+	if !truncated {
+		return msg
+	}
+	hint := "输出在达到 max_tokens 上限时被截断（深度思考、回复与工具调用参数共享该预算），本次运行中止；可在智能体配置调大「最大回复 tokens」后重试"
+	if argsBroken {
+		hint = "工具调用参数不完整——大概率是输出在达到 max_tokens 上限时被截断（深度思考、回复与工具调用参数共享该预算），本次运行中止；可在智能体配置调大「最大回复 tokens」后重试"
+	}
+	return hint + "。原始错误：" + msg
+}
+
 // consume 消费 ADK 事件流并翻译为平台事件（方案 §7）；中断事件在此捕获。
 func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 	s, runCtx, conv, runID, rt, emit := rc.s, rc.ctx, rc.conv, rc.runID, rc.rt, rc.emit
@@ -642,7 +677,7 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 			if errors.Is(ev.Err, context.Canceled) {
 				rc.stopped = true
 			} else {
-				rc.runErr = ev.Err.Error()
+				rc.runErr = humanizeRunErr(ev.Err.Error(), rc.lastFinish)
 			}
 			break
 		}
@@ -678,7 +713,7 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 					if errors.Is(err, context.Canceled) {
 						rc.stopped = true
 					} else {
-						rc.runErr = err.Error()
+						rc.runErr = humanizeRunErr(err.Error(), rc.lastFinish)
 					}
 					break
 				}
@@ -838,9 +873,11 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("stopped")), emit)
 		res.Stopped = true
 	case rc.runErr != "":
-		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, map[string]any{
-			"code": "run_failed", "message": rc.runErr, "elapsed_ms": time.Since(start).Milliseconds(),
-		}), emit)
+		errData := map[string]any{"code": "run_failed", "message": rc.runErr, "elapsed_ms": time.Since(start).Milliseconds()}
+		if rc.lastFinish != "" { // 截断类失败的关键证据（max_tokens/length），排障可见
+			errData["finish_reason"] = rc.lastFinish
+		}
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.error", runID, errData), emit)
 		res.Error = rc.runErr
 	case rc.interrupted:
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("interrupted")), emit)
