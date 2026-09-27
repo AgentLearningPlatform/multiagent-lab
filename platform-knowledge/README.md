@@ -35,3 +35,30 @@
 3. **编号不回收**：自 docs/ 迁入的文档保留原编号文件名——编号=全项目文档统一索引，docs/18 注册表口径不变；引用统一写 `platform-knowledge/<模块>/<原文件名>`。
 4. **语义级同步**：需求/方案档语义变更时按 AGENTS.md 纪律 7 同步命中本目录的导读页。
 5. **页面渲染**：`web/src/pages/ReferencePage.tsx` import.meta.glob 本目录；编辑后重建即生效。
+
+
+## 调研研究（G-5 并入，2026-09-27）
+
+原仓库顶层 `research/` 18 份调研已按域迁入本目录（**文件名不变**），映射：
+
+**智能体/**
+- 智能体沙箱方案调研_20260925.md（REQ-122/M10 调研）
+- DeepSeek_Harness接入可行性_20260925.md（REQ-160/M24 调研）
+- 扣子多Agent智能体平台实现架构反推_20260915.md
+- ChatWindow渲染与SSE链路审查_20260925.md（REQ-145 B3 溯源）
+- 对话伴生本体生长可行性分析_20260922.md（REQ-170 前置调研）
+
+**本体/**
+- 本体构建理论论文线综述_20260926.md（REQ-171 理论线，35 篇）
+- 开源本体可视化工具调研_report.md / 本体可视化方案调研_20260925.md（REQ-154/M21/D-O18）
+- 开源本体构建与运行工具链调研_report.md / 本体运行时与MCP服务开源方案调研_report.md
+- 对话式与LLM本体构建工具调研_OntoChat_OntoExtend_20260922.md（路径③④依据）
+- open-ontologies借鉴与引入分析.md（REQ-100/M8.5）
+- OpenBKN借鉴映射_eino-multiagent-lab_20260922.md / openbkn-ai-分析与借鉴.md
+- 本体平台与学习资源地图_20260911.md / 本体对话Agent技术选型_Eino_vs_DeepSeekHarness_20260915.md
+- 本体Agent开发上手指南.html（附件，页面不渲染，直接打开）
+
+**总览/**
+- 开源本体与语义层赛道全景.md（跨域赛道）
+
+> 原 research/README 的映射职责由本节承接；`research/` 目录暂留为桩（后端 RESEARCH_ROOT 指向，REQ-184 处置）。

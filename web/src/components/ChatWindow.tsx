@@ -452,7 +452,7 @@ export default function ChatWindow({
 
   // 历史还原：消息表（对话正文）+ 事件表（执行时间线）按时间合并
   useEffect(() => {
-    // B3（research/ChatWindow渲染与SSE链路审查）：切换会话先中止旧流，防止旧会话事件写入新会话列表
+    // B3（platform-knowledge/智能体/ChatWindow渲染与SSE链路审查）：切换会话先中止旧流，防止旧会话事件写入新会话列表
     runRef.current?.abort()
     runRef.current = null
     setRunning(false)
