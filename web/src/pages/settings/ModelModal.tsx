@@ -1,18 +1,22 @@
 /**
- * 模型表单（REQ-172 自 SettingsPage 抽取 + 协议感知）：
- * 所属提供商（分组下拉，name/base_url/protocol 随组）· 模型名 · 类型 · 设为默认。
- * - API Key 归属提供商：新建时用 copy_key_from 复用组锚点的密文，模型表单不再出现 Key；
- * - 编辑时切换提供商 = 移动到目标组（名称/Base URL/协议随目标组，Key 亦改用目标提供商）；
- * - 提供商未变则两个 Key 字段都不发送（后端保留原 Key）；
- * - initialProvider：从某提供商行「＋添加模型」进入时预选该分组；
- * - 协议联动（REQ-172）：anthropic 分组仅可选 chat（Anthropic 无官方向量接口）。
+ * 模型表单（REQ-172 自 SettingsPage 抽取；REQ-177 协议重组 + 紧凑化）：
+ * - 所属提供商（分组下拉，仅显示供应商名）；协议与 Base URL 为连接自己的属性（REQ-177①），
+ *   新建时预填所选提供商锚点值、可改——同一供应商组内可混合 openai_compat 与 anthropic；
+ * - 切换提供商时预填目标组锚点的协议/接入点（可再手改）；移动组 = copy_key_from 目标锚点；
+ * - API Key 归属提供商（模型表单不出现 Key 输入）；提供商未变不发送 Key 字段（后端保留）；
+ * - 协议联动（REQ-172）：anthropic 仅 chat（Anthropic 无官方向量接口）。
  */
-import { useEffect, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Select, Space, Switch, Tag } from 'antd'
+import { useEffect, useRef, useState } from 'react'
+import { Alert, Button, Form, Input, Modal, Select, Space, Switch } from 'antd'
 import { api } from '../../api/client'
 import type { ModelConnection } from '../../api/types'
 import { useUI } from '../../store/ui'
-import { groupOf, isAnthropicProtocol, protocolLabel, providerOfName, uniqueConnName, type ProviderGroup } from './grouping'
+import { groupOf, isAnthropicProtocol, providerOfName, uniqueConnName, type ProviderGroup } from './grouping'
+
+const PROTOCOL_OPTIONS = [
+  { value: 'openai_compat', label: 'openai_compat · OpenAI 兼容' },
+  { value: 'anthropic', label: 'anthropic · Anthropic Messages' },
+]
 
 export function ModelModal({ conn, groups, conns, initialProvider, onClose, onSaved }: {
   conn: ModelConnection | 'new'
@@ -26,20 +30,51 @@ export function ModelModal({ conn, groups, conns, initialProvider, onClose, onSa
   const [form] = Form.useForm()
   const [busy, setBusy] = useState(false)
   const editConn = conn === 'new' ? null : conn
+  // 提供商切换时才预填目标组锚点协议/接入点；初始加载不覆盖连接自身值
+  const loadedProvider = useRef<string | null>(null)
 
   useEffect(() => {
     if (editConn) {
-      form.setFieldsValue({ provider: groupOf(editConn), model_name: editConn.model_name, conn_type: editConn.conn_type, is_default: editConn.is_default })
+      const key = groupOf(editConn)
+      form.setFieldsValue({
+        provider: key,
+        protocol: editConn.protocol,
+        base_url: editConn.base_url,
+        model_name: editConn.model_name,
+        conn_type: editConn.conn_type,
+        is_default: editConn.is_default,
+      })
+      loadedProvider.current = key
     } else {
-      form.setFieldsValue({ provider: initialProvider ?? groups[0]?.key, model_name: '', conn_type: 'chat', is_default: false })
+      const g0 = initialProvider ? groups.find((g) => g.key === initialProvider) : groups[0]
+      form.setFieldsValue({
+        provider: g0?.key,
+        protocol: g0?.protocol ?? 'openai_compat',
+        base_url: g0?.baseUrl ?? '',
+        model_name: '',
+        conn_type: 'chat',
+        is_default: false,
+      })
+      loadedProvider.current = g0?.key ?? null
     }
   }, [conn, form, groups, initialProvider])
 
   const providerKey = Form.useWatch('provider', form)
   const providerGroup = groups.find((g) => g.key === providerKey)
-  // REQ-172：随所选提供商的协议联动
-  const anthropic = isAnthropicProtocol(providerGroup?.protocol)
+  const protocol = Form.useWatch('protocol', form)
+  const anthropic = isAnthropicProtocol(protocol)
 
+  // 切换提供商 → 预填目标组锚点协议/接入点（可手改）；初始加载不触发
+  useEffect(() => {
+    if (!providerKey || providerKey === loadedProvider.current) return
+    const g = groups.find((x) => x.key === providerKey)
+    if (g) {
+      form.setFieldsValue({ protocol: g.protocol, base_url: g.baseUrl })
+    }
+    loadedProvider.current = providerKey
+  }, [providerKey, groups, form])
+
+  // 切到 anthropic 时类型锁定 chat；切回 openai_compat 不代选（保持用户已选值）
   useEffect(() => {
     if (anthropic && form.getFieldValue('conn_type') === 'embedding') {
       form.setFieldsValue({ conn_type: 'chat' })
@@ -66,8 +101,11 @@ export function ModelModal({ conn, groups, conns, initialProvider, onClose, onSa
             : editConn.name
         await api.updateConnection(editConn.id, {
           ...editConn,
-          ...(target ? { protocol: target.protocol, base_url: target.baseUrl, copy_key_from: target.anchor.id, provider_group_id: target.id } : {}),
+          // REQ-177①：移动组只改归属与 Key 来源；协议/Base URL 为连接属性随表单值
+          ...(target ? { provider_group_id: target.id, copy_key_from: target.anchor.id } : {}),
           name,
+          protocol: v.protocol,
+          base_url: v.base_url,
           model_name: v.model_name,
           conn_type: anthropic ? 'chat' : v.conn_type,
           is_default: v.is_default,
@@ -77,8 +115,8 @@ export function ModelModal({ conn, groups, conns, initialProvider, onClose, onSa
         if (!providerGroup) throw new Error('请先选择提供商；新提供商请先添加')
         const created = await api.createConnection({
           name: uniqueConnName(providerGroup.name, v.model_name, new Set(conns.map((c) => c.name))),
-          protocol: providerGroup.protocol,
-          base_url: providerGroup.baseUrl,
+          protocol: v.protocol,
+          base_url: v.base_url,
           model_name: v.model_name,
           conn_type: anthropic ? 'chat' : v.conn_type, // anthropic 无向量接口，强制 chat
           provider_group_id: providerGroup.id, // REQ-148：归属所选实例分组
@@ -121,22 +159,23 @@ export function ModelModal({ conn, groups, conns, initialProvider, onClose, onSa
             description="请先关闭本弹窗，用「＋ 添加提供商」从厂商预设快速填充访问配置（仅需补 API Key）。"
           />
         )}
-        <Form.Item name="provider" label="所属提供商" rules={[{ required: true, message: '请选择提供商；新提供商请先添加' }]} style={{ marginBottom: 8 }}>
+        <Form.Item
+          name="provider"
+          label="所属提供商"
+          rules={[{ required: true, message: '请选择提供商；新提供商请先添加' }]}
+          extra="API Key 由提供商统一管理（移动提供商时自动沿用目标提供商的 Key）"
+          style={{ marginBottom: 12 }}
+        >
           <Select
             placeholder="选择提供商"
-            options={groups.map((g) => ({ value: g.key, label: `${g.name}（${g.protocol === 'anthropic' ? 'anthropic' : 'openai_compat'}）` }))}
+            options={groups.map((g) => ({ value: g.key, label: g.name }))}
           />
         </Form.Item>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px', fontSize: 12, color: 'rgba(0,0,0,0.55)' }}>
-          <span>接入点：{providerGroup?.baseUrl || '—'}</span>
-          {providerGroup && <Tag style={{ margin: 0 }} color={anthropic ? 'purple' : 'blue'}>{protocolLabel(providerGroup.protocol)}</Tag>}
-          <span>（随所选提供商）</span>
-        </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <Form.Item name="model_name" label="模型名" rules={[{ required: true, message: '模型名必填' }]} style={{ flex: 1, marginBottom: 12 }}>
-            <Input placeholder={anthropic ? 'claude-sonnet-4-5' : 'deepseek-chat'} />
+          <Form.Item name="protocol" label="协议" extra="同一供应商下可与其他连接不同协议（REQ-177）" style={{ width: 250, marginBottom: 12 }}>
+            <Select options={PROTOCOL_OPTIONS} />
           </Form.Item>
-          <Form.Item name="conn_type" label="类型" style={{ width: 180, marginBottom: 12 }} extra={anthropic ? 'Anthropic 协议仅支持对话模型' : undefined}>
+          <Form.Item name="conn_type" label="类型" style={{ width: 170, marginBottom: 12 }} extra={anthropic ? '仅支持对话模型' : undefined}>
             <Select
               disabled={anthropic}
               options={[
@@ -146,14 +185,23 @@ export function ModelModal({ conn, groups, conns, initialProvider, onClose, onSa
             />
           </Form.Item>
         </div>
-        <Form.Item label="API Key" style={{ marginBottom: 12 }}>
-          <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)' }}>
-            API Key 由提供商统一管理{editConn ? '；移动到其他提供商时自动沿用目标提供商的 Key。' : '；保存后自动沿用所选提供商的 Key。'}
-          </span>
+        <Form.Item
+          name="base_url"
+          label={anthropic ? 'Base URL（Anthropic 网关根地址）' : 'Base URL（OpenAI 兼容）'}
+          rules={[{ required: true, message: 'Base URL 必填' }]}
+          extra={anthropic ? '填网关根地址，平台自动拼接 /v1/messages' : '各连接可使用不同接入点'}
+          style={{ marginBottom: 12 }}
+        >
+          <Input placeholder={anthropic ? 'https://api.anthropic.com' : 'https://api.deepseek.com/v1'} />
         </Form.Item>
-        <Form.Item name="is_default" label="设为该类型默认" valuePropName="checked" extra="chat / embedding 各至多一条默认；「跟随全局默认」的智能体将使用它" style={{ marginBottom: 4 }}>
-          <Switch />
-        </Form.Item>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <Form.Item name="model_name" label="模型名" rules={[{ required: true, message: '模型名必填' }]} style={{ flex: 1, marginBottom: 12 }}>
+            <Input placeholder={anthropic ? 'claude-sonnet-4-5' : 'deepseek-chat'} />
+          </Form.Item>
+          <Form.Item name="is_default" label="类型默认" valuePropName="checked" extra="chat / embedding 各至多一条" style={{ width: 190, marginBottom: 12 }}>
+            <Switch checkedChildren="默认" unCheckedChildren="否" />
+          </Form.Item>
+        </div>
       </Form>
     </Modal>
   )

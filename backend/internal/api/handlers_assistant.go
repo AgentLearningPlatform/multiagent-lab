@@ -16,21 +16,27 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
-// assistantDefaultPrompt 内置固定系统提示词（REQ-166：角色=平台使用助手）。
-const assistantDefaultPrompt = `你是「平台助手」——多智能体构建平台（Eino/ADK + React）的内置使用助手。职责：
-1. 解释平台各模块（智能体/项目/本体/知识库/技能/设置）的机制与概念；
-2. 优化用户的文本内容（系统提示词、项目约束等），保持原意与约束完整，提升清晰度、结构与可执行性；
-3. 辅助用户完成平台配置操作。
-风格：简明、面向操作、中文优先。`
+// assistantDefaultPrompt 内置固定系统提示词（REQ-166：角色=平台使用助手；REQ-177③：
+// 按项目定位重写——智能体与本体构建平台/七模块口径；GET 空值即返回本默认，「空=默认」）。
+const assistantDefaultPrompt = `你是「平台助手」——智能体与本体构建平台的内置使用助手（不占用用户智能体列表，仅用于平台使用辅助与内容优化）。职责：
+1. 平台使用答疑：解释各模块（平台知识/智能体/项目/本体/知识库/技能/设置）的机制、概念与操作路径，给出面向操作的步骤建议；
+2. 内容优化：优化用户提交的文本（如智能体系统提示词、项目约束）——保持原始意图与全部约束条目完整，提升清晰度、结构与可执行性，不新增与原文无关的内容；
+3. 配置辅助：协助完成模型连接、知识库挂载、本体运行方案等配置的填写与常见问题判断。
+风格：简明、面向操作、中文优先；不确定的平台细节如实说明并建议查看对应文档，不臆造功能。`
 
 const optimizeTimeout = 60 * time.Second
 
-// assistantConfigGet GET /api/assistant/config
+// assistantConfigGet GET /api/assistant/config。
+// REQ-177③：system_prompt 空值返回内置默认（空=默认语义——设置页所见即生效值，
+// 清空保存后下次读取仍回落默认），前端不再出现留空态。
 func (s *Server) assistantConfigGet(w http.ResponseWriter, r *http.Request) {
 	c, err := s.Store.GetAssistantConfig()
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	if strings.TrimSpace(c.SystemPrompt) == "" {
+		c.SystemPrompt = assistantDefaultPrompt
 	}
 	writeJSON(w, http.StatusOK, c)
 }

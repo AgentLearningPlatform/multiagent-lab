@@ -119,6 +119,14 @@ export function DiscoverPanel({ group, conns, onManualAdd, onClose, onAdded }: {
         <Tag color="blue" style={{ margin: 0 }}>可添加 {addable.length}</Tag>
         <span className="discover-provider">{group.name} · 沿用提供商 Key</span>
       </div>
+      {new Set(group.members.map((m) => m.protocol)).size > 1 && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 8 }}
+          message="组内含多协议连接（REQ-177）：自动发现按锚点接入点协议执行；其他协议的模型请「手动添加」后按连接调整协议与 Base URL。"
+        />
+      )}
       <div className="discover-toolbar">
         <span className="discover-label">类型</span>
         <Segmented

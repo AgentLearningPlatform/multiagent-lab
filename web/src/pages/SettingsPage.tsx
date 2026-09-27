@@ -123,19 +123,12 @@ export default function SettingsPage() {
     setDiscoverKey(g.key)
   }
 
-  // 提供商行：名称（含协议徽标）/ Base URL / API Key 掩码 / 启用 / 模型数 / 行内操作
+  // 提供商行：名称（REQ-177①：协议为连接属性，行上不再显示协议徽标）/ Base URL / API Key 掩码 / 启用 / 模型数 / 行内操作
   const providerColumns: ColumnsType<ProviderGroup> = [
     {
       title: '提供商',
       dataIndex: 'name',
-      render: (_, g) => (
-        <Space size={6}>
-          <Typography.Text strong>{g.name}</Typography.Text>
-          <Tag style={{ margin: 0 }} color={g.protocol === 'anthropic' ? 'purple' : 'default'}>
-            {g.protocol === 'anthropic' ? 'anthropic' : 'openai_compat'}
-          </Tag>
-        </Space>
-      ),
+      render: (_, g) => <Typography.Text strong>{g.name}</Typography.Text>,
     },
     { title: 'Base URL', dataIndex: 'baseUrl', ellipsis: true, render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
     {
@@ -191,7 +184,13 @@ export default function SettingsPage() {
   // 展开区：一条连接一行（模型名 / 类型 / 默认 / 操作）
   const modelColumns: ColumnsType<ModelConnection> = [
     { title: '模型', dataIndex: 'model_name', render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
-    { title: '类型', dataIndex: 'conn_type', width: 110, render: (t: string) => (t === 'chat' ? <Tag color="blue">chat</Tag> : <Tag color="green">embedding</Tag>) },
+    { title: '类型', dataIndex: 'conn_type', width: 170, render: (t: string, c) => (
+      <Space size={4}>
+        {t === 'chat' ? <Tag color="blue" style={{ margin: 0 }}>chat</Tag> : <Tag color="green" style={{ margin: 0 }}>embedding</Tag>}
+        {/* REQ-177①：协议为连接属性，混合协议组内逐连接可见 */}
+        <Tag style={{ margin: 0 }} color={c.protocol === 'anthropic' ? 'purple' : 'default'}>{c.protocol === 'anthropic' ? 'anthropic' : 'openai'}</Tag>
+      </Space>
+    ) },
     { title: '默认', dataIndex: 'is_default', width: 130, render: (_, c) => (c.is_default ? <Tag color="gold" style={{ margin: 0 }}>{c.conn_type} 默认</Tag> : <Typography.Text type="secondary">—</Typography.Text>) },
     {
       title: '操作',
@@ -296,7 +295,7 @@ export default function SettingsPage() {
               <div className="settings-head">
                 <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>模型管理</Typography.Title>
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                  提供商按接入配置聚合（同一供应商可多实例，REQ-148）；支持 openai_compat 与 anthropic（Messages API，含厂商 Anthropic 兼容端点）双协议（REQ-172）。chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。添加提供商可从厂商预设（Anthropic / DeepSeek / 智谱 GLM / Kimi / 百炼 / 千帆 / 硅基流动 / MiniMax / 星火）快速填充；已预置「百度千帆（预置）」embeddings-v1 向量连接候选——填入 Key 并启用即为默认向量连接。
+                  提供商按接入配置聚合（同一供应商可多实例，REQ-148）；协议为模型连接属性（REQ-177）——同一供应商下可同时存在 openai_compat 与 anthropic（Messages API，含厂商 Anthropic 兼容端点）协议的模型连接，列表按供应商名展示。chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。添加提供商可从厂商预设（Anthropic / DeepSeek / 智谱 GLM / Kimi / 百炼 / 千帆 / 硅基流动 / MiniMax / 星火）快速填充；已预置「百度千帆（预置）」embeddings-v1 向量连接候选——填入 Key 并启用即为默认向量连接。
                 </Typography.Paragraph>
               </div>
 
@@ -798,12 +797,12 @@ function AssistantPanel() {
       ) : (
         <div style={{ maxWidth: 640, marginTop: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
-            <Typography.Text style={{ fontSize: 12 }}>系统提示词微调（追加到内置提示词后；留空 = 使用内置默认）</Typography.Text>
+            <Typography.Text style={{ fontSize: 12 }}>系统提示词（已按平台定位预置默认，可微调；清空并保存 = 恢复默认）</Typography.Text>
             <Input.TextArea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               autoSize={{ minRows: 4, maxRows: 10 }}
-              placeholder="内置角色：平台使用助手（解释模块机制/优化文本内容/执行配置操作）……"
+              placeholder="内置角色：平台使用助手（解释模块机制/优化文本内容/辅助配置操作）……"
               style={{ marginTop: 4 }}
             />
           </div>
