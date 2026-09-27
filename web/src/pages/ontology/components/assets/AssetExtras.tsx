@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Form, Input, Modal, Segmented, Space, Tag } from 'antd'
+import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons'
 import { api } from '../../../../api/client'
 import type { Ontology, RuntimeProfile, Spec } from '../../../../api/types'
 import { useUI } from '../../../../store/ui'
@@ -117,25 +118,48 @@ export function RenameModal({ ontology, onClose, onSaved }: { ontology: Ontology
 
 /**
  * M21/VIZ-1（REQ-154）：可视化 Tab 内 2D（React Flow，D-O12 默认）/ 三维（3d-force-graph 沉浸浏览）
- * 切换。三维懒加载：首次切到「三维浏览」才挂载（WebGL 初始化成本）。两视图数据同源 spec_json，零同步。
+ * / WebVOWL 对照三态切换。三维懒加载：首次切到「三维浏览」才挂载（WebGL 初始化成本）。
+ * 数据同源 spec_json（WebVOWL 走平台 VOWL JSON 导出），零同步。
+ * REQ-179：全屏按钮——对整个可视化区 requestFullscreen（三视图共用）；3D 进出场时重挂载
+ * （key 置换，WebGL 初始化按新容器尺寸），WebVOWL 由组件内部监听尺寸变化刷新画布。
  */
 export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: string }) {
   const [mode, setMode] = useState<'2d' | '3d' | 'webvowl'>('2d')
+  const [full, setFull] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const sync = () => setFull(document.fullscreenElement === wrapRef.current)
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
+
+  const toggleFull = () => {
+    if (!wrapRef.current) return
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void wrapRef.current.requestFullscreen().catch(() => {}) // 内嵌环境拒绝时状态由事件同步，保持诚实
+  }
+
   return (
-    <div>
-      <Segmented
-        size="small"
-        style={{ marginBottom: 8 }}
-        value={mode}
-        onChange={(v) => setMode(v as '2d' | '3d' | 'webvowl')}
-        options={[
-          { value: '2d', label: '2D 结构（React Flow）' },
-          { value: '3d', label: '三维浏览（沉浸只读）' },
-          { value: 'webvowl', label: 'WebVOWL 对照（OWL 视觉语言）' },
-        ]}
-      />
+    <div ref={wrapRef} className={`viz-wrap${full ? ' viz-full' : ''}`}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Segmented
+          size="small"
+          value={mode}
+          onChange={(v) => setMode(v as '2d' | '3d' | 'webvowl')}
+          options={[
+            { value: '2d', label: '2D 结构（React Flow）' },
+            { value: '3d', label: '三维浏览（沉浸只读）' },
+            { value: 'webvowl', label: 'WebVOWL 对照（OWL 视觉语言）' },
+          ]}
+        />
+        <span style={{ flex: 1 }} />
+        <Button size="small" icon={full ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={toggleFull}>
+          {full ? '退出全屏' : '全屏'}
+        </Button>
+      </div>
       {mode === '2d' && <SpecGraph spec={spec} />}
-      {mode === '3d' && <Graph3D spec={spec} />}
+      {mode === '3d' && <Graph3D key={full ? 'fs' : 'inline'} spec={spec} />}
       {mode === 'webvowl' && <WebVowlView ontologyId={ontologyId} />}
     </div>
   )

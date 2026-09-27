@@ -288,7 +288,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
             复位全景
           </Button>
         </div>
-        <div ref={containerRef} style={{ width: '100%', height: 520, borderRadius: 8, background: 'linear-gradient(180deg,#f2f4fb 0%,#e8ebf5 100%)' }} />
+        <div ref={containerRef} className="viz-3d-box" style={{ width: '100%', height: 520, borderRadius: 8, background: 'linear-gradient(180deg,#f2f4fb 0%,#e8ebf5 100%)' }} />
         <div style={{ position: 'absolute', zIndex: 5, bottom: 8, left: 10, fontSize: 11, color: 'var(--ant-color-text-tertiary, #888)' }}>
           拖拽旋转 · 滚轮缩放 · 点击节点聚焦飞入（邻居高亮）· 双击空白复位 · 标签悬停可见
         </div>

@@ -5,15 +5,36 @@ import { api } from '../../../api/client'
 
 // ---------------------------------------------------------------------------
 // M21/VIZ-3（REQ-154）：WebVOWL 对照视图——本体语义原生的可视化视觉语言（D-O9 对照项激活）。
-// 集成方式：webvowl 独立分发包（dist js/css）经 public/vendor 静态加载；数据源 = 平台 TTL 导出
-// （/api/ontologies/{id}/export?format=turtle，即本体的 Turtle 形态）经 owl2vowl 转换为 webvowl json。
-// 转换链落地：sidecar rdflib 不可用时降级提示（诚实边界）；Safari 等 WebGL 无关（本视图为 2D SVG）。
+// 集成方式：webvowl 浏览器构建（UMD 全量含 d3）经 public/vendor 静态加载，prepare-vendor
+// 自 angular-webvowl npm 包自动复制（克隆/重装依赖即自愈）。
+// 数据源（2026-09-27 转换链重构，原 owl2vowl.js 为无效链接从未可用——owl2vowl 是 Java-only
+// 转换器无浏览器分发）：平台原生 VOWL JSON 导出 /api/ontologies/{id}/export?format=vowljson，
+// 前端零转换直接渲染；本视图为 2D SVG，与 WebGL 无关。
 // ---------------------------------------------------------------------------
+
+/** webvowl 1.1.x graph 实例（只声明用到的子集） */
+interface WebVowlGraph {
+  options: () => WebVowlOpts
+  start: () => void // 只建空骨架（内部 loadGraphData(true) 跳过解析）
+  load: () => void // 解析 options.data 并渲染（数据装载的唯一生效路径）
+  updateCanvasContainerSize: () => void // 按当前 options 宽高刷新 svg 画布（容器尺寸变化时调用）
+}
+
+/** webvowl 1.1.x options 链式设置器（只声明用到的子集） */
+interface WebVowlOpts {
+  data: (json: unknown) => void
+  width: (v?: number) => WebVowlOpts
+  height: (v?: number) => WebVowlOpts
+  graphContainerSelector: (v?: string) => WebVowlOpts
+  [key: string]: unknown
+}
 
 declare global {
   interface Window {
-    webvowl?: { graph: (container: HTMLElement) => { options: () => { data: (json: unknown) => void } }; util?: unknown }
-    owl2vowl?: { convert: (opts: { data?: string; fileContents?: string }) => { json: () => unknown } }
+    webvowl?: {
+      graph: (containerSelector?: string) => WebVowlGraph
+      util?: unknown
+    }
   }
 }
 
@@ -38,6 +59,12 @@ function loadCss(href: string): void {
 
 export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const graphRef = useRef<WebVowlGraph | null>(null)
+  // webvowl 1.1.x 的 graph() 只接受「选择器字符串」——内部 d3.selectAll(选择器) 对单个 DOM
+  // 元素会解出空集（redrawGraph 建 svg 失败 → 随后 .on("dblclick.zoom") 读空节点崩溃），
+  // 故给容器生成唯一 id、以 #id 传参（2026-09-27 修复）
+  const selRef = useRef<string>('')
+  if (!selRef.current) selRef.current = `wv_${Math.random().toString(36).slice(2, 9)}`
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [ttlBytes, setTtlBytes] = useState(0)
@@ -46,25 +73,31 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
     setLoading(true)
     setErr(null)
     try {
-      // 1) 取平台 TTL 导出（本体的 Turtle 形态）
-      const res = await fetch(api.ontologyExportUrl(ontologyId, 'turtle'))
-      if (!res.ok) throw new Error(`TTL 导出失败: HTTP ${res.status}`)
-      const ttl = await res.text()
-      setTtlBytes(ttl.length)
-      // 2) 注入 webvowl + owl2vowl 分发脚本（public/vendor，随镜像分发）
+      // 1) 取平台原生 VOWL JSON 导出（spec 直转，后端零依赖完成原 owl2vowl 的转换职责）
+      const res = await fetch(api.ontologyExportUrl(ontologyId, 'vowljson'))
+      if (!res.ok) throw new Error(`VOWL JSON 导出失败: HTTP ${res.status}`)
+      const json = await res.json()
+      setTtlBytes(JSON.stringify(json).length)
+      // 2) 注入 webvowl 分发脚本（public/vendor，prepare-vendor 自 npm 包复制）
       loadCss('/vendor/webvowl/webvowl.css')
       await loadScript('/vendor/webvowl/webvowl.js')
-      await loadScript('/vendor/webvowl/owl2vowl.js')
-      if (!window.owl2vowl || !window.webvowl) {
-        throw new Error('webvowl/owl2vowl 分发文件缺失（public/vendor/webvowl/）——请运行 tools/fetch-webvowl.sh 或参考 15 号登记簿部署')
+      if (!window.webvowl) {
+        throw new Error('webvowl 分发文件缺失（public/vendor/webvowl/）——请重新 npm install 并构建（prepare-vendor 自动补齐）')
       }
-      // 3) OWL2VOWL：TTL → webvowl json（预转换；结果仅内存态，转换缓存随版本 TTL 导出）
-      const json = window.owl2vowl.convert({ data: ttl }).json()
-      // 4) WebVOWL 渲染
+      // 3) WebVOWL 渲染——严格按官方 app.js 序列：start() 只建空骨架（其 loadGraphData(true)
+      //    会跳过解析），数据装载必须走 data() + load()（loadGraphData 内才调用 parser.parse）
       if (containerRef.current) {
         containerRef.current.innerHTML = ''
-        const graph = window.webvowl.graph(containerRef.current)
+        const graph = window.webvowl.graph()
+        graph
+          .options()
+          .graphContainerSelector(`#${selRef.current}`)
+          .width(containerRef.current.clientWidth)
+          .height(containerRef.current.clientHeight)
+        graph.start()
         graph.options().data(json)
+        graph.load()
+        graphRef.current = graph
       }
     } catch (e: any) {
       setErr(e?.message ?? String(e))
@@ -78,6 +111,24 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ontologyId])
 
+  // 全屏/窗口尺寸变化：保住图实例与力布局状态，仅刷新画布尺寸（不重挂载——重挂载会让
+  // 力布局从零重跑，节点全部堆回原点）
+  useEffect(() => {
+    const onResize = () => {
+      const g = graphRef.current
+      const c = containerRef.current
+      if (!g || !c) return
+      g.options().width(c.clientWidth).height(c.clientHeight)
+      g.updateCanvasContainerSize()
+    }
+    document.addEventListener('fullscreenchange', onResize)
+    window.addEventListener('resize', onResize)
+    return () => {
+      document.removeEventListener('fullscreenchange', onResize)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [])
+
   return (
     <div>
       <Space style={{ marginBottom: 8 }}>
@@ -85,8 +136,8 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
           重新转换并渲染
         </Button>
         <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          WebVOWL（本体语义原生视觉语言，D-O9 对照视图）· 数据源：平台 TTL 导出 → owl2vowl 预转换
-          {ttlBytes > 0 ? ` · ${Math.round(ttlBytes / 1024)}KB TTL` : ''}
+          WebVOWL（本体语义原生视觉语言，D-O9 对照视图）· 数据源：平台 VOWL JSON 原生导出（spec 直转）
+          {ttlBytes > 0 ? ` · ${Math.round(ttlBytes / 1024)}KB JSON` : ''}
         </Typography.Text>
       </Space>
       {err && (
@@ -100,11 +151,13 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
       )}
       {loading && !err && (
         <div style={{ textAlign: 'center', padding: 40 }}>
-          <Spin tip="转换并渲染中（TTL → owl2vowl → webvowl）…" />
+          <Spin tip="加载 VOWL JSON 并渲染中…" />
         </div>
       )}
       <div
         ref={containerRef}
+        id={selRef.current}
+        className="webvowl-box"
         style={{ width: '100%', height: 560, border: '1px solid var(--ant-color-border, #e3e6f0)', borderRadius: 8, background: '#fff', overflow: 'hidden' }}
       />
       {!err && !loading && (
