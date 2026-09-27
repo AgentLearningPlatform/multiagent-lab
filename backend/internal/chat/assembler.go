@@ -227,7 +227,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
 		entries = append(entries, agentSnapshotEntry("member", s.Name, sb.Meta.ModelLabel, sb.Meta.SourceOf, sb.Meta.LoadedSkills, s.MCPServers, sb.Meta.Instruction))
-		tools = append(tools, adk.NewAgentTool(ctx, sb.Inst))
+		tools = append(tools, normalizeEmptyArgsTool(adk.NewAgentTool(ctx, sb.Inst)))
 		for k, v := range sb.Meta.SourceOf {
 			if _, dup := src[k]; !dup {
 				src[k] = v
@@ -518,6 +518,10 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 				tb.Tools[i] = wrapped
 			}
 		}
+	}
+	// 7) 空参数归一化包装（toolargs.go：GLM 等 Anthropic 兼容端点空入参 tool_use 致命解析失败的统一收口）
+	for i, bt := range tb.Tools {
+		tb.Tools[i] = normalizeEmptyArgsTool(bt)
 	}
 	return tb, nil
 }

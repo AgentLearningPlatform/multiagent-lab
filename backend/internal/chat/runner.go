@@ -644,25 +644,27 @@ func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, r
 	return rc
 }
 
-// humanizeRunErr 把「输出被截断」类底层失败翻译为带修复指引的可读信息，其余错误原样返回。
-// 背景：Anthropic 协议下思考、回复与流式工具调用参数共享 max_tokens 输出预算，复杂任务在
-// 低预算下工具参数 JSON 未写完即断流，eino ToolsNode 解析报 "failed to unmarshal arguments
-// ... eof"——用户观感是「回答到一半卡住」。finish_reason=max_tokens/length（Anthropic 的
-// stop_reason 原样透传）与参数解析失败是两个互补的截断信号。原始错误始终附在末尾便于排障。
+// humanizeRunErr 把两类工具链底层失败翻译为可读信息，其余错误原样返回。
+// 背景（2026-09-27 复杂问题答到一半即止排查）：Anthropic 协议下思考、回复与流式工具调用参数
+// 共享 max_tokens 输出预算，低预算下工具参数 JSON 未写完即断流，eino ToolsNode 解析报
+// "failed to unmarshal arguments ... eof"——用户观感是「回答到一半卡住」。两类信号分口径：
+//   - finish_reason=max_tokens/length（Anthropic stop_reason 原样透传）→ 输出预算截断，给调参指引；
+//   - 仅参数解析失败（finish_reason 正常收尾）→ 参数为空/非法（空参数已由 toolargs.go 归一化兜底，
+//     剩余为畸形 JSON），如实描述不再臆断截断。
+//     原始错误始终附在末尾便于排障。
 func humanizeRunErr(msg, finishReason string) string {
 	if msg == "" {
 		return msg
 	}
 	argsBroken := strings.Contains(msg, "failed to unmarshal arguments")
-	truncated := argsBroken || finishReason == "max_tokens" || finishReason == "length"
-	if !truncated {
-		return msg
+	truncated := finishReason == "max_tokens" || finishReason == "length"
+	switch {
+	case truncated:
+		return "输出在达到 max_tokens 上限时被截断（深度思考、回复与工具调用参数共享该预算），本次运行中止；可在智能体配置调大「最大回复 tokens」后重试。原始错误：" + msg
+	case argsBroken:
+		return "工具调用参数解析失败（参数 JSON 为空或非法），本次运行中止；可重试或换一种问法。原始错误：" + msg
 	}
-	hint := "输出在达到 max_tokens 上限时被截断（深度思考、回复与工具调用参数共享该预算），本次运行中止；可在智能体配置调大「最大回复 tokens」后重试"
-	if argsBroken {
-		hint = "工具调用参数不完整——大概率是输出在达到 max_tokens 上限时被截断（深度思考、回复与工具调用参数共享该预算），本次运行中止；可在智能体配置调大「最大回复 tokens」后重试"
-	}
-	return hint + "。原始错误：" + msg
+	return msg
 }
 
 // consume 消费 ADK 事件流并翻译为平台事件（方案 §7）；中断事件在此捕获。
