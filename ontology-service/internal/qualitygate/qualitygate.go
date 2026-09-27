@@ -31,8 +31,8 @@ const (
 type Dimension string
 
 const (
-	DimCompleteness  Dimension = "completeness"  // 完备性
-	DimConsistency   Dimension = "consistency"   // 一致性
+	DimCompleteness    Dimension = "completeness"    // 完备性
+	DimConsistency     Dimension = "consistency"     // 一致性
 	DimMaintainability Dimension = "maintainability" // 可维护性
 )
 
@@ -47,12 +47,12 @@ type Config map[string]CheckCfg
 
 // Finding 一组同检查项命中（count 全量计数，samples 截样）。
 type Finding struct {
-	CheckID   string   `json:"check_id"`
-	Title     string   `json:"title"`
+	CheckID   string    `json:"check_id"`
+	Title     string    `json:"title"`
 	Dimension Dimension `json:"dimension"`
-	Severity  Severity `json:"severity"`
-	Count     int      `json:"count"`
-	Samples   []string `json:"samples"` // 路径级样例（如 concepts[2]），最多 maxSamples
+	Severity  Severity  `json:"severity"`
+	Count     int       `json:"count"`
+	Samples   []string  `json:"samples"` // 路径级样例（如 concepts[2]），最多 maxSamples
 }
 
 // Score 三维质量分（0~100，扣分制）+ 加权综合分。
@@ -65,14 +65,14 @@ type Score struct {
 
 // Report 质量报告（入库形态：ontology_artifact format='quality-report'）。
 type Report struct {
-	Pass      bool      `json:"pass"`        // strict 模式下 = 无错误级命中；宽松模式恒 true（仅告警不阻断）
-	Strict    bool      `json:"strict"`
-	ErrorCount int      `json:"error_count"`
-	WarningCount int    `json:"warning_count"`
-	InfoCount int       `json:"info_count"`
-	Findings  []Finding `json:"findings"`
-	Score     Score     `json:"score"`
-	Stats     Stats     `json:"stats"`
+	Pass         bool      `json:"pass"` // strict 模式下 = 无错误级命中；宽松模式恒 true（仅告警不阻断）
+	Strict       bool      `json:"strict"`
+	ErrorCount   int       `json:"error_count"`
+	WarningCount int       `json:"warning_count"`
+	InfoCount    int       `json:"info_count"`
+	Findings     []Finding `json:"findings"`
+	Score        Score     `json:"score"`
+	Stats        Stats     `json:"stats"`
 }
 
 // Stats 被检本体规模（报告可读性）。

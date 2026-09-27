@@ -18,16 +18,16 @@ import (
 	"strings"
 	"time"
 
-	pkgspec "github.com/xiaoyao/eino-multiagent-lab/pkg/ontology/spec"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/qualitygate"
+	pkgspec "github.com/xiaoyao/eino-multiagent-lab/pkg/ontology/spec"
 )
 
 // Validation validate 工具结果：结构错误 + 质量报告（复用 qualitygate 三维评分）。
 type Validation struct {
-	Pass      bool                 `json:"pass"`
-	Strict    bool                 `json:"strict"`
-	Errors    []string             `json:"errors"` // 结构错误（path: message），存在即 pass=false
-	Quality   *qualitygate.Report  `json:"quality"`
+	Pass    bool                `json:"pass"`
+	Strict  bool                `json:"strict"`
+	Errors  []string            `json:"errors"` // 结构错误（path: message），存在即 pass=false
+	Quality *qualitygate.Report `json:"quality"`
 }
 
 // LintReport lint 工具结果：qualitygate 命中以 lint 语义呈现（风格/最佳实践，不阻断结构）。
@@ -80,7 +80,7 @@ func isWordChar(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == ':' || c == '.'
 }
 
-// scanBareWords 词法扫描产出裸词：跳过 # 注释、<…> IRI、单双引号字符串（含 '''/""" 长串与 \ 转义）。
+// scanBareWords 词法扫描产出裸词：跳过 # 注释、<…> IRI、单双引号字符串（含 ”'/""" 长串与 \ 转义）。
 func scanBareWords(q string) []string {
 	var words []string
 	i, n := 0, len(q)

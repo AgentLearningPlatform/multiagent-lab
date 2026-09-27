@@ -81,9 +81,9 @@ func (s *Server) updatePipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name             *string                          `json:"name"`
-		OntologyID       *string                          `json:"ontology_id"`
-		RuntimeProfileID *string                          `json:"runtime_profile_id"`
+		Name             *string                             `json:"name"`
+		OntologyID       *string                             `json:"ontology_id"`
+		RuntimeProfileID *string                             `json:"runtime_profile_id"`
 		Stages           *map[string]pipeline.StageSelection `json:"stages"`
 	}
 	if err := decodeJSON(r, &req); err != nil {

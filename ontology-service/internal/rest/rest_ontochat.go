@@ -106,9 +106,9 @@ func (s *Server) ontoChatTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{
-		"reply":  res.Reply,
-		"stage":  res.NextStage,
-		"round":  fresh.Round,
+		"reply":   res.Reply,
+		"stage":   res.NextStage,
+		"round":   fresh.Round,
 		"session": fresh,
 	}
 	if res.Draft != nil {

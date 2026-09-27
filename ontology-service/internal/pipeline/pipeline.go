@@ -92,16 +92,16 @@ func DefaultStages() map[string]StageSelection {
 
 // StageSelection 单阶段选择（stages JSON 的值）。
 type StageSelection struct {
-	Tool    string         `json:"tool"`
-	Mode    string         `json:"mode"`
-	Params  map[string]any `json:"params,omitempty"`
+	Tool   string         `json:"tool"`
+	Mode   string         `json:"mode"`
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // ChecklistItem 引导清单条目（guided 阶段聚合 + 任务卡引用）。
 type ChecklistItem struct {
-	Key      string `json:"key"`      // tool:<stage>:<tool_id> 或 task:<task_id>
-	Kind     string `json:"kind"`     // tool | task
-	Stage    string `json:"stage"`    // tool 类有；task 类空
+	Key      string `json:"key"`   // tool:<stage>:<tool_id> 或 task:<task_id>
+	Kind     string `json:"kind"`  // tool | task
+	Stage    string `json:"stage"` // tool 类有；task 类空
 	Title    string `json:"title"`
 	Detail   string `json:"detail,omitempty"`
 	EntryURL string `json:"entry_url,omitempty"`

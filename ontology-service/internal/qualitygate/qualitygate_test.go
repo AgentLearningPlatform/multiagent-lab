@@ -25,17 +25,17 @@ func findingOf(rep *Report, id string) *Finding {
 func TestChecksTrigger(t *testing.T) {
 	sp := specOf(
 		[]pkgspec.Concept{
-			{Name: "Drug"},                                       // 孤立 + 无定义 + 无 label
-			{Name: "treats_drug", Definition: "x", Label: "治疗"},  // snake 风格（主导 camel 时命中）
+			{Name: "Drug"}, // 孤立 + 无定义 + 无 label
+			{Name: "treats_drug", Definition: "x", Label: "治疗"},            // snake 风格（主导 camel 时命中）
 			{Name: "Disease", Definition: "x", Parents: []string{"Ghost"}}, // 父不存在
-			{Name: "Disease"},                                    // 重复名
+			{Name: "Disease"}, // 重复名
 		},
 		[]pkgspec.Relation{
-			{Name: "treats", From: "Drug", To: "Ghost2"},        // 端点不存在
-			{Name: "noEndpoint", Definition: "x"},               // 域值域未声明
+			{Name: "treats", From: "Drug", To: "Ghost2"}, // 端点不存在
+			{Name: "noEndpoint", Definition: "x"},        // 域值域未声明
 		},
 		[]pkgspec.Instance{
-			{Name: "aspirin", Concept: "Nope"},                  // 类型不存在
+			{Name: "aspirin", Concept: "Nope"}, // 类型不存在
 			{Name: "aspirin", Concept: "Drug", Relations: []pkgspec.InstanceRel{{Rel: "ghostRel", Target: "nope-ins"}}}, // 断言悬空 + 重复名
 		},
 	)
@@ -79,8 +79,8 @@ func TestHierarchyCycle(t *testing.T) {
 
 func TestNamingStyleDominant(t *testing.T) {
 	sp := specOf([]pkgspec.Concept{
-		{Name: "DrugTarget", Definition: "x"},   // camel 主导
-		{Name: "drug_dose", Definition: "x"},    // snake 少数派 → 命中
+		{Name: "DrugTarget", Definition: "x"}, // camel 主导
+		{Name: "drug_dose", Definition: "x"},  // snake 少数派 → 命中
 		{Name: "剂量上限", Definition: "x"},       // cjk 不参与风格判定
 	}, nil, nil)
 	rep := Check(sp, nil)

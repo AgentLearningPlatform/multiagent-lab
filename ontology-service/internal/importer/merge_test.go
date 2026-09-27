@@ -22,12 +22,12 @@ func mergeSpecs() (target, incoming *pkgspec.Spec) {
 	incoming = &pkgspec.Spec{
 		Name: "I",
 		Concepts: []pkgspec.Concept{
-			{Name: "Drug", Label: "药品", Definition: "导入定义"},            // 冲突：label+definition
-			{Name: "Symptom", Label: "症状", Definition: "症状"},        // 新增
+			{Name: "Drug", Label: "药品", Definition: "导入定义"},                              // 冲突：label+definition
+			{Name: "Symptom", Label: "症状", Definition: "症状"},                             // 新增
 			{Name: "Disease", Label: "疾病", Definition: "疾病改", Parents: []string{"Drug"}}, // 冲突：definition
 		},
-		Relations:  []pkgspec.Relation{{Name: "treats", From: "Drug", To: "Symptom", Definition: "改"}},
-		Instances:  []pkgspec.Instance{{Name: "aspirin", Concept: "Disease"}},
+		Relations: []pkgspec.Relation{{Name: "treats", From: "Drug", To: "Symptom", Definition: "改"}},
+		Instances: []pkgspec.Instance{{Name: "aspirin", Concept: "Disease"}},
 	}
 	return
 }

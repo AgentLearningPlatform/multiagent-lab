@@ -24,9 +24,9 @@ type Message struct {
 
 // Context 累积上下文（每轮追加，draft 阶段整体喂给生成器）。
 type Context struct {
-	Description string      `json:"description"`            // 领域描述（cq 阶段录入）
-	CQs         []string    `json:"cqs,omitempty"`          // 能力问题列表
-	Hints       []string    `json:"hints,omitempty"`        // 逐轮补全的领域信息
+	Description string           `json:"description"`          // 领域描述（cq 阶段录入）
+	CQs         []string         `json:"cqs,omitempty"`        // 能力问题列表
+	Hints       []string         `json:"hints,omitempty"`      // 逐轮补全的领域信息
 	DraftSpec   *json.RawMessage `json:"draft_spec,omitempty"` // 最近一次草稿（refine 阶段回喂）
 }
 

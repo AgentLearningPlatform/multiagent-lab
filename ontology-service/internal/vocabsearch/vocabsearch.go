@@ -89,8 +89,8 @@ func (c *Client) Search(ctx context.Context, q string) ([]Card, error) {
 func decodeCards(body []byte) ([]Card, error) {
 	var raw struct {
 		Results []struct {
-			Prefix      string `json:"prefix"`
-			URI         string `json:"uri"`
+			Prefix      string            `json:"prefix"`
+			URI         string            `json:"uri"`
 			Title       map[string]string `json:"title"`
 			Description map[string]string `json:"description"`
 		} `json:"results"`
