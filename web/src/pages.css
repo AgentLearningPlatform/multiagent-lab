@@ -580,6 +580,12 @@
 .onto-engine-desc { font-size: 11px; color: var(--c-ink-3); line-height: 1.5; }
 
 /* 资产选择条（资产栏顶部统一列表） */
+/* REQ-179 可视化全屏：三视图共用 viz-wrap 容器，:fullscreen 态下按视口拉伸画布 */
+.viz-wrap:fullscreen { background: #fff; padding: 12px; overflow: auto; }
+.viz-wrap:fullscreen .viz-3d-box,
+.viz-wrap:fullscreen .webvowl-box { height: calc(100vh - 96px) !important; }
+.viz-wrap:fullscreen .onto-flow-split { height: calc(100vh - 96px) !important; }
+
 .onto-picker { display: flex; gap: 6px; flex-wrap: wrap; }
 .onto-picker-item {
   display: flex; flex-direction: column; gap: 4px; text-align: left;
