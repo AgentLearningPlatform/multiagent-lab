@@ -97,6 +97,29 @@ func scanProfile(row interface{ Scan(...any) error }) (*Profile, error) {
 	return &p, nil
 }
 
+// RuntimeConfig 全局运行配置（REQ-179/M-O16：执行方式为系统级配置而非方案级——2026-09-27 主人指示变更）。
+type RuntimeConfig struct {
+	ExecutionMethod string `json:"execution_method"` // docker | native | k8s（默认 k8s）
+}
+
+// GetConfig 读全局运行配置（无行/空值 = 默认 k8s）。
+func (s *Store) GetConfig() RuntimeConfig {
+	var method string
+	_ = s.db.QueryRow(`SELECT execution_method FROM runtime_config WHERE id=1`).Scan(&method)
+	method = strings.TrimSpace(method)
+	if method == "" {
+		method = "k8s"
+	}
+	return RuntimeConfig{ExecutionMethod: method}
+}
+
+// SetConfig 写全局运行配置（单行 upsert）。
+func (s *Store) SetConfig(cfg RuntimeConfig) error {
+	_, err := s.db.Exec(`INSERT INTO runtime_config(id, execution_method) VALUES(1, ?)
+		ON CONFLICT(id) DO UPDATE SET execution_method=excluded.execution_method`, cfg.ExecutionMethod)
+	return err
+}
+
 // SetLoadedVersions REQ-155/M-O15 阶段二：记录启动/重载成功时的加载版本快照。
 func (s *Store) SetLoadedVersions(id string, versionsJSON string) error {
 	_, err := s.db.Exec(`UPDATE runtime_profile SET loaded_versions=? WHERE id=?`, versionsJSON, id)

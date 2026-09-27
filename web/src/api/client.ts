@@ -402,6 +402,9 @@ export const api = {
 
   // ---- M8 运行平面 :8090 /api/runtime-profiles* ----
   listRuntimeProfiles: () => req<RuntimeProfile[]>('/api/runtime-profiles'),
+  // REQ-179/M-O16：全局运行配置（执行方式；系统级）
+  runtimeConfig: () => req<{ execution_method: 'docker' | 'native' | 'k8s'; docker_available: boolean; options: { value: string; label: string }[] }>('/api/runtime-config'),
+  setRuntimeConfig: (execution_method: string) => req<{ execution_method: string }>('/api/runtime-config', { method: 'PUT', body: JSON.stringify({ execution_method }) }),
   // ---- REQ-148 供应商分组：多实例与别名（分组标识与 BaseURL 解耦） ----
   listProviderGroups: () => req<ProviderGroupMeta[]>('/api/provider-groups'),
   createProviderGroup: (alias: string) =>

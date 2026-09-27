@@ -358,6 +358,17 @@ func (m *Manager) ProcEndpoint(id string) (string, error) {
 
 // startEngine 按引擎能力分发启动（实现 ReasoningRuntime 的引擎透传推理开关，O6）。
 func (m *Manager) startEngine(ctx context.Context, eng engine.Runtime, p *store.Profile, port int, ttls map[string]string) (*engine.Process, error) {
+	// REQ-179/M-O16：执行方式为系统级全局配置（2026-09-27 主人指示变更，默认 k8s）——
+	// docker=容器执行（oxigraph 官方镜像）；native=内置二进制子进程；k8s=接口预留（复用 M10 10d K8sBackend 模式，随集群环境落地）
+	switch m.Store.GetConfig().ExecutionMethod {
+	case "docker":
+		if ox, ok := eng.(*oxigraph.Runtime); ok {
+			return ox.DockerStart(ctx, p.ID, port, ttls)
+		}
+		return nil, fmt.Errorf("执行方式 docker 当前仅支持 oxigraph 引擎（fuseki docker 化随需求推进）")
+	case "k8s":
+		return nil, fmt.Errorf("执行方式 k8s 为接口预留（复用 M10 10d K8sBackend 模式，随集群环境落地）——当前请在系统配置切换 docker 容器或内置二进制")
+	}
 	if rr, ok := eng.(engine.ReasoningRuntime); ok {
 		return rr.StartWithReasoning(ctx, p.ID, port, ttls, profileReasoning(p.Config))
 	}

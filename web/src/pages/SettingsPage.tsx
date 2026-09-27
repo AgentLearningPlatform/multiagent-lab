@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, DatePicker, Input, InputNumber, Menu, Popconfirm, Result, Segmented, Select, Slider, Space, Spin, Splitter, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, DatePicker, Input, InputNumber, Menu, Popconfirm, Result, Segmented, Select, Slider, Space, Spin, Splitter, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import { api } from '../api/client'
@@ -260,7 +260,7 @@ export default function SettingsPage() {
               { key: 'inference', label: '推理后端' },
               { key: 'assistant', label: '平台助手' },
               { key: 'stats', label: '使用统计' },
-              { key: 'global', label: <Space size={6}>全局参数<Tag style={{ margin: 0 }}>P1 预留</Tag></Space>, disabled: true },
+              { key: 'global', label: <Space size={6}>全局参数</Space> },
               { key: 'security', label: '数据与安全' },
             ]}
           />
@@ -274,6 +274,8 @@ export default function SettingsPage() {
         <div className="settings-main">
           {category === 'inference' ? (
             <InferencePanel />
+          ) : category === 'global' ? (
+            <RuntimeExecPanel />
           ) : category === 'assistant' ? (
             <AssistantPanel />
           ) : category === 'security' ? (
@@ -552,6 +554,61 @@ function StatsView() {
 }
 
 /** M13/D-O13 §6.16：推理后端面板——已发现清单（PATH 探测 + 版本）+ 重新探测；能力矩阵（§6.16.4） */
+/** REQ-179/M-O16：运行执行方式全局配置（docker 容器 / 内置二进制 / k8s 接口预留；默认 k8s——主人指示） */
+function RuntimeExecPanel() {
+  const [cfg, setCfg] = useState<{ execution_method: 'docker' | 'native' | 'k8s'; docker_available: boolean } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    api.runtimeConfig().then(setCfg).catch((e: any) => setErr(e?.message ?? '加载失败'))
+  }, [])
+  const set = (v: 'docker' | 'native' | 'k8s') => {
+    setSaving(true)
+    api
+      .setRuntimeConfig(v)
+      .then((r) => setCfg((c) => ({ execution_method: r.execution_method as any, docker_available: c?.docker_available ?? false })))
+      .catch((e: any) => setErr(e?.message ?? '保存失败'))
+      .finally(() => setSaving(false))
+  }
+  return (
+    <>
+      <div className="settings-head">
+        <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>全局参数 · 运行执行方式</Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          本体运行方案的引擎执行方式（系统级配置，对所有方案生效；REQ-179/M-O16，D-O20）。切换后对下一次方案启动生效。
+        </Typography.Paragraph>
+      </div>
+      {err && <Alert type="error" showIcon style={{ marginTop: 12 }} message={err} closable onClose={() => setErr(null)} />}
+      {!cfg ? (
+        <div style={{ marginTop: 16 }}>{err ? null : <Spin />}</div>
+      ) : (
+        <Card size="small" style={{ marginTop: 12, maxWidth: 640 }}>
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Space size={10} wrap>
+              <Typography.Text strong>执行方式</Typography.Text>
+              <Segmented
+                value={cfg.execution_method}
+                onChange={(v) => set(v as 'docker' | 'native' | 'k8s')}
+                options={[
+                  { value: 'docker', label: 'docker 容器' },
+                  { value: 'native', label: '内置二进制' },
+                  { value: 'k8s', label: 'k8s' },
+                ]}
+              />
+              {saving && <Spin size="small" />}
+            </Space>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {cfg.execution_method === 'docker' && <>容器执行（oxigraph 官方镜像，数据目录挂载 + 端口映射）。当前 docker 可用性：<b style={{ color: cfg.docker_available ? '#16a34a' : '#dc2626' }}>{cfg.docker_available ? '可用' : '不可用（PATH 无 docker CLI 或守护进程未启动）'}</b>——不可用时方案启动会失败。</>}
+              {cfg.execution_method === 'native' && <>内置二进制子进程执行（REQ-146 一键安装的引擎二进制，按方案端口本机监听）。引擎未安装时到「本体运行」栏一键安装。</>}
+              {cfg.execution_method === 'k8s' && <>接口预留（复用 M10 10d K8sBackend 模式，随集群环境落地）——当前选择 k8s 时方案启动将报错提示，请在有集群环境前切换 docker 容器或内置二进制。</>}
+            </Typography.Text>
+          </Space>
+        </Card>
+      )}
+    </>
+  )
+}
+
 function InferencePanel() {
   const { showToast } = useUI()
   const [backends, setBackends] = useState<InferenceBackendStatus[]>([])

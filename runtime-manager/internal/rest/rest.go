@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/engine/oxigraph"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/manager"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/store"
 )
@@ -34,6 +35,9 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("POST /api/runtime-profiles/{id}/start", s.start)
 	m.HandleFunc("POST /api/runtime-profiles/{id}/stop", s.stop)
 	m.HandleFunc("POST /api/runtime-profiles/{id}/reload", s.reload)
+	// REQ-179/M-O16：全局运行配置（执行方式；系统级）
+	m.HandleFunc("GET /api/runtime-config", s.runtimeConfigGet)
+	m.HandleFunc("PUT /api/runtime-config", s.runtimeConfigPut)
 	m.HandleFunc("GET /api/runtime-profiles/{id}/logs", s.logs)
 	m.HandleFunc("GET /api/runtime-profiles/{id}/trace", s.trace)    // 翻译透视（REQ-94）
 	m.HandleFunc("GET /api/runtime-profiles/{id}/sparql", s.sparql)  // SPARQL 工作台端点（REQ-92，Yasgui）
@@ -73,8 +77,39 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 }
 
 // engines 引擎自检汇总（REQ-146）：GET /api/engines → {engines:[EngineStatus]}。
+// runtimeConfigGet / runtimeConfigPut REQ-179/M-O16：全局运行配置读写（执行方式；系统级配置）。
+func (s *Server) runtimeConfigGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"execution_method": s.Store.GetConfig().ExecutionMethod,
+		"docker_available": oxigraph.DockerAvailable(),
+		"options":          []map[string]string{{"value": "docker", "label": "docker 容器"}, {"value": "native", "label": "内置二进制"}, {"value": "k8s", "label": "k8s（接口预留）"}},
+	})
+}
+
+func (s *Server) runtimeConfigPut(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExecutionMethod string `json:"execution_method"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	switch body.ExecutionMethod {
+	case "docker", "native", "k8s":
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "execution_method 须为 docker | native | k8s"})
+		return
+	}
+	if err := s.Store.SetConfig(store.RuntimeConfig{ExecutionMethod: body.ExecutionMethod}); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"execution_method": body.ExecutionMethod})
+}
+
 func (s *Server) engines(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"engines": s.Manager.EngineStatuses()})
+	// REQ-179/M-O16：docker 可用性探测（执行方式默认值联动——有 Docker 时新方案推荐容器执行）
+	writeJSON(w, http.StatusOK, map[string]any{"engines": s.Manager.EngineStatuses(), "docker_available": oxigraph.DockerAvailable()})
 }
 
 // engineInstall 一键安装（REQ-146）：POST /api/engines/{name}/install → 202 异步任务，

@@ -210,6 +210,8 @@ func (s *Server) routes() {
 		m.Handle("/api/ontology/", s.Ontology.BuildProxy())
 		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
 		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
+		// REQ-179/M-O16：全局运行配置（执行方式）——运行平面单行配置表
+		m.Handle("/api/runtime-config", s.Ontology.RuntimeProxy())
 		// REQ-146：引擎自检与一键安装（install 为 202 异步任务，轮询 /api/engines 无长连接）
 		m.Handle("/api/engines", s.Ontology.RuntimeProxy())
 		m.Handle("/api/engines/", s.Ontology.RuntimeProxy())
