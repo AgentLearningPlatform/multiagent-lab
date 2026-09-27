@@ -3,7 +3,8 @@
 .tool-phase {
   font-size: 12px;
   line-height: 1.5;
-  margin: 2px 0;
+  /* REQ-178：缩进基准与事件卡/深度思考同列（44 = 头像 32 + 间距 12），嵌套深度经 --sub-depth 参与 */
+  margin: 2px 0 2px calc(44px + var(--sub-depth, 0) * 14px);
   padding-left: 10px;
   border-left: 2px solid var(--c-line, #e5e7eb);
 }

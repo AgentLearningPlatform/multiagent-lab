@@ -7,6 +7,7 @@
  * 单行渲染替代原「调用工具卡 + 工具结果卡」两卡各带「详情」折叠的四行形态。
  */
 import { useState } from 'react'
+import type { CSSProperties } from 'react'
 import './tool-phase.css'
 
 /** 一次工具调用（call/result 合并后） */
@@ -180,7 +181,7 @@ export function ToolPhaseBlock({ group }: { group: ToolPhaseGroup }) {
   const running = group.calls.some((c) => c.running)
   if (group.live) {
     return (
-      <div className={`tool-phase${running ? ' live' : ''}`} style={{ marginLeft: group.subDepth * 14 }}>
+      <div className={`tool-phase${running ? ' live' : ''}`} style={{ '--sub-depth': group.subDepth } as CSSProperties}>
         {group.calls.map((c, i) => (
           <ToolLine key={i} call={c} />
         ))}
@@ -188,7 +189,7 @@ export function ToolPhaseBlock({ group }: { group: ToolPhaseGroup }) {
     )
   }
   return (
-    <div className="tool-phase" style={{ marginLeft: group.subDepth * 14 }}>
+    <div className="tool-phase" style={{ '--sub-depth': group.subDepth } as CSSProperties}>
       {!open && (
         <div className="tool-phase-head" onClick={() => setOpen(true)} title="展开每次调用的详情">
           <span className="tool-caret" />

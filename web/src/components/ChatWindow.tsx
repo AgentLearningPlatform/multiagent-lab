@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Splitter, Switch, Tag, Tooltip, Typography } from 'antd'
 import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, RobotOutlined, SettingOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
@@ -803,8 +803,10 @@ export default function ChatWindow({
   )
 
   // 事件卡渲染（ThoughtChain 深度思考 / 工具详情 / 终态摘要）：
-  // 紧凑、左侧色条区分来源、与助手文本列对齐（margin-left 44 = 头像 32 + 间距 12）
+  // 紧凑、左侧色条区分来源、与助手文本列对齐（缩进统一由样式 .event-card/.event-side/.tool-phase
+  // 的 margin-left 计算，内联只透传子智能体嵌套深度变量——根级=助手正文列，不再错位到头像列）
   // REQ-117：按 enter/exit 序列计算子智能体嵌套深度（回放与实时共用，渲染时缩进）
+  const depthStyle = (d?: number): CSSProperties => ({ '--sub-depth': d ?? 0 }) as CSSProperties
   const withSubDepth = (list: ChatItem[]): ChatItem[] => {
     let depth = 0
     return list.map((it) => {
@@ -832,6 +834,7 @@ export default function ChatWindow({
         <ThoughtChain
           key={i}
           className="event-side"
+          style={depthStyle(it.subDepth)}
           expandedKeys={open ? [cardKey] : []}
           onExpand={(keys) => setReasoningOpen((prev) => ({ ...prev, [cardKey]: keys.includes(cardKey) }))}
           items={[
@@ -852,7 +855,7 @@ export default function ChatWindow({
       const tools: any[] = Array.isArray(it.evData?.tools) ? it.evData.tools : []
       const roleLabel: Record<string, string> = { user: '用户', assistant: '助手', system: '系统', tool: '工具' }
       return (
-        <div key={i} className="event-card src-builtin" style={{ marginLeft: (it.subDepth ?? 0) * 14 }}>
+        <div key={i} className="event-card src-builtin" style={depthStyle(it.subDepth)}>
           <span>{it.eventText}</span>
           {(msgs.length > 0 || tools.length > 0) && (
             <Collapse
@@ -926,7 +929,7 @@ export default function ChatWindow({
 
     const assembly = it.evType === 'run.started' ? it.evData?.assembly : undefined
     return (
-      <div key={i} className={`event-card src-${eventSource(it.evType, it.evData)}${it.eventErr ? ' err' : ''}${it.eventWarn ? ' warn' : ''}`} style={{ marginLeft: (it.subDepth ?? 0) * 14 }}>
+      <div key={i} className={`event-card src-${eventSource(it.evType, it.evData)}${it.eventErr ? ' err' : ''}${it.eventWarn ? ' warn' : ''}`} style={depthStyle(it.subDepth)}>
         <span>{it.eventText}</span>
         {assembly && (
           <Collapse
