@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -23,7 +24,12 @@ type Service struct {
 	MCPURL      string        // facade MCP 端点（ONTOLOGY_MCP_URL，默认 http://127.0.0.1:8090/mcp）
 	RuntimeURL  string        // 运行平面（RUNTIME_MGR_URL，默认 http://127.0.0.1:8090）
 	BuildURL    string        // 构建平面（BUILD_SVC_URL，默认 http://127.0.0.1:8091）
-	DialTimeout time.Duration // ONTOLOGY_DIAL_TIMEOUT，默认 3s
+	DialTimeout time.Duration // ONTOLOGY_DIAL_TIMEOUT，默认 3s（仅约束建连拨号）
+	// HeaderTimeout 反代等待上游响应头的上限（ONTOLOGY_RESPONSE_HEADER_TIMEOUT，默认 0 = 不限）。
+	// 默认不限的原因：OntoChat turn（REQ-103 模式 A）为同步 LLM 生成端点，生成完成才写响应头，
+	// 可达分钟级——此前误用 DialTimeout 填 ResponseHeaderTimeout（3s），LLM 轮必超时，
+	// 被误报为「本体服务不可达」（2026-09-27 主人报障修复）。
+	HeaderTimeout time.Duration
 }
 
 // NewService 从环境变量构建；始终返回可用实例（不可达由调用方降级）。
@@ -37,6 +43,11 @@ func NewService() *Service {
 	if v := os.Getenv("ONTOLOGY_DIAL_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			s.DialTimeout = d
+		}
+	}
+	if v := os.Getenv("ONTOLOGY_RESPONSE_HEADER_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			s.HeaderTimeout = d
 		}
 	}
 	return s
@@ -122,10 +133,15 @@ func (s *Service) newProxy(target string) http.Handler {
 			orig(w, r, perr)
 			return
 		}
-		writeErrJSON(w, http.StatusBadGateway, "本体服务不可达: "+target)
+		// 附带底层错误：dial 失败=真不可达；其余（如上游处理超时）按细节排查，不都叫「不可达」
+		writeErrJSON(w, http.StatusBadGateway, fmt.Sprintf("本体服务不可达: %s（%v）", target, perr))
 	}
-	// 拨号超时对齐 ONTOLOGY_DIAL_TIMEOUT（§9）
-	rp.Transport = &http.Transport{ResponseHeaderTimeout: s.DialTimeout}
+	// 拨号超时对齐 ONTOLOGY_DIAL_TIMEOUT（§9）；响应头超时独立（HeaderTimeout，默认不限——
+	// OntoChat turn 为同步 LLM 生成，响应头在生成完成后才返回，可达分钟级）
+	rp.Transport = &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: s.DialTimeout}).DialContext,
+		ResponseHeaderTimeout: s.HeaderTimeout,
+	}
 	return rp
 }
 

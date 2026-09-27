@@ -40,9 +40,13 @@ func (s *Server) generateOntologyLLM(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// draft_json 契约 = 草稿 JSON **字符串**（02 §6.10）：消费方 ontology-service llmcreate
+	// 以 string 解码后再 Unmarshal。曾直嵌 json.RawMessage（对象形态）致对端
+	// 「cannot unmarshal object into .draft_json of type string」——OntoChat 生成轮
+	// 从未走通（2026-09-27 OntoChat 报障排查中暴露，第二层问题）。
 	if res.Usage == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"draft_json": res.DraftJSON, "usage": nil})
+		writeJSON(w, http.StatusOK, map[string]any{"draft_json": string(res.DraftJSON), "usage": nil})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"draft_json": res.DraftJSON, "usage": res.Usage})
+	writeJSON(w, http.StatusOK, map[string]any{"draft_json": string(res.DraftJSON), "usage": res.Usage})
 }
