@@ -47,6 +47,8 @@
 
 ## 当前状态（2026-09-27，由协作 Agent 维护）
 
+- **REQ-173 P2 批次交付收口（2026-09-27，P2 池清偿）**：①LoadErrorAlert 错误卡铺开 2 处——消费与审计页 KG 图谱读取失败/TTL 检索失败换共享可重试错误卡；冒烟经 playwright route 拦截模拟接口失败（不动共享栈）：失败→错误卡+重试按钮→恢复→重试后错误卡消失 4 断言全过，截图 smoke/req173-p2/（坑：route glob `**/api/kg/*` 未匹配，换正则；Tabs 重挂不触发重载，用卡内「刷新」触发）。②诚实评估收口两池项：Descriptions 化适用面窄（graph-editor 面板=编辑表单/伴生状态卡=徽标流，不强转；RuntimePage x9 已覆盖主要 kv 场景）；pro-components 暂不引入（AntD 6 现有能力覆盖，M18/REQ-134 启动再评估）。01 v0.64（REQ-173 行 P2 注 + 迭代）/14 v0.30/20 v1.39（S4.21 OntoChat 反代长轮询回归行 + S4.22 审计错误卡行）。
+
 - **OntoChat「本体服务不可达」双根因修复已交付（2026-09-27，主人报障「本体/本体构建/OntoChat 发送消息返回 本体服务不可达: http://127.0.0.1:8091」）**：①反代超时语义错配——BuildProxy Transport 误把 DialTimeout(3s) 填 ResponseHeaderTimeout，OntoChat turn 同步 LLM 生成（实测 63~118s）3s 即被掐 502 误报不可达；修复=dial/header 分离（DialContext + HeaderTimeout 默认不限，ONTOLOGY_RESPONSE_HEADER_TIMEOUT 可调）+ 502 附底层错误；单测 2 例（慢上游透传/真不可达 502）。②draft_json 契约断裂（修复①后暴露）——/api/ontology-llm/generate M8 起直嵌 RawMessage（对象），唯一消费方 llmcreate 期望 string，「生成草稿」轮从未走通；handler 改回 string。真机全链：生成草稿 118s 返回（6 概念/11 关系/5 实例）。02 v0.91。**坑：并行会话 runtime-manager WIP（REQ-179）编译不过期间 run-dev.sh 起不来——既有二进制临时拉栈绕过（栈当前在跑），其 WIP 完成后 run-dev.sh 恢复正常**。
 
 - **REQ-179 本体运行引擎执行方式可插拔立项排期（2026-09-27，主人指令"增加需求并排期"；文档线无实现代码）**：创建方案时可选执行方式——**docker（默认）**/k8s（后期，接口预留复用 M10 10d K8sBackend 模式）/进程内子进程（备选降级，REQ-146 链路继续服务）——反转 NFR-O-4「子进程为主」口径（03 v0.47 新增 D-O20，原行标注已变更）；ExecutionBackend 抽象与引擎适配器（oxigraph/fuseki）正交，docker 后端 docker CLI 零新依赖（M10 10a 先例：端口映射+数据挂载+生命周期对账，oxigraph 官方镜像优先）；存量方案无字段=进程内迁移兼容；/api/engines 自检扩 docker 探测；挂新里程碑 **M-O16**（02 v0.89 §12）+04 §7 O13（04 v0.28）；18 v1.52；P2 待领取（依赖 Docker——M10 10a 已实测）。注：本体运行平面（runtime-manager）引擎执行，与 Agent 执行沙箱（REQ-122 族）两套独立机制；顺修 02 M-O15 行状态列滞后（②③已收口仍标待领取）与 03 迭代 v0.46 行漏记回补。

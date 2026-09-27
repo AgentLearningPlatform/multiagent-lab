@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Skeleton, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Empty, Skeleton, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ExportOutlined, ReloadOutlined } from '@ant-design/icons'
+import LoadErrorAlert from '../../../../components/LoadErrorAlert'
 import { api, ApiError } from '../../../../api/client'
 import type { KGClaim, KGEntity, KGReadResult, KGRelationship } from '../../../../api/types'
 import { useUI } from '../../../../store/ui'
@@ -84,7 +85,7 @@ export default function AuditGraphTab({ kbId }: { kbId?: string }) {
   }, [entities])
 
   if (!kbId) return <Empty description="先在顶部选择知识库" style={{ marginTop: 24 }} />
-  if (err) return <Alert type="error" showIcon message="KG 读取失败" description={err} />
+  if (err) return <LoadErrorAlert title="KG 读取失败" message={err} onRetry={load} style={{ marginTop: 24 }} />
 
   const claimColumns: ColumnsType<KGClaim> = [
     { title: '主体', dataIndex: 'subject', width: 140, ellipsis: true },

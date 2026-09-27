@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Card, Empty, Input, InputNumber, Segmented, Select, Space, Tag, Typography } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
+import LoadErrorAlert from '../../../../components/LoadErrorAlert'
 import { api } from '../../../../api/client'
 import { useUI } from '../../../../store/ui'
 import type { RuntimeProfile } from '../../../../api/types'
@@ -144,7 +145,7 @@ export default function AuditQueryTab({ kbId }: { kbId?: string }) {
                 检索
               </Button>
             </Space>
-            {ttlErr && <Alert type="error" showIcon style={{ marginTop: 6 }} message="TTL 检索失败" description={ttlErr} />}
+            {ttlErr && <LoadErrorAlert title="TTL 检索失败" message={ttlErr} onRetry={doTtlQuery} style={{ marginTop: 6 }} />}
             {ttlRows !== null && ttlRows.length === 0 && !ttlErr && (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '16px 0' }} description="无命中（换关键词，或确认方案已装载本体）" />
             )}
