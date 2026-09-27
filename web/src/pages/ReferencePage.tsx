@@ -19,7 +19,7 @@ import { docFileOf, resolveRef } from '../lib/docref'
 // 平台知识内容（REQ-116 / REQ-161 v2）：构建期内联扫描 platform-knowledge/ 全目录，
 // 主题页发现仍是目录驱动（新增或迁移文档后重建即生效）；但页面组织不照搬存放顺序——
 // L1 分组按 GROUP_ORDER 规划（导航栏模块及其顺序，平台总览置顶、设置殿后），
-// 个别专题跨目录挂载见 TOPIC_MOUNT（REQ-169 二轮，2026-09-26 主人指定）；
+// 个别专题跨目录挂载见 TOPIC_MOUNT（REQ-169 二轮，2026-09-26 开发者指定）；
 // 组内主页置顶（模块导读/平台总览）、专题按文档编号序。
 // 每篇头部 frontmatter（module/topic/desc/req/docs/decisions/synced）为页面元信息与源指针约定，
 // 语义级变更（REQ 行/决策/口径）须同步更新命中的文档（AGENTS.md 纪律 7）。
@@ -49,7 +49,7 @@ const MODULES: { dir: string; label: string; icon: ReactNode }[] = [
  *  设置对应导航栏最右齿轮殿后；跨目录挂载的专题随目标组出现，不单列 L1 */
 const GROUP_ORDER = ['总览', '智能体', '项目', '本体', '知识库', '技能', '设置']
 
-/** 跨目录挂载（REQ-169 二轮，主人指定）：键=主题 key（存放目录/文件），value=挂载的 L1 组 + 展示名。
+/** 跨目录挂载（REQ-169 二轮，开发者指定）：键=主题 key（存放目录/文件），value=挂载的 L1 组 + 展示名。
  *  仅改页面归属与标题；互引解析基准 base 仍按真实存放目录，保证文内相对链接不失效 */
 const TOPIC_MOUNT: Record<string, { group: string; label: string }> = {
   '产品设计/17_产品_信息架构与界面设计': { group: '总览', label: '产品设计' },

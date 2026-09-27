@@ -733,7 +733,7 @@ function OntoExtendGuide() {
         showIcon
         style={{ marginBottom: 12 }}
         message="OntoExtend 流程——对话式扩展现有本体（引导先行，工程化另行评估）"
-        description="定位：不新建本体，而是对已有本体做对话式增量扩展（补概念/关系/实例）。工程化 = fork（REQ-83）+ REQ-82 扩展语料组合，增量成本待主人体验引导卡后评估。"
+        description="定位：不新建本体，而是对已有本体做对话式增量扩展（补概念/关系/实例）。工程化 = fork（REQ-83）+ REQ-82 扩展语料组合，增量成本待开发者体验引导卡后评估。"
       />
       <div className="onto-sec" style={{ marginTop: 0 }}>
         <span className="onto-sec-title">手工路径（当前可用）</span>

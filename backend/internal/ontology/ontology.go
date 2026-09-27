@@ -28,7 +28,7 @@ type Service struct {
 	// HeaderTimeout 反代等待上游响应头的上限（ONTOLOGY_RESPONSE_HEADER_TIMEOUT，默认 0 = 不限）。
 	// 默认不限的原因：OntoChat turn（REQ-103 模式 A）为同步 LLM 生成端点，生成完成才写响应头，
 	// 可达分钟级——此前误用 DialTimeout 填 ResponseHeaderTimeout（3s），LLM 轮必超时，
-	// 被误报为「本体服务不可达」（2026-09-27 主人报障修复）。
+	// 被误报为「本体服务不可达」（2026-09-27 开发者报障修复）。
 	HeaderTimeout time.Duration
 }
 

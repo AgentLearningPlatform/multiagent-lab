@@ -554,7 +554,7 @@ function StatsView() {
 }
 
 /** M13/D-O13 §6.16：推理后端面板——已发现清单（PATH 探测 + 版本）+ 重新探测；能力矩阵（§6.16.4） */
-/** REQ-179/M-O16：运行执行方式全局配置（docker 容器 / 内置二进制 / k8s 接口预留；默认 k8s——主人指示） */
+/** REQ-179/M-O16：运行执行方式全局配置（docker 容器 / 内置二进制 / k8s 接口预留；默认 k8s——开发者指示） */
 function RuntimeExecPanel() {
   const [cfg, setCfg] = useState<{ execution_method: 'docker' | 'native' | 'k8s'; docker_available: boolean } | null>(null)
   const [saving, setSaving] = useState(false)

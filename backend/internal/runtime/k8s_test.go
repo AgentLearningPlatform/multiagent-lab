@@ -24,7 +24,7 @@ func netListen(addr string) (netListener, error) {
 }
 
 // M10 10d 桩级单测（本机无 K8s 集群）：stub kubectl 脚本驱动 manifest 生成/对账/状态映射/Stop 回收。
-// 真机（真实集群）验证待主人侧环境——边界注记见 02 §12 M10 行。
+// 真机（真实集群）验证待开发者侧环境——边界注记见 02 §12 M10 行。
 
 // stubKubectl 生成记录调用的伪 kubectl，返回二进制路径与日志文件路径。
 func stubKubectl(t *testing.T, phase, podIP string) (bin, logPath, manifestPath string) {

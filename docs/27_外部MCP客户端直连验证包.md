@@ -5,7 +5,7 @@
 | 版本 / 日期 | v1.0 / 2026-09-27 |
 | 需求 | REQ-152（M20/P2，D-O17 ②；18 号登记） |
 | 性质 | **交付资产**：外部 MCP 客户端（Claude Desktop / Cursor / 任意 MCP 客户端）直连本平台 facade 的配置文档 + 协议级实测记录。目标场景：**外部 IDE 查平台本体**——"使用本体的最直观外部证明"（03 §5 D-O17 ②） |
-| 状态 | ✅ 文档 + 协议级实测已交付（2026-09-27）；GUI 客户端（Claude Desktop / Cursor）实测留主人侧（需 GUI 环境，见 §6 实测记录表） |
+| 状态 | ✅ 文档 + 协议级实测已交付（2026-09-27）；GUI 客户端（Claude Desktop / Cursor）实测留开发者侧（需 GUI 环境，见 §6 实测记录表） |
 
 ---
 
@@ -115,9 +115,9 @@ curl -sS http://localhost:8080/mcp -H "Authorization: Bearer $TOKEN" -H "Mcp-Ses
 | 1 | initialize / initialized / tools/list（协议握手） | ✅ 2026-09-27 | 本机 curl（§5），Streamable HTTP 全语义（Bearer + 会话头） |
 | 2 | tools/call 缺参 → 结构化 isError | ✅ 2026-09-27 | MCP 错误语义正确（HTTP 200 + isError，非传输层报错） |
 | 3 | tools/call 真实对话（LLM 全链） | ✅ 2026-09-27 | 平台内模型连接执行，最终回复经 content[0].text 返回 |
-| 4 | tools/call 挂载本体方案的问答（Agent 内查 TTL 本体） | ⏳ 待主人侧复验 | 链路本身由 20 号 S4.7 覆盖（agent 对话内 tool.call→tool.result）；本验证包演示建议挂 med_common/gene_core 种子方案 |
-| 5 | Claude Desktop 直连 | ⏳ 待主人 | §3.2 两路径；结果回填本表 |
-| 6 | Cursor 直连 | ⏳ 待主人 | §3.1 mcp.json；结果回填本表 |
+| 4 | tools/call 挂载本体方案的问答（Agent 内查 TTL 本体） | ⏳ 待开发者侧复验 | 链路本身由 20 号 S4.7 覆盖（agent 对话内 tool.call→tool.result）；本验证包演示建议挂 med_common/gene_core 种子方案 |
+| 5 | Claude Desktop 直连 | ⏳ 待开发者 | §3.2 两路径；结果回填本表 |
+| 6 | Cursor 直连 | ⏳ 待开发者 | §3.1 mcp.json；结果回填本表 |
 
 ## 7. 排障
 

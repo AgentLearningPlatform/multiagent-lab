@@ -97,7 +97,7 @@ func scanProfile(row interface{ Scan(...any) error }) (*Profile, error) {
 	return &p, nil
 }
 
-// RuntimeConfig 全局运行配置（REQ-179/M-O16：执行方式为系统级配置而非方案级——2026-09-27 主人指示变更）。
+// RuntimeConfig 全局运行配置（REQ-179/M-O16：执行方式为系统级配置而非方案级——2026-09-27 开发者指示变更）。
 type RuntimeConfig struct {
 	ExecutionMethod string `json:"execution_method"` // docker | native | k8s（默认 k8s）
 }

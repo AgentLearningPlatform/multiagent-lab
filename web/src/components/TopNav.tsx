@@ -32,7 +32,7 @@ export default function TopNav() {
         </span>
         <span className="brand-text">
           <span className="brand-name">AgentLab</span>
-          <span className="brand-sub">智能体与本体构建平台</span>
+          <span className="brand-sub">智能体构建平台</span>
         </span>
       </div>
 

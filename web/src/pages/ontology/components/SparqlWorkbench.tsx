@@ -9,7 +9,7 @@ import { ClearOutlined, CaretRightOutlined, DownloadOutlined, UndoOutlined } fro
 import { api } from '../../../api/client'
 
 // ---------------------------------------------------------------------------
-// SPARQL 工作台 v2（REQ-92 实现升级，2026-09-26 主人授权）：
+// SPARQL 工作台 v2（REQ-92 实现升级，2026-09-26 开发者授权）：
 // 原 Yasgui 内嵌因自带样式未随包生效而杂乱（裸表单形态），且其 UI 体系与平台
 // AntD 口径割裂。改用开源组件自组装：CodeMirror 6（@uiw/react-codemirror + 
 // codemirror-lang-sparql 语法高亮）+ AntD 表格/告警 + api.runSparql（既有零调用

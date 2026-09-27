@@ -25,7 +25,7 @@ import (
 //   - "pod-ip"：直接用 Pod IP（平台与集群同网/平台在集群内时）。
 //
 // 诚实边界（2026-09-27 交付）：本机无 K8s 集群——机制经 stub kubectl 桩测试验证（manifest
-// 内容/状态映射/对账/资源限制），真机（真实集群）验证待主人侧环境，见 02 §12 M10 行。
+// 内容/状态映射/对账/资源限制），真机（真实集群）验证待开发者侧环境，见 02 §12 M10 行。
 type K8sBackend struct {
 	Image         string // agentd 镜像（集群内可见，如 agentd:dev 或 registry 路径）
 	Bin           string // kubectl 路径（空 = PATH）

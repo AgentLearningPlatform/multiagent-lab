@@ -1,6 +1,6 @@
 # DeepSeek Harness 内置接入可行性调研（推理后端扩展提案，2026-09-25）
 
-> 任务来源：主人指示「研究当前项目 agent 后端内置接入 DeepSeek Harness 的可行性和方案」。
+> 任务来源：开发者指示「研究当前项目 agent 后端内置接入 DeepSeek Harness 的可行性和方案」。
 > 语境：DeepSeek Harness（`dsh`）= 深度求索官方开源 agent harness（MIT，TypeScript/Cordis 微内核，理念 `Agent = Model + Harness`，2026-08-13 开源 developer preview）——本项目 2026-09-15 技术选型时已评估过（《本体对话Agent技术选型_Eino_vs_DeepSeekHarness_20260915.md》，当时结论"Eino 为主壳"，dsh 未淘汰而是作为对照位）。
 > 性质：可行性分析 + 集成方案（进 research/ 单源）；结论回写 02 §6.16 / 18 / 15 / AGENTS。
 
