@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Empty, Input, Popconfirm, Result, Space, Tabs, Tag, Tooltip, Typography } from 'antd'
-import { BranchesOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
+import { BranchesOutlined, DeleteOutlined, EditOutlined, ImportOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
 import type { Ontology, RuntimeProfile, Spec } from '../../api/types'
 import { useUI } from '../../store/ui'
@@ -12,6 +12,8 @@ import CompanionPane from './components/companion/CompanionPane'
 import SpecEditorPane from './components/assets/SpecEditorPane'
 import { ArtifactsPane, ExportPane, ValidatePane } from './components/assets/AssetPanes'
 import { OntologyPicker, RenameModal, VizTabs } from './components/assets/AssetExtras'
+import QualityCardPane from './components/assets/QualityCardPane'
+import ImportMergeWizard from './components/assets/ImportMergeWizard'
 
 // ---------------------------------------------------------------------------
 // 本体资产（AssetsPage，REQ-104 ③）：全部已构建本体统一管理
@@ -34,6 +36,7 @@ export default function AssetsPage() {
   const [specTick, setSpecTick] = useState(0)
 
   const [validations, setValidations] = useState<Record<string, ValidationState>>({})
+  const [mergeOpen, setMergeOpen] = useState(false) // REQ-157 导入合并向导
   const [renameOpen, setRenameOpen] = useState(false)
   const [forkName, setForkName] = useState('')
   const [forkBusy, setForkBusy] = useState(false)
@@ -222,6 +225,9 @@ export default function AssetsPage() {
               <Button icon={<EditOutlined />} onClick={() => setRenameOpen(true)}>
                 重命名
               </Button>
+              <Button icon={<ImportOutlined />} onClick={() => setMergeOpen(true)}>
+                导入合并
+              </Button>
               <Popconfirm
                 title={`删除本体「${active.name}」？`}
                 description="级联删除其 Spec、产物与引用；已启动的运行方案不受影响（REQ-87）。"
@@ -236,6 +242,19 @@ export default function AssetsPage() {
               </Popconfirm>
             </Space>
           </div>
+
+          {mergeOpen && active && (
+            <ImportMergeWizard
+              open={mergeOpen}
+              onClose={() => setMergeOpen(false)}
+              ontologyId={active.id}
+              targetSpecText={spec ? JSON.stringify(spec, null, 2) : ''}
+              onApplied={() => {
+                reloadOntos(active.id)
+                setSpecTick((t) => t + 1)
+              }}
+            />
+          )}
 
           {forkErr && (
             <Alert type="error" showIcon closable message="Fork 失败" description={forkErr} onClose={() => setForkErr(null)} />
@@ -270,6 +289,11 @@ export default function AssetsPage() {
                       onResult={(r) => setValidations((v) => ({ ...v, [active.id]: r }))}
                     />
                   ),
+                },
+                {
+                  key: 'versions',
+                  label: '质量卡',
+                  children: <QualityCardPane ontologyId={active.id} />,
                 },
                 {
                   key: 'versions',

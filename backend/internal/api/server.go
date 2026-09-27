@@ -205,6 +205,9 @@ func (s *Server) routes() {
 		// 同源请求命中主后端 404 文本，前端 JSON.parse 报 "Unexpected non-whitespace character after JSON"）
 		m.Handle("/api/ontochat", s.Ontology.BuildProxy())
 		m.Handle("/api/ontochat/", s.Ontology.BuildProxy())
+		// REQ-171/156/157/M-O15：质量门禁（quality check/report）+ 工具链（toolchain 五工具）+
+		// LOV 词表搜索 + 导入合并（merge preview/apply）+ 质量门禁开关（quality-config）——构建平面新端点前缀
+		m.Handle("/api/ontology/", s.Ontology.BuildProxy())
 		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
 		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
 		// REQ-146：引擎自检与一键安装（install 为 202 异步任务，轮询 /api/engines 无长连接）

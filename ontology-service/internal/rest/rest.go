@@ -53,6 +53,10 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("POST /api/ontologies/{id}/validate", s.validate)
 	m.HandleFunc("GET /api/ontologies/{id}/artifacts", s.artifacts)
 	m.HandleFunc("POST /api/ontologies/import", s.importOntology)
+	m.HandleFunc("POST /api/ontologies/{id}/merge/preview", s.mergePreview)
+	m.HandleFunc("POST /api/ontologies/{id}/merge/apply", s.mergeApply)
+	m.HandleFunc("GET /api/ontologies/{id}/quality-config", s.qualityConfigGet)
+	m.HandleFunc("PUT /api/ontologies/{id}/quality-config", s.qualityConfigPut)
 	m.HandleFunc("GET /api/ontologies/{id}/export", s.exportOntology)
 	m.HandleFunc("GET /api/ontologies/{id}/guide", s.guide)
 	m.HandleFunc("POST /api/ontologies/seed-sample", s.seedSample)
@@ -197,6 +201,13 @@ func (s *Server) saveSpec(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "校验未通过，不允许保存坏本体", "validation_errors": errs})
 		return
 	}
+	// REQ-156/M-O15：strict 门禁（本体级开关，默认宽松）——结构合法后过质量门禁，错误级命中阻断保存
+	if o, gerr := s.Store.GetOntology(id); gerr == nil && o.QualityStrict {
+		if rep := qualitygate.Check(&sp, nil); rep.ErrorCount > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("strict 门禁拦截：%d 处错误级质量命中（可在资产详情质量卡查看明细，或关闭 strict 开关）", rep.ErrorCount), "quality_report": rep})
+			return
+		}
+	}
 	bts, err := json.Marshal(sp)
 	if err != nil {
 		writeErr(w, err)
@@ -327,6 +338,163 @@ func (s *Server) artifacts(w http.ResponseWriter, r *http.Request) {
 
 // ---- 导入 / 导出 ----
 
+// mergeIncoming 解析合并请求体：multipart 文件（filename+content 走 importer.Import）或 JSON {filename,content} / {spec}；
+// strategy/prefix 取表单值或 JSON 字段（REQ-157 审查向导走 JSON）。
+func (s *Server) mergeIncoming(r *http.Request) (filename, content string, spec *pkgspec.Spec, strategy, prefix string, err error) {
+	strategy = r.FormValue("strategy")
+	prefix = r.FormValue("prefix")
+	ct := r.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		f, h, ferr := r.FormFile("file")
+		if ferr != nil {
+			err = fmt.Errorf("file 字段必填（multipart）")
+			return
+		}
+		defer f.Close()
+		b, _ := io.ReadAll(io.LimitReader(f, 64<<20))
+		filename, content = h.Filename, string(b)
+	} else {
+		var body struct {
+			Filename string        `json:"filename"`
+			Content  string        `json:"content"`
+			Spec     *pkgspec.Spec `json:"spec"`
+			Strategy string        `json:"strategy"`
+			Prefix   string        `json:"prefix"`
+		}
+		if derr := decodeJSON(r, &body); derr != nil {
+			err = derr
+			return
+		}
+		filename, content = body.Filename, body.Content
+		if body.Spec != nil {
+			spec = body.Spec
+		}
+		if strategy == "" {
+			strategy = body.Strategy
+		}
+		if prefix == "" {
+			prefix = body.Prefix
+		}
+	}
+	if spec == nil {
+		if strings.TrimSpace(content) == "" {
+			err = fmt.Errorf("content 或 spec 必填其一")
+			return
+		}
+		if filename == "" {
+			filename = "incoming.md"
+		}
+		spec, _, err = importer.Import(s.Sidecar, filename, content)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+// mergePreview REQ-157：导入合并冲突预览（字段级冲突/新增/重命名/合并结果 spec）。
+func (s *Server) mergePreview(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	_, _, spec, strategy, prefix, err := s.mergeIncoming(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strategy == "" {
+		strategy = importer.StrategyReplace
+	}
+	raw, _, gerr := s.Store.GetArtifact(id, "spec_json")
+	if gerr != nil {
+		writeErr(w, gerr)
+		return
+	}
+	target := &pkgspec.Spec{}
+	if err := json.Unmarshal([]byte(raw), target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "现行 spec_json 解析失败: " + err.Error()})
+		return
+	}
+	pv, err := importer.BuildMerged(target, spec, strategy, prefix)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, pv)
+}
+
+// mergeApply REQ-157：按策略应用合并（结构校验 + strict 门禁 + 版本快照）。
+func (s *Server) mergeApply(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	_, _, spec, strategy, prefix, err := s.mergeIncoming(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strategy == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "strategy 必填（replace | merge-overwrite | merge）"})
+		return
+	}
+	raw, _, gerr := s.Store.GetArtifact(id, "spec_json")
+	if gerr != nil {
+		writeErr(w, gerr)
+		return
+	}
+	target := &pkgspec.Spec{}
+	if err := json.Unmarshal([]byte(raw), target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "现行 spec_json 解析失败: " + err.Error()})
+		return
+	}
+	pv, err := importer.BuildMerged(target, spec, strategy, prefix)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if errs := pv.MergedSpec.Validate(); len(errs) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "合并结果结构校验未通过", "validation_errors": errs})
+		return
+	}
+	// REQ-156：strict 门禁（本体级开关）——合并结果错误级命中阻断
+	if o, gerr := s.Store.GetOntology(id); gerr == nil && o.QualityStrict {
+		if rep := qualitygate.Check(pv.MergedSpec, nil); rep.ErrorCount > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("strict 门禁拦截：合并结果存在 %d 处错误级质量命中", rep.ErrorCount), "quality_report": rep})
+			return
+		}
+	}
+	bts, _ := json.Marshal(pv.MergedSpec)
+	if err := s.Store.PutArtifact(id, "spec_json", string(bts), true); err != nil {
+		writeErr(w, err)
+		return
+	}
+	v, _ := s.Store.BumpVersion(id)
+	_ = s.Store.SaveVersion(id, v, string(bts), "", "")
+	writeJSON(w, http.StatusOK, map[string]any{"applied": true, "version": v, "preview": pv})
+}
+
+// qualityConfigGet / qualityConfigPut REQ-156：本体级 strict 门禁开关读写。
+func (s *Server) qualityConfigGet(w http.ResponseWriter, r *http.Request) {
+	o, err := s.Store.GetOntology(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ontology_id": o.ID, "strict": o.QualityStrict})
+}
+
+func (s *Server) qualityConfigPut(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Strict *bool `json:"strict"`
+	}
+	if err := decodeJSON(r, &body); err != nil || body.Strict == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "strict（bool）必填"})
+		return
+	}
+	if err := s.Store.SetQualityStrict(id, *body.Strict); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ontology_id": id, "strict": *body.Strict})
+}
+
 func (s *Server) importOntology(w http.ResponseWriter, r *http.Request) {
 	var filename, content, name string
 	ct := r.Header.Get("Content-Type")
@@ -445,6 +613,27 @@ func (s *Server) exportOntology(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/turtle; charset=utf-8")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s_v%d.ttl", o.ID, o.Version))
 		_, _ = w.Write([]byte(ttl))
+	case "vowljson":
+		// WebVOWL 对照视图数据源（2026-09-27 转换链重构）：spec → VOWL JSON 本服务直出，
+		// 替代不可用的浏览器端 owl2vowl（Java-only 无浏览器分发，见 importer/vowljson.go）
+		raw, _, err := s.Store.GetArtifact(id, "spec_json")
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		var sp pkgspec.Spec
+		if err := json.Unmarshal([]byte(raw), &sp); err != nil {
+			writeErr(w, err)
+			return
+		}
+		vj, err := importer.ExportVOWLJSON(&sp)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename*=UTF-8''%s_v%d_vowl.json", o.ID, o.Version))
+		_, _ = w.Write(vj)
 	default:
 		raw, _, err := s.Store.GetArtifact(id, format)
 		if err != nil {

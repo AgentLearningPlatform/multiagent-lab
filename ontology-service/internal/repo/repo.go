@@ -20,13 +20,14 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type Ontology struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Version     int    `json:"version"`
-	ForkedFrom  string `json:"forked_from,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Version       int    `json:"version"`
+	ForkedFrom    string `json:"forked_from,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+	QualityStrict bool   `json:"quality_strict"` // REQ-156/M-O15：保存/导入合并 strict 门禁（错误级命中阻断）
 	// 统计（从 spec_json 计算，仅列表/详情返回时填充）
 	NConcepts  int `json:"n_concepts,omitempty"`
 	NRelations int `json:"n_relations,omitempty"`
@@ -73,6 +74,11 @@ func (s *Store) migrate() error {
 				continue
 			}
 			if _, err := s.db.Exec(stmt); err != nil {
+				// 幂等容忍：重放式迁移下 ALTER ADD COLUMN 无法 IF NOT EXISTS，
+				// 重复启动时列已存在视为已应用（REQ-156/M-O15 005 起的 ALTER 类迁移依赖此语义）
+				if strings.Contains(err.Error(), "duplicate column name") {
+					continue
+				}
 				return fmt.Errorf("apply migration %s: %w", f, err)
 			}
 		}
@@ -110,7 +116,7 @@ func (s *Store) DB() *sql.DB { return s.db }
 // ---- 元数据 CRUD ----
 
 func (s *Store) ListOntologies() ([]Ontology, error) {
-	rows, err := s.db.Query(`SELECT id,name,description,version,IFNULL(forked_from,''),created_at,updated_at FROM ontology ORDER BY updated_at DESC, id`)
+	rows, err := s.db.Query(`SELECT id,name,description,version,IFNULL(forked_from,''),created_at,updated_at,quality_strict FROM ontology ORDER BY updated_at DESC, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +124,7 @@ func (s *Store) ListOntologies() ([]Ontology, error) {
 	out := []Ontology{}
 	for rows.Next() {
 		var o Ontology
-		if err := rows.Scan(&o.ID, &o.Name, &o.Description, &o.Version, &o.ForkedFrom, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.Name, &o.Description, &o.Version, &o.ForkedFrom, &o.CreatedAt, &o.UpdatedAt, &o.QualityStrict); err != nil {
 			return nil, err
 		}
 		if err := s.fillStats(&o); err != nil {
@@ -131,8 +137,8 @@ func (s *Store) ListOntologies() ([]Ontology, error) {
 
 func (s *Store) GetOntology(id string) (*Ontology, error) {
 	var o Ontology
-	err := s.db.QueryRow(`SELECT id,name,description,version,IFNULL(forked_from,''),created_at,updated_at FROM ontology WHERE id=?`, id).
-		Scan(&o.ID, &o.Name, &o.Description, &o.Version, &o.ForkedFrom, &o.CreatedAt, &o.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id,name,description,version,IFNULL(forked_from,''),created_at,updated_at,quality_strict FROM ontology WHERE id=?`, id).
+		Scan(&o.ID, &o.Name, &o.Description, &o.Version, &o.ForkedFrom, &o.CreatedAt, &o.UpdatedAt, &o.QualityStrict)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -302,6 +308,12 @@ type VersionMeta struct {
 	HasOriginal    bool   `json:"has_original"`
 	OriginalFormat string `json:"original_format,omitempty"`
 	OriginalSize   int    `json:"original_size,omitempty"`
+}
+
+// SetQualityStrict REQ-156/M-O15：本体级质量门禁 strict 开关。
+func (s *Store) SetQualityStrict(id string, strict bool) error {
+	_, err := s.db.Exec(`UPDATE ontology SET quality_strict=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, b2i(strict), id)
+	return err
 }
 
 // SaveVersion 写入一条版本快照（spec_json 必有；original_format/original_content 可空）。幂等：同 (ontology_id, version) 覆盖。

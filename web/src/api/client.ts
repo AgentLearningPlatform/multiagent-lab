@@ -356,6 +356,19 @@ export const api = {
   validateOntology: (id: string) =>
     req<{ ok: boolean; validation_errors: ValidationError[] }>(`/api/ontologies/${id}/validate`, { method: 'POST' }),
   listArtifacts: (id: string) => req<ArtifactMeta[]>(`/api/ontologies/${id}/artifacts`),
+  // ---- REQ-156/M-O15 质量卡与门禁开关 ----
+  qualityRun: (id: string, strict = false) =>
+    req<{ report: QualityReport; artifact_saved?: boolean }>(`/api/ontology/quality/check`, { method: 'POST', body: JSON.stringify({ ontology_id: id, strict }) }),
+  qualityReport: (id: string) =>
+    req<{ ontology_id: string; imported_at: string; report: QualityReport | null }>(`/api/ontology/quality/report?ontology_id=${encodeURIComponent(id)}`),
+  qualityConfig: (id: string) => req<{ ontology_id: string; strict: boolean }>(`/api/ontologies/${id}/quality-config`),
+  setQualityConfig: (id: string, strict: boolean) =>
+    req<{ ontology_id: string; strict: boolean }>(`/api/ontologies/${id}/quality-config`, { method: 'PUT', body: JSON.stringify({ strict }) }),
+  // ---- REQ-157/M-O15 导入合并（审查向导）----
+  mergePreview: (id: string, body: MergeIngest) =>
+    req<MergePreview>(`/api/ontologies/${id}/merge/preview`, { method: 'POST', body: JSON.stringify(body) }),
+  mergeApply: (id: string, body: MergeIngest) =>
+    req<{ applied: boolean; version: number; preview: MergePreview }>(`/api/ontologies/${id}/merge/apply`, { method: 'POST', body: JSON.stringify(body) }),
   /** 导入：multipart（file + 可选 name），自动嗅探 ttl/owl/graphml/csv/spec_json */
   importOntologyFile: (file: File, name?: string) => {
     const fd = new FormData()
@@ -640,4 +653,33 @@ export interface EngineStatus {
   searched?: string[]
   hint?: string
   installable: boolean
+}
+
+// ---- REQ-156/157/M-O15：质量报告与导入合并 ----
+export interface QualityReport {
+  pass: boolean
+  strict: boolean
+  error_count: number
+  warning_count: number
+  info_count: number
+  findings: { check_id: string; title: string; dimension: string; severity: 'error' | 'warning' | 'info'; count: number; samples: string[] }[]
+  score: { overall: number; completeness: number; consistency: number; maintainability: number }
+  stats: { concepts: number; relations: number; instances: number }
+}
+export interface MergeIngest {
+  filename?: string
+  content?: string
+  spec?: unknown
+  strategy?: string
+  prefix?: string
+}
+export interface MergePreview {
+  strategy: string
+  prefix: string
+  added: string[]
+  conflicts: { kind: string; name: string; fields: string[]; incoming: string; current: string; resolution: string; resolved_as?: string }[]
+  renamed: string[]
+  stats: { concepts_added: number; concepts_updated: number; relations_added: number; relations_updated: number; instances_added: number; instances_updated: number; instances_renamed: number; total_conflicts: number }
+  target_name: string
+  merged_spec: unknown
 }
