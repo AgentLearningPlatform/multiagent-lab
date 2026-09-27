@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Splitter, Switch, Tag, Tooltip, Typography } from 'antd'
-import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, RobotOutlined, SettingOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
@@ -9,6 +9,7 @@ import { api, connDisplayName, resumeConversation, runConversation } from '../ap
 import type { ComparePaneConfig } from '../api/client'
 import EventReplayDrawer from './EventReplayDrawer'
 import { AgentLogo } from './AgentLogo'
+import { groupToolPhases, ToolPhaseBlock, type ToolPhaseGroup } from './ToolPhase'
 import type {
   Agent,
   Conversation,
@@ -380,7 +381,7 @@ export default function ChatWindow({
   sidePanelOpen?: boolean
   onToggleSidePanel?: () => void
 }) {
-  const { bumpData, showToast } = useUI()
+  const { bumpData, showToast, setPage } = useUI()
   const isProjectScope = conversation.scope === 'project'
 
   const project = isProjectScope
@@ -509,7 +510,7 @@ export default function ChatWindow({
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
   const [profilesErr, setProfilesErr] = useState(false)
   const [kbsErr, setKbsErr] = useState(false)
-  const [picker, setPicker] = useState<'kb' | 'onto' | null>(null)
+  const [picker, setPicker] = useState<'kb' | 'onto' | 'model' | null>(null)
 
   // 选项列表：挂载时拉取；失败降级为空 + chip 置灰说明
   const loadCfgOptions = () => {
@@ -520,6 +521,27 @@ export default function ChatWindow({
   }
   useEffect(loadCfgOptions, [])
   const [conns, setConns] = useState<ModelConnection[]>([])
+
+  // ---- REQ-174 对话输入区模型快捷切换：会话级记忆（localStorage）+ 逐次下发 model_conn_id ----
+  const modelKey = `eino.chat.model.${conversation?.id}`
+  const [modelOverride, setModelOverrideState] = useState<string | null>(() => {
+    try { return localStorage.getItem(`eino.chat.model.${conversation?.id}`) || null } catch { return null }
+  })
+  const setModelOverride = (id: string | null) => {
+    setModelOverrideState(id)
+    try {
+      if (id) localStorage.setItem(modelKey, id)
+      else localStorage.removeItem(modelKey)
+    } catch { /* 忽略配额 */ }
+  }
+  const convAgent = agents.find((a) => a.id === conversation?.agent_id) ?? null
+  const agentDefaultConn = convAgent?.model_conn_id ? conns.find((c) => c.id === convAgent.model_conn_id) : undefined
+  const modelConnOf = (id: string | null) => (id ? conns.find((c) => c.id === id) : undefined)
+  const effectiveModelName = modelOverride
+    ? (modelConnOf(modelOverride) ? connDisplayName(modelConnOf(modelOverride)!) : modelOverride)
+    : agentDefaultConn
+      ? connDisplayName(agentDefaultConn)
+      : '默认模型'
 
   // ---- REQ-19e/19f 对话对比模式：开关 + 2~4 窗格 + 每窗格单项覆盖（''= 继承对话当前配置）----
   const cmpKey = `eino.compare.${conversation?.id}`
@@ -708,6 +730,7 @@ export default function ChatWindow({
     items: { id: string; name: string; meta?: string }[],
     current: string | null,
     onPick: (id: string) => void,
+    footer?: { icon: ReactNode; label: string; onClick: () => void },
   ) => (
     <div className="chip-picker" onKeyDown={(e) => { if (e.key === 'Escape') setPicker(null) }}>
       <div className="chip-picker-title">{title}</div>
@@ -725,12 +748,59 @@ export default function ChatWindow({
           </button>
         ))}
       </div>
+      {footer && (
+        <>
+          <div className="chip-picker-divider" />
+          <button
+            type="button"
+            className="chip-picker-item chip-picker-manage"
+            onClick={() => { setPicker(null); footer.onClick() }}
+          >
+            {footer.icon}
+            <span className="chip-picker-name">{footer.label}</span>
+          </button>
+        </>
+      )}
     </div>
   )
 
   const kbChip = <ChatChip on={conversation.enable_kb} disabled={kbDisabled} icon={<BookOutlined />} label="知识库" title={kbHint} onClick={toggleKb} />
   const ontoChip = <ChatChip on={conversation.ontology_enabled} disabled={ontoDisabled} icon={<ClusterOutlined />} label="本体" title={ontoHint} onClick={toggleOnto} />
   const skillsChip = <ChatChip on={skillsOn} disabled={skillsDisabled} icon={<ThunderboltOutlined />} label="技能" title={skillsHint} onClick={toggleSkills} />
+  // REQ-174：模型快捷切换 pill（发送键左方；zcode 风格——当前生效模型名 + 列表 + 模型管理入口）
+  const modelChip = (
+    <Popover
+      open={picker === 'model'}
+      onOpenChange={(o) => { if (!o) setPicker(null) }}
+      trigger="click"
+      placement="topLeft"
+      arrow={false}
+      content={pickerList(
+        '切换模型（对本会话后续发送生效）',
+        [
+          { id: '', name: '跟随智能体默认', meta: agentDefaultConn ? connDisplayName(agentDefaultConn) : (convAgent ? '未指定连接' : undefined) },
+          ...conns.filter((c) => c.id !== convAgent?.model_conn_id).map((c) => ({ id: c.id, name: connDisplayName(c), meta: c.model_name })),
+        ],
+        modelOverride ?? '',
+        (id) => {
+          setModelOverride(id || null)
+          showToast(id ? `已切换模型：${modelConnOf(id) ? connDisplayName(modelConnOf(id)!) : id}` : '已恢复跟随智能体默认')
+        },
+        {
+          icon: <SettingOutlined style={{ color: 'var(--c-brand)', marginRight: 6 }} />,
+          label: '模型管理',
+          onClick: () => {
+            localStorage.setItem('eino.settings.section', 'models')
+            setPage('settings')
+          },
+        },
+      )}
+    >
+      <span>
+        <ChatChip on={!!modelOverride} disabled={false} icon={<RobotOutlined />} label={effectiveModelName} title="切换模型（REQ-174）" onClick={() => setPicker(picker === 'model' ? null : 'model')} />
+      </span>
+    </Popover>
+  )
 
   // 事件卡渲染（ThoughtChain 深度思考 / 工具详情 / 终态摘要）：
   // 紧凑、左侧色条区分来源、与助手文本列对齐（margin-left 44 = 头像 32 + 间距 12）
@@ -897,9 +967,14 @@ export default function ChatWindow({
   }
 
   // Bubble.List 数据（消息走 user/ai 角色，事件卡为无边框自定义内容）
+  // REQ-174：连续 tool.call/result 归组为「执行过程」块（单行/收起）后再映射
+  const displayItems = useMemo(
+    () => groupToolPhases(withSubDepth(items.filter((it) => !(it.evType && levelGated(it.evType, debugLevel))))),
+    [items, debugLevel],
+  )
   const listItems = useMemo(
     () =>
-      withSubDepth(items.filter((it) => !(it.evType && levelGated(it.evType, debugLevel)))).map((it, i) => {
+      displayItems.map((it, i) => {
         if (it.kind === 'msg') {
           return {
             key: `m${i}`,
@@ -909,13 +984,16 @@ export default function ChatWindow({
             extraInfo: { streaming: !!it.streaming }, // 供 contentRender 判断流式状态（尾部游标）
           }
         }
+        if ((it as unknown as { kind: string }).kind === '__tool_phase') {
+          return { key: `t${i}`, role: 'event', content: <ToolPhaseBlock group={it as unknown as ToolPhaseGroup} /> }
+        }
         return {
           key: `e${i}`,
           role: 'event',
           content: renderEventCard(it, i),
         }
       }),
-    [items, showRaw, reasoningOpen, granularity, showReasoning, debugLevel],
+    [displayItems, showRaw, reasoningOpen, granularity, showReasoning, debugLevel],
   )
 
   // REQ-150② 窗格状态对齐：从窗格消息流派生本轮状态（流式中/出错/已停止/完成/待提问），窗格头统一呈现
@@ -942,9 +1020,9 @@ export default function ChatWindow({
     return 'done'
   }
 
-  // REQ-19e 窗格消息流条目（与单路 listItems 同构映射：消息走角色、事件卡无边框）
+  // REQ-19e 窗格消息流条目（与单路 listItems 同构映射：消息走角色、事件卡无边框；REQ-174 同构归组）
   const paneListItems = (i: number) =>
-    withSubDepth(paneItems[i] ?? []).map((it, j) => {
+    groupToolPhases(withSubDepth(paneItems[i] ?? [])).map((it, j) => {
       if (it.kind === 'msg') {
         return {
           key: `p${i}m${j}`,
@@ -953,6 +1031,9 @@ export default function ChatWindow({
           loading: !!it.streaming && !it.content,
           extraInfo: { streaming: !!it.streaming },
         }
+      }
+      if ((it as unknown as { kind: string }).kind === '__tool_phase') {
+        return { key: `p${i}t${j}`, role: 'event', content: <ToolPhaseBlock group={it as unknown as ToolPhaseGroup} /> }
       }
       return {
         key: `p${i}e${j}`,
@@ -1039,7 +1120,7 @@ export default function ChatWindow({
     }
     runKeyRef.current = `run-${Date.now()}`
     setItems((prev) => [...prev, { kind: 'msg', role: 'user', content: text }])
-    await streamStart((handler) => runConversation(conversation.id, text, debugLevel, handler, undefined, debugPersist))
+    await streamStart((handler) => runConversation(conversation.id, text, debugLevel, handler, undefined, debugPersist, modelOverride || undefined))
   }
 
   // REQ-19e/19f 对比发送：共用输入框一次提问 → N 路并行；meta 建窗格 run_id 映射，事件按 run_id 路由
@@ -1604,6 +1685,7 @@ export default function ChatWindow({
                     对比模式 · {cmp.panes.length} 窗格独立配置（模型/知识库/本体/技能承载于各窗格头，本区不参与配置）
                   </Typography.Text>
                 ) : (<>
+                {modelChip}
                 {kbDisabled ? (
                   <Tooltip title={kbHint}><span className="chip-slot">{kbChip}</span></Tooltip>
                 ) : (

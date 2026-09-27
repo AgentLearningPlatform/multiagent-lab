@@ -1,0 +1,109 @@
+/* REQ-174 执行过程块（ZCode 式单行/收起）——独立样式文件（pages.css 含并行 WIP 避让） */
+
+.tool-phase {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 2px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--c-line, #e5e7eb);
+}
+
+.tool-phase-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ant-color-text-secondary, #6b7280);
+  user-select: none;
+}
+.tool-phase-head:hover { background: rgba(0, 0, 0, 0.035); }
+.tool-phase-head.open { margin-bottom: 2px; }
+.tool-phase-title { font-size: 12px; }
+
+/* 单次调用行 */
+.tool-line { margin: 1px 0; }
+.tool-line-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ant-color-text, #374151);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tool-line-head:hover { background: rgba(0, 0, 0, 0.035); }
+
+.tool-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+}
+.tool-dot.ok { color: #52c41a; background: rgba(82, 196, 26, 0.12); }
+.tool-dot.bad { color: #ff4d4f; background: rgba(255, 77, 79, 0.12); }
+.tool-dot.pend { color: #9ca3af; background: rgba(0, 0, 0, 0.06); }
+.tool-dot.run {
+  background: transparent;
+  width: 0;
+  height: 0;
+  border: 7px solid transparent;
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: tool-spin 0.9s linear infinite;
+}
+@keyframes tool-spin { to { transform: rotate(360deg); } }
+
+.tool-name { flex: none; font-weight: 600; font-family: var(--font-mono, ui-monospace, monospace); }
+.tool-args {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ant-color-text-tertiary, #9ca3af);
+}
+.tool-dur { flex: none; color: var(--ant-color-text-tertiary, #9ca3af); font-variant-numeric: tabular-nums; }
+
+.tool-caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-left-color: currentColor;
+  border-left-width: 5px;
+  margin-left: 2px;
+  opacity: 0.45;
+  transform-origin: 2px 4px;
+}
+.tool-caret.open { transform: rotate(90deg); }
+
+/* 来源色点沿用事件卡色系（左缘线） */
+.tool-line.src-skill .tool-name { color: #16a34a; }
+.tool-line.src-mcp .tool-name { color: #9333ea; }
+.tool-line.src-onto .tool-name { color: #0891b2; }
+.tool-line.src-subagent .tool-name { color: #9333ea; }
+.tool-line.err .tool-name { color: #ff4d4f; }
+
+/* 展开的原始 JSON */
+.tool-raw {
+  margin: 2px 0 4px 26px;
+  padding: 6px 8px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.45;
+  background: rgba(0, 0, 0, 0.025);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ant-color-text-secondary, #6b7280);
+}
