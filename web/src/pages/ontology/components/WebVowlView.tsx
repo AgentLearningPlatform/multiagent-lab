@@ -26,6 +26,8 @@ interface WebVowlOpts {
   width: (v?: number) => WebVowlOpts
   height: (v?: number) => WebVowlOpts
   graphContainerSelector: (v?: string) => WebVowlOpts
+  /** 空 sidebar 模块注入（空白修复）：内部 forceRelocationEvent 会读 leftSidebar().isSidebarVisible() */
+  leftSidebar: (v?: unknown) => void
   [key: string]: unknown
 }
 
@@ -68,6 +70,9 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [ttlBytes, setTtlBytes] = useState(0)
+  // 力布局收敛期提示（2026-09-27 空白修复配套）：数据装载后 webvowl 力导向需 ~2s 收敛展开，
+  // 期间画布近似空白——显式提示「计算中」避免被误判为渲染失败（此前报障的观感来源之一）
+  const [layouting, setLayouting] = useState(false)
 
   const render = async () => {
     setLoading(true)
@@ -89,6 +94,11 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
       if (containerRef.current) {
         containerRef.current.innerHTML = ''
         const graph = window.webvowl.graph()
+        // 空 sidebar 模块（2026-09-27 空白修复）：webvowl 内部 forceRelocationEvent（力布局
+        // 收敛后的重定位/适配）会读 options().leftSidebar().isSidebarVisible()——未配置时该处
+        // 抛 TypeError，重定位中断，节点停留在布局期 hidden 态不被揭示 → 画布全白（全屏尺寸
+        // 变化 + 视图重挂后必现）。本视图无侧栏，isSidebarVisible=false 语义即「按全宽适配」。
+        graph.options().leftSidebar({ isSidebarVisible: () => false, showSidebar: () => {}, hideCollapseButton: () => {} })
         graph
           .options()
           .graphContainerSelector(`#${selRef.current}`)
@@ -98,6 +108,8 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
         graph.options().data(json)
         graph.load()
         graphRef.current = graph
+        setLayouting(true)
+        window.setTimeout(() => setLayouting(false), 2500)
       }
     } catch (e: any) {
       setErr(e?.message ?? String(e))
@@ -113,24 +125,34 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
 
   // 全屏/窗口尺寸变化：保住图实例与力布局状态，仅刷新画布尺寸（不重挂载——重挂载会让
   // 力布局从零重跑，节点全部堆回原点）
+  // 2026-09-27 空白修复②：退出全屏瞬间读到的是过渡前布局（:fullscreen 类移除有过渡），
+  // 单次刷新会把 svg 留在全屏尺寸 → 内容被 overflow 裁剪成空白。补 rAF + 350ms 二次刷新。
   useEffect(() => {
     const onResize = () => {
       const g = graphRef.current
       const c = containerRef.current
       if (!g || !c) return
-      g.options().width(c.clientWidth).height(c.clientHeight)
-      g.updateCanvasContainerSize()
+      const apply = () => {
+        if (!containerRef.current) return
+        g.options().width(containerRef.current.clientWidth).height(containerRef.current.clientHeight)
+        g.updateCanvasContainerSize()
+      }
+      apply()
+      requestAnimationFrame(apply)
+      const t = window.setTimeout(apply, 350)
+      return () => window.clearTimeout(t)
     }
-    document.addEventListener('fullscreenchange', onResize)
-    window.addEventListener('resize', onResize)
+    const wrap = () => void onResize()
+    document.addEventListener('fullscreenchange', wrap)
+    window.addEventListener('resize', wrap)
     return () => {
-      document.removeEventListener('fullscreenchange', onResize)
-      window.removeEventListener('resize', onResize)
+      document.removeEventListener('fullscreenchange', wrap)
+      window.removeEventListener('resize', wrap)
     }
   }, [])
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <Space style={{ marginBottom: 8 }}>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={render}>
           重新转换并渲染
@@ -152,6 +174,11 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
       {loading && !err && (
         <div style={{ textAlign: 'center', padding: 40 }}>
           <Spin tip="加载 VOWL JSON 并渲染中…" />
+        </div>
+      )}
+      {!loading && layouting && !err && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 60, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 3, background: 'rgba(255,255,255,0.72)', borderRadius: 8, padding: '6px 0' }}>
+          <Spin tip="力布局计算中（百级本体约需数秒）…" />
         </div>
       )}
       <div
