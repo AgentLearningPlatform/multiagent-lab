@@ -23,6 +23,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/qualitygate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/repo"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/seed"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/toolchain"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/vocabsearch"
 )
 
@@ -67,6 +68,10 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/ontology/quality/report", s.qualityReport)
 	m.HandleFunc("POST /api/ontology/toolchain/{tool}", s.toolchain)
 	m.HandleFunc("GET /api/ontology/vocabularies/search", s.vocabSearch)
+
+	// 方案生命周期（REQ-155 阶段二/M-O15：Terraform 式 plan/apply，monitor=plan 只读形态）
+	m.HandleFunc("GET /api/ontology/lifecycle/plan", s.lifecyclePlan)
+	m.HandleFunc("POST /api/ontology/lifecycle/apply", s.lifecycleApply)
 	m.HandleFunc("GET /api/ontologies/seed-learning", s.listLearning)
 	m.HandleFunc("POST /api/ontologies/seed-learning", s.seedLearning)
 	m.HandleFunc("GET /api/ontologies/{id}/versions", s.listVersions)
@@ -337,6 +342,44 @@ func (s *Server) artifacts(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- 导入 / 导出 ----
+
+// lifecyclePlan REQ-155 阶段二：生命周期计划（期望=方案声明全部运行；实际=运行平面状态+加载版本快照；漂移=spec 版本超前）。
+func (s *Server) lifecyclePlan(w http.ResponseWriter, r *http.Request) {
+	versions, err := s.Store.CurrentVersions()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	plan, err := toolchain.Plan(r.Context(), s.LLM.PlatformURL, versions)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
+}
+
+// lifecycleApply REQ-155 阶段二：逐项执行计划动作（start/reload）。
+func (s *Server) lifecycleApply(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actions []toolchain.LifecycleAction `json:"actions"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	results := make([]map[string]any, 0, len(body.Actions))
+	okN := 0
+	for _, a := range body.Actions {
+		aerr := toolchain.ApplyAction(r.Context(), s.LLM.PlatformURL, a)
+		if aerr != nil {
+			results = append(results, map[string]any{"profile_id": a.ProfileID, "action": a.Action, "ok": false, "error": aerr.Error()})
+			continue
+		}
+		okN++
+		results = append(results, map[string]any{"profile_id": a.ProfileID, "action": a.Action, "ok": true})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"applied": okN, "total": len(body.Actions), "results": results})
+}
 
 // mergeIncoming 解析合并请求体：multipart 文件（filename+content 走 importer.Import）或 JSON {filename,content} / {spec}；
 // strategy/prefix 取表单值或 JSON 字段（REQ-157 审查向导走 JSON）。

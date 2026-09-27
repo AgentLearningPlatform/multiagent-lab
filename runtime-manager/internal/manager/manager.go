@@ -219,6 +219,23 @@ func (m *Manager) FetchTTL(ontologyID string) (string, error) {
 	return string(b), nil
 }
 
+// FetchVersion 拉取本体当前版本号（构建平面 meta；REQ-155 阶段二 drift 检测用）。
+func (m *Manager) FetchVersion(ontologyID string) (int, error) {
+	resp, err := m.HTTP.Get(fmt.Sprintf("%s/api/ontologies/%s", m.BuildURL, ontologyID))
+	if err != nil {
+		return 0, fmt.Errorf("构建平面不可达: %w", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var meta struct {
+		Version int `json:"version"`
+	}
+	if json.Unmarshal(b, &meta) != nil {
+		return 0, nil // 解析失败不阻断启动（版本快照尽力而为）
+	}
+	return meta.Version, nil
+}
+
 // Start 启动方案：starting → 拉形态 → 引擎装载 → 健康检查 → running（失败进 error）。
 func (m *Manager) Start(ctx context.Context, id string) error {
 	p, err := m.Store.Get(id)
@@ -234,6 +251,7 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 		return fmt.Errorf("方案未配置本体集合")
 	}
 	ttls := map[string]string{}
+	loadedVersions := map[string]int{}
 	for _, oid := range p.OntologyIDs {
 		ttl, err := m.FetchTTL(oid)
 		if err != nil {
@@ -241,6 +259,9 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 			return err
 		}
 		ttls[oid] = ttl
+		if v, verr := m.FetchVersion(oid); verr == nil {
+			loadedVersions[oid] = v // 尽力而为：版本快照失败不阻断启动
+		}
 	}
 	port := p.Port
 	if port == 0 {
@@ -270,6 +291,9 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 		}
 		lastErr = eng.HealthCheck(ctx, proc.Endpoint)
 		if lastErr == nil {
+			if b, jerr := json.Marshal(loadedVersions); jerr == nil {
+				_ = m.Store.SetLoadedVersions(id, string(b)) // REQ-155 阶段二：加载版本快照（drift 检测）
+			}
 			_ = m.Store.SetStatus(id, "running", "", "")
 			return nil
 		}

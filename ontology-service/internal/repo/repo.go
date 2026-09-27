@@ -310,6 +310,25 @@ type VersionMeta struct {
 	OriginalSize   int    `json:"original_size,omitempty"`
 }
 
+// CurrentVersions 全部本体的当前版本号（REQ-155 阶段二生命周期 drift 检测用）。
+func (s *Store) CurrentVersions() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT id, version FROM ontology`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var v int
+		if err := rows.Scan(&id, &v); err != nil {
+			return nil, err
+		}
+		out[id] = v
+	}
+	return out, rows.Err()
+}
+
 // SetQualityStrict REQ-156/M-O15：本体级质量门禁 strict 开关。
 func (s *Store) SetQualityStrict(id string, strict bool) error {
 	_, err := s.db.Exec(`UPDATE ontology SET quality_strict=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, b2i(strict), id)

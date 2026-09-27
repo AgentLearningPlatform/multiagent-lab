@@ -30,6 +30,8 @@ type Profile struct {
 	LastError   string   `json:"last_error,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
+	// REQ-155/M-O15 阶段二：启动/重载成功时的加载版本快照（JSON {ontology_id: version}），生命周期 drift 检测数据源
+	LoadedVersions string `json:"loaded_versions,omitempty"`
 }
 
 type Store struct{ db *sql.DB }
@@ -69,6 +71,10 @@ func (s *Store) migrate(dir string) error {
 				continue
 			}
 			if _, err := s.db.Exec(stmt); err != nil {
+				// 幂等容忍：重放式迁移下 ALTER ADD COLUMN 无法 IF NOT EXISTS（REQ-155/M-O15 003 起）
+				if strings.Contains(err.Error(), "duplicate column name") {
+					continue
+				}
 				return fmt.Errorf("apply migration %s: %w", f, err)
 			}
 		}
@@ -78,17 +84,23 @@ func (s *Store) migrate(dir string) error {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-const profileCols = `id,name,engine,ontology_ids,config,port,status,pid,last_error,created_at,updated_at`
+const profileCols = `id,name,engine,ontology_ids,config,port,status,pid,last_error,created_at,updated_at,IFNULL(loaded_versions,'')`
 
 func scanProfile(row interface{ Scan(...any) error }) (*Profile, error) {
 	var p Profile
-	var oids, cfg, pid, lastErr string
-	if err := row.Scan(&p.ID, &p.Name, &p.Engine, &oids, &cfg, &p.Port, &p.Status, &pid, &lastErr, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	var oids, cfg, pid, lastErr, loadedVersions string
+	if err := row.Scan(&p.ID, &p.Name, &p.Engine, &oids, &cfg, &p.Port, &p.Status, &pid, &lastErr, &p.CreatedAt, &p.UpdatedAt, &loadedVersions); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(oids), &p.OntologyIDs)
-	p.Config, p.PID, p.LastError = cfg, pid, lastErr
+	p.Config, p.PID, p.LastError, p.LoadedVersions = cfg, pid, lastErr, loadedVersions
 	return &p, nil
+}
+
+// SetLoadedVersions REQ-155/M-O15 阶段二：记录启动/重载成功时的加载版本快照。
+func (s *Store) SetLoadedVersions(id string, versionsJSON string) error {
+	_, err := s.db.Exec(`UPDATE runtime_profile SET loaded_versions=? WHERE id=?`, versionsJSON, id)
+	return err
 }
 
 func (s *Store) List() ([]*Profile, error) {

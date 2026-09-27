@@ -1,6 +1,6 @@
 # eino-multiagent-lab · 智能体平台 需求文档（PRD）
 
-> 状态：Draft v0.62
+> 状态：Draft v0.63
 > 日期：2026-09-27
 > 负责人：董奎
 > 文档性质：**活文档**。每个迭代开始前更新「迭代记录」与「需求池」，已确认需求不要直接删除，改为在条目后标注 `（已变更/已移交，见 vX.X）`。
@@ -551,6 +551,7 @@
 | v0.57 | 2026-09-27 | **M26 ③④⑤ 交付（REQ-164/165 + REQ-111② 空态收口，主人指令"继续开发所有已排期功能"）**：③REQ-164——AgentSidePanel「运行后端」（含沙箱资源字段/SandboxPanel）与「推理后端」自「模型与参数」移至「基本」分区（分区标题「后端身份（在哪儿跑 · 谁来推理）」，Agent 身份属性口径）；「能力」页签补技能勾选（api.listSkills 仅启用项，技能=指令+工具集+资源打包能力单元，外部 CLI 后端降级提示注入注记）+ AgentModal 同步（新建弹窗增「后端身份」Section 与「工具与技能」技能勾选）；④REQ-165——AgentLogo 双态渲染：context='identity'（默认，导航树恒 Agent 身份不随后端变）/context='runtime'（对话窗格头/会话入口 tile 按推理后端切换内置官方标识：eino-adk=CloudWeGo、claude-code=Anthropic、opencode、aider、deepseek-harness，web/public/logos/backend/ 入库；自定义/外部部署沿用登记 logo_url）；⑤REQ-111②——技能页零技能空态升级 EmptyGuide（三步引导+直达新建），全模块首屏盘点：智能体/项目（Sidebar EmptyGuide）/知识库 ✓、技能本批补齐、平台知识/设置/本体学习中心无裸空白 | 董奎 × 协作 Agent |
 | v0.56 | 2026-09-27 | **M26 ①② 交付（REQ-162①/163，主人指令"继续开发所有已排期功能"）**：①学习中心「七阶段学习路径」Collapse→一排七方块+箭头步骤条（编号色块+阶段名+任务进度徽标，点击切换该阶段方法论卡与任务卡面板）；「外部资源」Tab 移除（REQ-162② 已挂平台知识，本体侧栏相应口径收敛）；②第五栏 KG 检索页签（原「GraphRAG 试查」）改 Segmented 双源——**本体 TTL 装载（默认，绿徽标）**：选运行方案→关键词跨谓词字面量 SPARQL 检索；**KB 文本抽取（橙徽标）**：原 GraphRAG 试查保留可切换——两源永不混排（D-O19 边界规则①③）；页签更名「KG 检索」+头部口径「本体消费侧观测台」（③文案同步）。02 v0.83 §12 M26 行①②✅/17 v0.25/14 v0.25/18 v1.44/20 v1.30 S4.15 | 董奎 × 协作 Agent |
 | v0.60 | 2026-09-27 | **项目定位口径更新（主人指示：由学习平台改为智能体与本体构建平台）**：README 全量重写（定位段/核心能力刷新至当前现实——本体五栏与伴生本体/质量门禁/SPARQL 工作台/MCP 服务化/双协议模型管理/K8s 后端等；目录结构与文档索引更新；失效 Roadmap 清单改指 02 §12 状态列；删除已失实的「内置示例 Agent 学习助手」说法）+ AGENTS.md 项目定位段 + platform-knowledge/总览/平台总览.md 产品定位段 + platform-knowledge/README + 17 §0 平台级定位句 + docs/16 五处单机定位措辞 + 品牌副标与页面标题（AgentLab 智能体与本体构建平台）。**边界注记**：学习中心（本体模块默认页）/任务卡/示例本体等产品功能与其交互原则（17 P1~P6）保持不变——本轮仅变更项目定位的描述措辞，不改任何需求语义与功能 | 董奎 × 协作 Agent |
+| v0.63 | 2026-09-27 | **REQ-155 阶段二方案生命周期交付（M-O15 阶段二，主人指令「继续开发排期中的任务」）**：runtime-manager 启动/重载成功记录加载版本快照（迁移 003 runtime_profile.loaded_versions + FetchVersion 构建平面 meta，尽力而为）+ ontology-service /api/ontology/lifecycle/plan|apply（期望=方案声明全部运行 vs 实际=status+快照；drift=spec 版本超前→reload；stop 不入 plan）+ RuntimePage「生命周期」抽屉（状态表/漂移标注/动作清单/一键应用）。真机 start→一致→保存 v3→漂移→reload→清零全链 + headless 抽屉断言（截图 smoke/m-o15/ 04/05）。02 v0.90 §12 M-O15 阶段二/18 v1.53/14 v0.29/20 v1.37 S4.18 | 董奎 × 协作 Agent |
 | v0.62 | 2026-09-27 | **REQ-178 立项即交付（对话窗口列宽自适应 + 过程行缩进对齐，主人体验反馈）**：--chat-col 三段同源 + 过程行 --sub-depth 统一缩进（14 v0.27/18 v1.50/20 v1.34 S2.13） | 董奎 × 协作 Agent |
 | v0.59 | 2026-09-27 | **REQ-174 立项即交付（对话输入区模型快捷切换，主人指定参考 zcode）**：前端——Sender footer 首位模型 pill（当前生效模型名；RobotOutlined），Popover 列表=跟随默认+已启用 chat 连接（connDisplayName+model_name meta，选中高亮）+底部「模型管理」跳设置页模型管理（localStorage `eino.settings.section` 深链）；会话级记忆 `eino.chat.model.{convId}`；后端——RunInput 增 `model_conn_id` 单路覆盖（handlers_runs 以 chat.WithModelOverride 应用，复用 REQ-144 paneAgent 机制；对比模式窗格头承载不变）；api.runConversation 增可选参；18 v1.47/20 v1.32 S2.11 | 董奎 × 协作 Agent |
 | v0.60 | 2026-09-27 | **bug 修复回写（复杂问题答到一半即止，主人报障）**：anthropic 通道 MaxTokens 兜底 4096→16384（REQ-172 行同步——推理模型思考/回复/工具调用参数共享输出预算，4096 下长文档工具参数中途截断致 run 报错「卡住」）；实现细节与第二根因（空参数工具调用致命失败）见 02 v0.87 | 董奎 × 协作 Agent |

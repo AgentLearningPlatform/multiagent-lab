@@ -32,6 +32,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import { api } from '../../api/client'
 import type { EngineStatus } from '../../api/client'
@@ -39,6 +40,7 @@ import type { Conversation, Ontology, RuntimeProfile } from '../../api/types'
 import { useUI } from '../../store/ui'
 import { StatusBadge } from './shared'
 import SparqlWorkbench from './components/SparqlWorkbench'
+import LifecyclePane from './components/LifecyclePane'
 import TraceTable from './components/TraceTable'
 
 // ---------------------------------------------------------------------------
@@ -92,6 +94,7 @@ function friendlyEngineError(err?: string): string | null {
 
 export default function RuntimePage() {
   const [engineKey, setEngineKey] = useState<EngineKey>(readEngineKey)
+  const [lifecycleOpen, setLifecycleOpen] = useState(false) // REQ-155 阶段二：生命周期面板
   // REQ-146 引擎自检：oxigraph/fuseki 缺失时导航 Tag 显异常，分组页给一键安装入口
   const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([])
 
@@ -133,8 +136,18 @@ export default function RuntimePage() {
           <p className="work-head-desc">
             运行方案是仓库内容的「部署视图」（REQ-87）：同一本体可被多套方案加载；方案停止/删除不影响仓库资产；本体更新后需在方案上显式重载。
           </p>
+          <Button
+            type="primary"
+            ghost
+            icon={<ThunderboltOutlined />}
+            onClick={() => setLifecycleOpen(true)}
+            style={{ marginTop: 8 }}
+          >
+            生命周期（plan / apply）
+          </Button>
         </div>
       </div>
+      <LifecyclePane open={lifecycleOpen} onClose={() => setLifecycleOpen(false)} />
 
       <div className="onto-engine-nav">
         {ENGINES.map((e) => {

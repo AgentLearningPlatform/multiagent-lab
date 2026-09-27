@@ -369,6 +369,10 @@ export const api = {
     req<MergePreview>(`/api/ontologies/${id}/merge/preview`, { method: 'POST', body: JSON.stringify(body) }),
   mergeApply: (id: string, body: MergeIngest) =>
     req<{ applied: boolean; version: number; preview: MergePreview }>(`/api/ontologies/${id}/merge/apply`, { method: 'POST', body: JSON.stringify(body) }),
+  // ---- REQ-155/M-O15 阶段二：方案生命周期 ----
+  lifecyclePlan: () => req<LifecyclePlan>('/api/ontology/lifecycle/plan'),
+  lifecycleApply: (actions: LifecycleAction[]) =>
+    req<{ applied: number; total: number; results: { profile_id: string; action: string; ok: boolean; error?: string }[] }>('/api/ontology/lifecycle/apply', { method: 'POST', body: JSON.stringify({ actions }) }),
   /** 导入：multipart（file + 可选 name），自动嗅探 ttl/owl/graphml/csv/spec_json */
   importOntologyFile: (file: File, name?: string) => {
     const fd = new FormData()
@@ -682,4 +686,17 @@ export interface MergePreview {
   stats: { concepts_added: number; concepts_updated: number; relations_added: number; relations_updated: number; instances_added: number; instances_updated: number; instances_renamed: number; total_conflicts: number }
   target_name: string
   merged_spec: unknown
+}
+
+export interface LifecycleAction {
+  profile_id: string
+  profile_name?: string
+  engine?: string
+  action: 'start' | 'reload'
+  reason: string
+}
+export interface LifecyclePlan {
+  generated_at: string
+  profiles: { profile_id: string; profile_name: string; engine: string; status: string; ontologies: string[]; loaded: Record<string, number>; current: Record<string, number>; drifted?: string[]; unknown_drift?: boolean; last_error?: string }[]
+  actions: LifecycleAction[]
 }
