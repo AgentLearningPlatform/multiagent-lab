@@ -1,0 +1,18 @@
+# 构建上下文瘦身：三个 Go 镜像（backend/agentd/ontology-service/runtime-manager）
+# 只 COPY go.work 与 Go 源码目录；backend/Dockerfile 在容器内自建前端，
+# 宿主 node_modules/dist 与数据/文档目录无需进上下文（2026-09-29 k8s 真机验证轮补齐）。
+.git
+.autodev.lock
+.zcode
+node_modules
+web/node_modules
+web/dist
+data
+smoke
+logs
+exe
+*.log
+docs
+platform-knowledge
+seeds
+research

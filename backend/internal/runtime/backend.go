@@ -36,6 +36,9 @@ type StopSpec struct {
 
 // Backend Agent 执行后端接口（§6.3）。
 type Backend interface {
+	// Name 后端形态标识（docker|k8s）——chat 侧 run.started.backend 事件标注与
+	// agent 配置形态对照提示用（2026-09-29 k8s 真机验证轮补充）。
+	Name() string
 	// Start 确保实例就绪并返回端点（沙箱后端负责生命周期与对账；agent 域已存在且健康则复用，
 	// run 域每次 Start 建新实例——调用方在 Run 收尾负责 Stop 清理）。
 	Start(ctx context.Context, spec StartSpec) (Endpoint, error)

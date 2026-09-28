@@ -132,12 +132,20 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 
 	// REQ-19e/19f 对比模式由 API 层按 RunInput.Panes 分发到 RunCompare（SSE 契约与单路一致）
 
-	// M10 §6.3：执行后端分发——docker 沙箱 → Start + /run SSE 透传；inprocess → 进程内装配执行
-	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend == "docker" {
+	// M10 §6.3：执行后端分发——沙箱（docker/k8s Pod，形态由平台 SANDBOX_BACKEND 统一决定）→
+	// Start + /run SSE 透传；inprocess → 进程内装配执行。agent.RuntimeBackend 是沙箱意图
+	// （docker|k8s 均视为走沙箱），实际执行形态以平台装配的 Runtime 后端为准（不匹配发
+	// run.warning 诚实提示，2026-09-29 k8s 真机验证轮修正：原判断硬编码 docker 致 k8s 永不分发）。
+	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend != "" && agent.RuntimeBackend != "inprocess" {
 		if s.Runtime != nil {
+			if agent.RuntimeBackend != s.Runtime.Name() {
+				emit(newEvent("run.warning", runID, map[string]any{
+					"message": fmt.Sprintf("智能体配置了 %s 执行后端，平台沙箱后端为 %s，本次以 %s 执行", agent.RuntimeBackend, s.Runtime.Name(), s.Runtime.Name()),
+				}))
+			}
 			return s.runDocker(ctx, conv, agent, runID, input, debug, debugPersist, emit)
 		} // 资源限制经 StartSpec 传入（10b）
-		emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了 docker 执行后端但沙箱后端未启用，已回退 inprocess"}))
+		emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了沙箱执行后端但平台未启用（SANDBOX_IMAGE 未配置），已回退 inprocess"}))
 	}
 
 	// M13/D-O13 §6.16：推理后端分发——外部 CLI 后端（非 eino-adk）走适配器路径（能力降级见 §6.16.4）
@@ -411,8 +419,8 @@ func (s *Service) resolvePaneAgent(def *store.Agent, pc PaneConfig) (*store.Agen
 			ag = loaded
 		}
 	}
-	if ag.RuntimeBackend == "docker" {
-		return nil, fmt.Errorf("智能体 %q 为 docker 沙箱执行后端，不支持对比窗格", ag.Name)
+	if ag.RuntimeBackend != "" && ag.RuntimeBackend != "inprocess" {
+		return nil, fmt.Errorf("智能体 %q 为 %s 沙箱执行后端，不支持对比窗格", ag.Name, ag.RuntimeBackend)
 	}
 	if s.Inference != nil && s.Inference.IsExternal(ag.InferenceBackend) {
 		return nil, fmt.Errorf("智能体 %q 为外部 CLI 推理后端（%s），不支持对比窗格", ag.Name, ag.InferenceBackend)
@@ -1086,7 +1094,7 @@ func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent
 		}
 		m["conversation_id"] = conv.ID // 事件流会话 ID 重写为主平台会话
 		if curEvent == "run.started" {
-			m["backend"] = "docker"
+			m["backend"] = s.Runtime.Name() // docker|k8s（2026-09-29 修正：原硬编码 docker 致 k8s 事件标注失真）
 		}
 		b, err := json.Marshal(m)
 		if err != nil {

@@ -1,7 +1,7 @@
 # eino-multiagent-lab · 智能体平台 需求文档（PRD）
 
-> 状态：Draft v0.73
-> 日期：2026-09-28
+> 状态：Draft v0.74
+> 日期：2026-09-29
 > 负责人：董奎
 > 文档性质：**活文档**。每个迭代开始前更新「迭代记录」与「需求池」，已确认需求不要直接删除，改为在条目后标注 `（已变更/已移交，见 vX.X）`。
 > 配套文档：《02_智能体_技术方案设计.md》界面口径事实源见《17_产品_信息架构与界面设计.md》（原 prototype/ 交互原型已移除，2026-09-23 整理轮；历史见 git）；本体模块：《04_本体_方案设计.md》（**独立维护**，v0.6，构建/运行解耦）；知识库模块：《11_知识库_需求文档.md》《12_知识库_方案设计.md》（**独立维护**，2026-09-21 起自本文档/02 拆分）。
@@ -177,7 +177,7 @@
 | REQ-24 | 工具列表 tools | 从系统已注册工具中勾选 | P1（第一期可先内置固定工具） |
 | REQ-25 | 最大迭代次数 max_iteration | 防止 ReAct 死循环 | P0 |
 | REQ-26 | 头像/颜色 | 仅用于 UI 区分 | P2 |
-| REQ-122（v0.6 立项；v0.21 自 REQ-90/92 合并迁移，见 18 号注册表 G-1） | **执行后端 runtime_backend（沙箱化）**：字段口径见 §3.7 同名条；✅ M10 阶段 10a/10b/10c 已交付（96210e6/9b0d45c，2026-09-25；10c SANDBOX_SCOPE=agent|run 双作用域 2026-09-28 真机实测——docker 后端 SANDBOX_IMAGE 全链 + 生命周期可见化与资源限制参数化，见 01 v0.50 与 02 §12 M10）+ 10d K8s Pod 桩级交付（2026-09-27，真机验证见 02 §12 M10）；**范围收敛（2026-09-29 开发者拍板）：沙箱终态=docker + k8s pod 两后端，10e gVisor/Kata 叠加与 10f/REQ-159 环境分级选型裁撤不再排期**（REQ-159 于 18 号标注已变更；调研 platform-knowledge/02_智能体/33_智能体沙箱方案调研.md §7 随之冻结留档） | P0（inprocess 默认）/ P2（docker/k8s） |
+| REQ-122（v0.6 立项；v0.21 自 REQ-90/92 合并迁移，见 18 号注册表 G-1） | **执行后端 runtime_backend（沙箱化）**：字段口径见 §3.7 同名条；✅ M10 阶段 10a/10b/10c 已交付（96210e6/9b0d45c，2026-09-25；10c SANDBOX_SCOPE=agent|run 双作用域 2026-09-28 真机实测——docker 后端 SANDBOX_IMAGE 全链 + 生命周期可见化与资源限制参数化，见 01 v0.50 与 02 §12 M10）+ 10d K8s Pod ✅ 交付含真机验证（桩级 2026-09-27；2026-09-29 kind 本地集群全链验证——Pod 拉起/manifest 下发/SSE 透传/Stop 回收，顺修分发缺失与 CrashLoop 假健康，见 02 v0.105）；**范围收敛（2026-09-29 开发者拍板）：沙箱终态=docker + k8s pod 两后端，10e gVisor/Kata 叠加与 10f/REQ-159 环境分级选型裁撤不再排期**（REQ-159 于 18 号标注已变更；调研 platform-knowledge/02_智能体/33_智能体沙箱方案调研.md §7 随之冻结留档） | P0（inprocess 默认）/ P2（docker/k8s） |
 | REQ-123（原 REQ-93，v0.21 号段迁移） | **Agent 级独立配置** | 在 REQ-20~26 基础上支持单独覆盖：**模型连接**（覆盖全局默认）、**技能集合**（勾选技能库中的技能）、**MCP servers**（配置一个或多个 MCP 服务端点，运行时经 MCP Client 拉取工具合并） | P2 |
 | REQ-131（v0.28 新增） | **Agent 对外 MCP 服务化（agent-as-MCP-server）** | Agent 可开启「对外服务」：平台暴露统一 MCP Server 端点 `/mcp`（Streamable HTTP，默认回环监听），将启用的 Agent 各暴露为一个 MCP 工具 `agent_{id}`（入参 input 文本 + 可选 session_id）供外部服务/Agent 调用；复用既有装配管线（模型/工具/技能/MCP/知识库全自动生效）；Agent 级静态 Token 鉴权；需审批工具（REQ-14 tool_approval≠off）在 server 会话内默认拒绝并说明；禁止自引用 + 调用深度上限（防循环）；被调用过程事件照常入库、对话窗口可回放（REQ-117 装配快照含 serve 状态）；工具式（无状态）先行，会话式（session_id 映射平台会话多轮延续）为增强项 | P2 |
 | REQ-132（v0.28 新增） | **Agent 配置页改版（SidePanel 分类 + 创建分级）** | ①AgentSidePanel 由单视图平铺改为**四分类分区**（面板内页签/锚点导航）——「基本」（名称/描述/头像颜色 REQ-26/系统提示词/审批策略）、「模型与参数」（模型连接覆盖 REQ-42、温度/最大 tokens/最大迭代 REQ-25、执行后端 REQ-122、推理后端 D-O13）、「能力」（工具 REQ-24、技能 REQ-121、MCP servers REQ-123）、「对外服务」（REQ-131，默认关闭收起）；②创建弹窗 AgentModal 分级——基本项（名称/描述/系统提示词/模型连接）填写即可创建（其余取默认：跟随全局模型/inprocess/审批 off），**高级配置默认收起**，创建后一律经 SidePanel 修改（弹窗仅保留新建，17 §4.1 口径不变）；界面口径见 17 v0.7 §4.3｜✅ 已排期 M18 | P2 |
@@ -578,3 +578,4 @@
 | v0.65 | 2026-09-27 | **REQ-186 立项（平台助手智能体化与平台知识接入，开发者指令，优先级 P3 待开发）**：§3.9/§4 新增 REQ-186——①助手对话化（智能体列表内置卡片+专用 SSE 对话端点，复用 chat 包工具循环；REQ-166「不占用户列表」修订为「占列表、内置徽标、不可编辑删除、不落 agent 表」）；②分级工具面（L0 只读全开/L1 写提案白名单 diff 确认两段式，复用 REQ-167 交互；删除类不开放）；③平台知识 KB 化（platform-knowledge/ 42 份同步任务+KB 检索工具+三级知识注入；承接 REQ-171 P2⑤ 平台知识子集；KG 化不做、留触发条件评估）。方案 platform-knowledge/02_智能体/平台助手智能体化与平台知识接入方案_20260928.md；可行性分析作调研临时件出库不入库 | 董奎 × 协作 Agent |
 | v0.72 | 2026-09-28 | **REQ-186 阶段二交付（平台助手对话化 L0）**：实现取「内置行隔离」修正方案 A（agent 表 is_builtin 列 + 迁移 023 seed 内置行 builtin-assistant，工具面/instruction 随行）——对话链路（会话树/SSE/历史还原/工具装配）全部复用既有实现零特判；L0 工具面注册（doc_read/list_model_connections/list_agents/list_kbs/get_assistant_config，纯只读，doc_read 与 api.docRead 同白名单口径）；前端侧栏内置分区（置顶+内置徽标+无配置入口）+ 编辑/删除双保护（api 400 + 前端拦截，配置指向设置页平台助手分区）。真机：list_model_connections/list_kbs 工具调用与表格化如实回答实测（smoke/req186/）。阶段一（KB 化，涉 store/knowledge 域）与阶段三（L1 写提案）待领取 | 董奎 × 协作 Agent |
 | v0.73 | 2026-09-29 | **沙箱范围收敛落档（开发者指令「智能体沙箱方案只需要实现 docker 和 k8s pod 即可，立即执行」视为拍板）**：REQ-122 §3.3/§3.7 行注记沙箱终态=docker + k8s pod 两后端——10e gVisor/Kata 叠加取消、10f/REQ-159 环境分级与执行沙箱选型裁撤（18 号 REQ-159 行标注已变更）；§9「沙箱进阶」池条目标注已变更/裁撤（镜像仓库/快照恢复/多机调度不再单列）；调研档 33 范围收敛注记；02 v0.104 M10 行同步 | 董奎 × 协作 Agent |
+| v0.74 | 2026-09-29 | **REQ-122 10d K8s Pod 真机验证交付回写**（随范围收敛同轮执行）：kind 本地集群全链验证过（Pod 拉起→manifest 下发→对话全链 SSE 透传 backend=k8s→工具环→落库→Stop 回收→再跑重建）；顺修三处——①chat 分发条件硬编码 `RuntimeBackend=="docker"` 致 k8s 永不分发（改沙箱意图分发：docker|k8s 均走 s.Runtime，形态由 SANDBOX_BACKEND 统一决定，不匹配发 run.warning）②runtime.Backend 增 Name()（run.started.backend 真实标注）③K8sBackend.Status 识别 CrashLoopBackOff 假健康（phase=Running 但容器崩 → error，防复用死端点）+ 覆盖式重建回收死 port-forward；坑沉淀（16 号配方）：kubectl 客户端与 server 须同带内（data/bin/kubectl v1.25.3）、Pod→宿主走 kind 网桥中继（PLATFORM_URL_IN_CLUSTER）、agentd 镜像宿主交叉编译组装（VM 内构建 OOM，Docker Desktop 2GB→4GB）、根目录补 .dockerignore（构建上下文瘦身）；20 v1.56 S2.9 ✅/02 v0.110 | 董奎 × 协作 Agent |

@@ -140,6 +140,8 @@ func (k *K8sBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error
 	inst := k.instanceName(spec)
 	runScoped := Scope() == "run" && spec.RunID != ""
 	if !runScoped {
+		// 对账复用（与 DockerBackend 同语义）；CrashLoop 等"phase=Running 但容器已死"
+		// 的假健康由 Status 判 error 拦截，不在复用路径再做健康探测。
 		if st, _ := k.Status(ctx, agentID); st.State == "running" {
 			if ep, perr := k.endpointOf(ctx, inst); perr == nil {
 				return ep, nil
@@ -157,8 +159,18 @@ func (k *K8sBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error
 	if err != nil {
 		return Endpoint{}, err
 	}
-	// 覆盖式重建：删旧 Pod（含 Nonexistent 容错）再 apply，保证镜像/env 变更生效
+	// 覆盖式重建：删旧 Pod（含 Nonexistent 容错）再 apply，保证镜像/env 变更生效。
+	// 同时回收旧 port-forward——隧道随 Pod 删除失效，进程残留会让健康等待循环一直
+	// 复用死隧道直到超时（2026-09-29 k8s 真机验证轮修正）。
 	_, _ = k.kubectl(ctx, "delete", "pod", inst, "--ignore-not-found=true", "--wait=false")
+	k.mu.Lock()
+	if fw := k.forwards[inst]; fw != nil && fw.Process != nil {
+		_ = fw.Process.Kill()
+		_ = fw.Wait()
+	}
+	delete(k.forwards, inst)
+	delete(k.ports, inst)
+	k.mu.Unlock()
 	if err := k.applyStdin(ctx, manifest); err != nil {
 		return Endpoint{}, err
 	}
@@ -293,12 +305,26 @@ func (k *K8sBackend) Stop(ctx context.Context, spec StopSpec) error {
 }
 
 // Status 查询 Pod phase → 后端状态（对账口径与 DockerBackend 一致）。
+// phase=Running 但容器 CrashLoopBackOff/ImagePullBackOff 时如实标 error——phase 是 Pod 级
+// 状态，容器反复崩溃时仍为 Running，直接复用会拿到一个端口转发到死容器的假端点
+// （2026-09-29 k8s 真机验证轮修正）。
 func (k *K8sBackend) Status(ctx context.Context, agentID string) (BackendStatus, error) {
-	phase, err := k.kubectl(ctx, "get", "pod", k.podName(agentID), "-o", "jsonpath={.status.phase}")
-	if err != nil || strings.TrimSpace(phase) == "" {
+	out, err := k.kubectl(ctx, "get", "pod", k.podName(agentID),
+		"-o", "jsonpath={.status.phase}|{.status.containerStatuses[*].state.waiting.reason}")
+	if err != nil || strings.TrimSpace(out) == "" || strings.HasPrefix(strings.TrimSpace(out), "|") {
 		return BackendStatus{State: "stopped", Detail: "pod not found"}, nil
 	}
-	switch strings.TrimSpace(phase) {
+	parts := strings.SplitN(strings.TrimSpace(out), "|", 2)
+	phase := strings.TrimSpace(parts[0])
+	waiting := ""
+	if len(parts) > 1 {
+		waiting = strings.TrimSpace(parts[1])
+	}
+	switch waiting {
+	case "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError":
+		return BackendStatus{State: "error", Detail: waiting}, nil
+	}
+	switch phase {
 	case "Running":
 		return BackendStatus{State: "running", Detail: phase}, nil
 	case "Pending", "ContainerCreating":

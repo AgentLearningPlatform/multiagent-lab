@@ -29,6 +29,8 @@ type DockerBackend struct {
 	HealthzWait time.Duration                        // 启动后等待 healthz 就绪的上限（默认 60s）
 }
 
+func (d *DockerBackend) Name() string { return "docker" }
+
 func (d *DockerBackend) containerName(agentID string) string { return "agt-" + agentID }
 
 // instanceName 实例名（10c 作用域）：run 域且携带 RunID → agt-{agentID}-r-{run8}（每次 Run
