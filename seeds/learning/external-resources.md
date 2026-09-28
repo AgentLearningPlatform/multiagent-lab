@@ -60,7 +60,7 @@
 
 ## 六、本体开源实现方案借鉴（技术研究专栏，REQ-155~158 配套）
 
-> 来源：[docs/23《本体开源实现方案借鉴研究》](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md)（2026-09-25，7 方向全量评估）。原则：选型全都要（多方案并存）/ Go 优先排期 / 结构化分组呈现。「落地栏」= 建议并入的本体模块页面；工作量 S/M/L 为初估。
+> 来源：[docs/23《本体开源实现方案借鉴研究》](../../platform-knowledge/04_本体/23_本体_开源实现方案借鉴研究.md)（2026-09-25，7 方向全量评估）。原则：选型全都要（多方案并存）/ Go 优先排期 / 结构化分组呈现。「落地栏」= 建议并入的本体模块页面；工作量 S/M/L 为初估。
 
 | 方向 | 项目/方案 | 链接 | 一句话说明 | 落地栏 | 工作量 |
 | --- | --- | --- | --- | --- | --- |
@@ -80,17 +80,17 @@
 | AI-native | **OntoChat** | <https://github.com/King-s-Knowledge-Graph-Lab/OntoChat> | 多智能体对话式本体构建工作流 | 构建·ontochat 路径 | M |
 | AI-native | **OntoGenix** | <https://mikelval82.github.io/Portfolio/blog-ontogenix.html> | 本体自修复循环（validate→repair 迭代） | 构建·ontochat 路径 | S |
 | AI-native | **LLM4ACOE** | <https://resolve.cambridge.org/core/journals/knowledge-engineering-review/article/automating-agentic-collaborative-ontology-engineering-with-roleplaying-simulation-of-llmpowered-agents-and-rag-technology/C4DFC9BD18020226B4CC763BE7056659> | 角色扮演多智能体协作本体工程框架 | 构建·ontochat 路径 | M |
-| 存储 | **Data Pipeline 增强** | [见 docs/23 §7.1](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md) | KG 构建管线增强（D-O14 迭代：混合策略/质量抽检） | 知识库·第六路径 | M |
-| 存储 | **语义嵌入双空间搜索** | [见 docs/23 §7.2](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md) | 术语向量与图结构双空间检索 | 资产·检索 | M |
+| 存储 | **Data Pipeline 增强** | [见 docs/23 §7.1](../../platform-knowledge/04_本体/23_本体_开源实现方案借鉴研究.md) | KG 构建管线增强（D-O14 迭代：混合策略/质量抽检） | 知识库·第六路径 | M |
+| 存储 | **语义嵌入双空间搜索** | [见 docs/23 §7.2](../../platform-knowledge/04_本体/23_本体_开源实现方案借鉴研究.md) | 术语向量与图结构双空间检索 | 资产·检索 | M |
 | 协作 | **WebProtégé 协作** | <https://github.com/protegeproject/webprotege> | 自托管协作建模（远期） | 构建·协作 | L |
 | 协作 | **语义 Diff** | <https://www.w3.org/2001/sw/wiki/How_to_diff_RDF> | RDF diff 方法集（结构化报告先行） | 资产·版本对比 | M |
 
-> 完整评估（每方案三段式：是什么/亮点/借鉴点）与三阶段路线见 [docs/23_本体_开源实现方案借鉴研究.md §9](../../platform-knowledge/本体/23_本体_开源实现方案借鉴研究.md)；吸收池方案推进时逐一立项。
+> 完整评估（每方案三段式：是什么/亮点/借鉴点）与三阶段路线见 [docs/23_本体_开源实现方案借鉴研究.md §9](../../platform-knowledge/04_本体/23_本体_开源实现方案借鉴研究.md)；吸收池方案推进时逐一立项。
 
 ### 6.A 子课题：智能体运行时动态薄本体（2026-09-25 登记）
 
 > **源文档**（开发者引入，仓库副本 `research/01/02-*.md`）：《01-研究报告-智能体运行时动态本体的可行性与方案》——以 MLSys 2026《Ontology-Guided Long-Term Agent Memory for Conversational RAG》为核心的可行性研究：运行时从对话数据自动归纳轻量本体图，破解"隐式召回失败"（Recall@10 0.58→0.70，成本较长上下文降 81%），四层六模块架构 + 轻量/标准/重型三档路线；《02-资料合集-动态本体与智能体记忆》——30+ 篇文献六板块合集（容量记忆线 MemGPT/Mem0/A-MEM、结构检索线 GraphRAG/HippoRAG/LightRAG、动态 schema 归纳线 AutoSchemaKG/EDC/Agentic-KGR、时序图谱线 Zep·Graphiti/Tag2Graph，附 LoCoMo/LongMemEval/BEAM 评测基准与术语表）。
-> **落地方案**：[动态薄本体_可行方案](../../platform-knowledge/智能体/动态薄本体_可行方案.md)——取报告**轻量档**（固定种子 schema + 实例填充）映射 D-O15 后自研栈（Oxigraph named graph 会话图 / LLM 抽 KG lightweight / PROV-O / REQ-151 facade），旁路低侵入：对话主链路 0 改动、开关默认关、会话图可整体摘除；展示入口走资产栏独立页签（D-O19 边界外第三来源「对话」）；**REQ-170 已立项**（2026-09-26，方案 only 待排期；子课题资料与方案均入平台知识智能体模块）。
+> **落地方案**：[动态薄本体_可行方案](../../platform-knowledge/02_智能体/动态薄本体_可行方案.md)——取报告**轻量档**（固定种子 schema + 实例填充）映射 D-O15 后自研栈（Oxigraph named graph 会话图 / LLM 抽 KG lightweight / PROV-O / REQ-151 facade），旁路低侵入：对话主链路 0 改动、开关默认关、会话图可整体摘除；展示入口走资产栏独立页签（D-O19 边界外第三来源「对话」）；**REQ-170 已立项**（2026-09-26，方案 only 待排期；子课题资料与方案均入平台知识智能体模块）。
 
 ---
 
