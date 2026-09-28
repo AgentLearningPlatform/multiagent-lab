@@ -737,6 +737,18 @@
 .onto-legend-root-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .onto-legend-root-meta { flex: none; font-size: 10.5px; color: var(--ant-color-text-tertiary, #9ca3af); }
 
+/* REQ-185：图例面板迁移（控制条入面板）+ 拖拽分隔手柄 + 折叠浮钮 */
+.viz-legend-resizer {
+  flex: none; width: 5px; margin: 0 2px; border-radius: 3px; cursor: col-resize;
+  background: transparent; transition: background .15s ease;
+}
+.viz-legend-resizer:hover, .viz-legend-resizer:active { background: var(--ant-color-primary, #4f46e5); opacity: .4; }
+.viz-legend-panel.ant-card { border-radius: 8px; }
+.viz-legend-panel .onto-flow-info-title { display: flex; align-items: center; gap: 4px; }
+.viz-legend-toggle {
+  position: absolute; z-index: 6; top: 8px; right: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+}
+
 /* 三维浏览控制条：多选 Select 的 tag 会把行高压到 44px（其余控件 24px）——压齐 single 行高。
    AntD 6 多选 DOM 为 .ant-select-content > .ant-select-content-item（无 .ant-select-selector） */
 .viz-3d-bar .ant-select-multiple { overflow: hidden; height: 24px; }

@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Empty, Input, Select, Space, Tag, Typography } from 'antd'
+import { Button, Card, Checkbox, Empty, Input, Select, Space, Tag, Typography } from 'antd'
 import * as THREE from 'three'
 import ForceGraph3D from 'react-force-graph-3d'
 // M21/VIZ-2 R0（15 号 v2.15）：react-force-graph-3d ESM 直装——消三 hack：
 //   ①UMD vendor 分发（prepare-vendor 补给链退役）②window.THREE 预挂（ESM 直接共享 three 实例）
 //   ③StrictMode 容器 DOM 搬移（React 组件生命周期自管）
+import { ControlOutlined, RightOutlined } from '@ant-design/icons'
 import type { Spec } from '../../../api/types'
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,9 @@ import type { Spec } from '../../../api/types'
 const PALETTE = ['#4f46e5', '#0891b2', '#ca8a04', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0d9488']
 /** R1③：边装饰（箭头/粒子）启用的边数阈值——超过走纯 LineSegments 快路径 */
 const LINK_DECOR_THRESHOLD = 800
+/** REQ-185③：图例面板宽度三常量与 localStorage 键 */
+const LEGEND_WIDTH_KEY = 'eino.viz.legend.width'
+const LEGEND_WIDTH_DEFAULT = 280
 
 interface GNode {
   id: string
@@ -137,6 +141,14 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
   const [linkFilter, setLinkFilter] = useState<Set<string>>(new Set(['parent', 'rel', 'instance', 'instrel']))
   /** R4：雾效开关 */
   const [fog3d, setFog3d] = useState(false)
+  // REQ-185①：图例显隐联动——隐藏的根概念集合（其子孙概念+挂载实例+关联边数据级过滤）
+  const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(new Set())
+  // REQ-185③：图例面板宽度（240~420 拖拽，localStorage 记忆，双击复位 280）与折叠
+  const [legendWidth, setLegendWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(LEGEND_WIDTH_KEY))
+    return saved >= 240 && saved <= 420 ? saved : 280
+  })
+  const [legendOpen, setLegendOpen] = useState(true)
   const data = useMemo(() => (spec ? buildGraphData(spec) : { nodes: [], links: [], roots: [] }), [spec])
   /** 图例根概念统计（子孙概念数 / 挂载实例数），随 legendQuery 过滤 */
   const rootStats = useMemo(() => {
@@ -175,6 +187,44 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     for (const i of spec?.instances ?? []) m.set(i.concept, (m.get(i.concept) ?? 0) + 1)
     return m
   }, [spec])
+
+  // REQ-185①：name → 顶层根（概念沿 parents 上溯；实例经所属概念）——显隐子树归簇依据
+  const rootOfName = useMemo(() => {
+    const m = new Map<string, string>()
+    if (!spec) return m
+    const names = new Set((spec.concepts ?? []).map((c) => c.name))
+    const conceptBy = new Map((spec.concepts ?? []).map((c) => [c.name, c]))
+    const rootOf = (name: string): string => {
+      const hit = m.get(name)
+      if (hit) return hit
+      let cur = name
+      for (let i = 0; i < 32; i++) {
+        const c = conceptBy.get(cur)
+        const parent = (c?.parents ?? []).find((pp) => names.has(pp))
+        if (!parent) break
+        cur = parent
+      }
+      m.set(name, cur)
+      return cur
+    }
+    for (const c of spec.concepts ?? []) rootOf(c.name)
+    for (const inst of spec.instances ?? []) if (names.has(inst.concept)) m.set(inst.name, rootOf(inst.concept))
+    return m
+  }, [spec])
+
+  // REQ-185①：数据级过滤重建 graphData（非视觉遮挡）——隐藏根的子孙概念+挂载实例剔除，边双端可见才保留
+  const visibleData = useMemo(() => {
+    const nodes = data.nodes.filter((n) => {
+      if (kindFilter === 'concept' && n.kind === 'instance') return false
+      if (kindFilter === 'instance' && n.kind === 'concept') return false
+      const root = rootOfName.get(n.kind === 'concept' ? n.name : (n.concept ?? ''))
+      if (root && hiddenRoots.has(root)) return false
+      return true
+    })
+    const ids = new Set(nodes.map((n) => n.id))
+    const links = data.links.filter((l) => ids.has(l.source) && ids.has(l.target))
+    return { nodes, links, roots: data.roots }
+  }, [data, kindFilter, hiddenRoots, rootOfName])
 
   const neighbors = useMemo(() => {
     const m = new Map<string, Set<string>>()
@@ -300,6 +350,38 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     }
   }
 
+  // REQ-185③：图例面板左缘拖拽（240~420；localStorage 记忆；双击复位）
+  const startLegendResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = legendWidth
+    const onMove = (ev: MouseEvent) => {
+      setLegendWidth(Math.min(420, Math.max(240, startW + (startX - ev.clientX))))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setLegendWidth((w) => {
+        localStorage.setItem(LEGEND_WIDTH_KEY, String(w))
+        return w
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+  const resetLegendWidth = () => {
+    setLegendWidth(LEGEND_WIDTH_DEFAULT)
+    localStorage.setItem(LEGEND_WIDTH_KEY, String(LEGEND_WIDTH_DEFAULT))
+  }
+  const toggleRoot = (name: string, visible: boolean) => {
+    setHiddenRoots((cur) => {
+      const next = new Set(cur)
+      if (visible) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
   // R2：布局切换——fz 定轴（力导向=自由 z；仅非 force 布局执行）
   useEffect(() => {
     const g = fgRef.current as any
@@ -396,90 +478,15 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
   const canvasH = 'clamp(480px, calc(100vh - 380px), 1200px)'
 
   return (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
+    <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
       <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-        <div className="viz-3d-bar" style={{ position: 'absolute', zIndex: 5, top: 8, left: 8, right: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Space.Compact style={{ flex: '1 1 220px', minWidth: 170, maxWidth: 520 }}>
-            <Input
-              size="small"
-              placeholder="搜索概念/实例定位并聚焦…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onPressEnter={locate}
-              allowClear
-            />
-            <Button size="small" onClick={locate}>定位</Button>
-          </Space.Compact>
-          <Select
-            size="small"
-            style={{ width: 'clamp(104px, 9vw, 132px)' }}
-            value={kindFilter}
-            onChange={setKindFilter}
-            options={[
-              { value: 'all', label: '全部节点' },
-              { value: 'concept', label: '仅概念' },
-              { value: 'instance', label: '仅实例' },
-            ]}
-          />
-          <Select
-            size="small"
-            style={{ width: 'clamp(112px, 10vw, 140px)' }}
-            value={layout}
-            onChange={setLayout}
-            options={[
-              { value: 'force', label: '力导向布局' },
-              { value: 'cluster', label: '根向分簇' },
-              { value: 'layer', label: '层次分层' },
-            ]}
-          />
-          <Select
-            size="small"
-            style={{ width: 'clamp(100px, 9vw, 128px)' }}
-            mode="multiple"
-            allowClear={false}
-            maxTagCount={1}
-            value={[...linkFilter]}
-            onChange={(vs) => setLinkFilter(new Set(vs.length ? vs : ['parent', 'rel', 'instance', 'instrel']))}
-            options={[
-              { value: 'parent', label: '继承' },
-              { value: 'rel', label: '关系' },
-              { value: 'instance', label: '属于' },
-              { value: 'instrel', label: '实例关系' },
-            ]}
-          />
-          <Button
-            size="small"
-            type={fog3d ? 'primary' : 'default'}
-            onClick={() => {
-              setFog3d((v) => !v)
-              const g = fgRef.current as any
-              if (g && typeof g.scene === 'function') {
-                const scn = g.scene()
-                if (scn) scn.fog = (!fog3d ? new THREE.Fog(0xe8ebf5, 200, 900) : null)
-              }
-            }}
-          >
-            {fog3d ? '雾效开' : '雾效关'}
-          </Button>
-          <Button
-            size="small"
-            onClick={() => {
-              setSelected(null)
-              highlightRef.current = null
-              callFg('zoomToFit', 600, 60)
-              updateRing(null)
-            }}
-          >
-            复位全景
-          </Button>
-        </div>
         <div ref={containerRef} className="viz-3d-box" style={{ width: '100%', height: canvasH, borderRadius: 8, background: 'linear-gradient(180deg,#f2f4fb 0%,#e8ebf5 100%)' }}>
           {hasConcepts && (
             <ForceGraph3D
               ref={fgRef}
               width={initSize.w || undefined}
               height={initSize.h || undefined}
-              graphData={data as any}
+              graphData={visibleData as any}
               backgroundColor="rgba(0,0,0,0)"
               showNavInfo={false}
               nodeLabel={(n: any) => n.label}
@@ -488,9 +495,8 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
               linkWidth={0}
               linkLabel={(l: any) => l.label}
               linkColor={(l: any) => (linkFilter.has(l.kind) ? (l.kind === 'parent' ? 'rgba(120,128,160,0.5)' : 'rgba(150,158,190,0.32)') : 'rgba(0,0,0,0)')}
-              linkDirectionalArrowLength={(l: any) => ((data.links.length < LINK_DECOR_THRESHOLD && l.kind !== 'parent') ? 3 : 0)}
-              linkDirectionalParticles={(l: any) => ((data.links.length < LINK_DECOR_THRESHOLD && l.kind === 'rel') ? 2 : 0)}
-              linkDirectionalParticleWidth={1.4}
+              linkDirectionalArrowLength={(l: any) => ((visibleData.links.length < LINK_DECOR_THRESHOLD && l.kind !== 'parent') ? 3 : 0)}
+              linkDirectionalParticles={(l: any) => ((visibleData.links.length < LINK_DECOR_THRESHOLD && l.kind === 'rel') ? 2 : 0)}
               linkOpacity={0.32}
               onNodeClick={(n: any) => {
                 setSelected({ kind: n.kind, name: n.name, label: n.label, color: n.color, definition: n.definition, concept: n.concept, attributes: n.attributes })
@@ -519,91 +525,228 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
               }}
             />
           )}
+          {visibleData.nodes.length === 0 && (
+            <div className="work-empty" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前过滤条件下无可见节点——在图例面板调整类型开关或根概念显隐" />
+            </div>
+          )}
         </div>
+        {!legendOpen && (
+          <Button
+            size="small"
+            className="viz-legend-toggle"
+            icon={<ControlOutlined />}
+            onClick={() => setLegendOpen(true)}
+            aria-label="展开图例面板"
+          >
+            图例
+          </Button>
+        )}
         <div style={{ position: 'absolute', zIndex: 5, bottom: 8, left: 10, fontSize: 11, color: 'var(--ant-color-text-tertiary, #888)' }}>
           拖拽旋转 · 滚轮缩放 · 点击节点聚焦飞入（邻居保持、其余收缩）· 标签悬停可见
         </div>
       </div>
-      <Card size="small" style={{ width: 280, flexShrink: 0, overflowY: 'auto', height: canvasH }}>
-        <div className="onto-flow-info-title">图例</div>
-        <div className="onto-flow-legend"><span className="onto-flow-legend-badge" style={{ borderRadius: '50%', background: '#4f46e5' }} />概念（球体，按顶层根着色）</div>
-        <div className="onto-flow-legend"><span className="onto-flow-legend-badge" style={{ transform: 'rotate(45deg)', background: '#9333ea' }} />实例（八面体，继承概念色）</div>
-        <div className="onto-flow-legend"><span className="onto-flow-legend-line rel" />实线 = 关系</div>
-        <div className="onto-flow-legend"><span className="onto-flow-legend-line parent" />暗线 = 继承 / 属于</div>
-
-        <div className="onto-flow-info-title spaced">根概念（点击定位；REQ-185 将扩展显隐开关）</div>
-        <Input
-          size="small"
-          placeholder="搜索根概念…"
-          value={legendQuery}
-          onChange={(e) => setLegendQuery(e.target.value)}
-          allowClear
-        />
-        <div style={{ marginTop: 6, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {rootsFiltered.map((r) => {
-            const st = rootStats.get(r.name)
-            return (
-              <button
-                key={r.name}
-                type="button"
-                className="onto-legend-root"
-                title={`定位 ${r.name}`}
-                onClick={() => focusNodeById(`c:${r.name}`)}
-              >
-                <span className="onto-legend-root-dot" style={{ background: r.color }} />
-                <span className="onto-legend-root-name">{r.name}</span>
-                <span className="onto-legend-root-meta">{st ? `${st.concepts} 概念 · ${st.instances} 实例` : '1 概念'}</span>
-              </button>
-            )
-          })}
-          {rootsFiltered.length === 0 && <p className="onto-flow-hint">无匹配根概念</p>}
-        </div>
-
-        <div className="onto-flow-info-title spaced">统计</div>
-        <div className="onto-flow-stats">
-          <span>概念 <b>{spec.concepts.length}</b></span>
-          <span>实例 <b>{spec.instances?.length ?? 0}</b></span>
-          <span>关系 <b>{spec.relations?.length ?? 0}</b></span>
-        </div>
-
-        <div className="onto-flow-info-title spaced">选中节点</div>
-        {selected ? (
-          <div className="onto-flow-detail">
-            <div className="onto-flow-detail-name">
-              <Tag color={selected.kind === 'concept' ? 'geekblue' : 'purple'} style={{ marginInlineEnd: 6 }}>{selected.kind === 'concept' ? '概念' : '实例'}</Tag>
-              {selected.label}
+      {legendOpen && (
+        <>
+          <div
+            className="viz-legend-resizer"
+            role="separator"
+            aria-label="拖拽调整图例面板宽度"
+            aria-orientation="vertical"
+            onMouseDown={startLegendResize}
+            onDoubleClick={resetLegendWidth}
+          />
+          <Card
+            size="small"
+            className="viz-legend-panel"
+            style={{ width: legendWidth, flexShrink: 0, overflowY: 'auto', height: canvasH }}
+            title={
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>图例与视图控制</span>
+                <Button type="text" size="small" icon={<RightOutlined />} onClick={() => setLegendOpen(false)} aria-label="折叠图例面板" />
+              </span>
+            }
+          >
+            {/* REQ-185②：控制条自画布迁入图例区（画布区纯净化）——视图/边/观感三分区 */}
+            <div className="onto-flow-info-title">视图</div>
+            <Space.Compact style={{ width: '100%', marginBottom: 6 }}>
+              <Input
+                size="small"
+                placeholder="搜索概念/实例定位…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onPressEnter={locate}
+                allowClear
+              />
+              <Button size="small" onClick={locate}>定位</Button>
+            </Space.Compact>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+              <Select
+                size="small"
+                style={{ flex: '1 1 96px', minWidth: 96 }}
+                value={kindFilter}
+                onChange={setKindFilter}
+                options={[
+                  { value: 'all', label: '全部节点' },
+                  { value: 'concept', label: '仅概念' },
+                  { value: 'instance', label: '仅实例' },
+                ]}
+              />
+              <Select
+                size="small"
+                style={{ flex: '1 1 104px', minWidth: 104 }}
+                value={layout}
+                onChange={setLayout}
+                options={[
+                  { value: 'force', label: '力导向布局' },
+                  { value: 'cluster', label: '根向分簇' },
+                  { value: 'layer', label: '层次分层' },
+                ]}
+              />
             </div>
-            <div className="onto-flow-detail-key">{selected.name}</div>
-            {selected.definition && <p className="onto-flow-detail-def">{selected.definition}</p>}
-            {selected.kind === 'instance' && (
-              <>
-                <div className="onto-flow-detail-row">
-                  <span className="onto-flow-detail-label">所属概念</span>
-                  <Tag style={{ margin: 0 }} color="geekblue">{conceptOfSelected?.label || selected.concept}</Tag>
+            <div className="onto-flow-info-title spaced">边</div>
+            <Select
+              size="small"
+              style={{ width: '100%', marginBottom: 6 }}
+              mode="multiple"
+              allowClear={false}
+              maxTagCount={2}
+              value={[...linkFilter]}
+              onChange={(vs) => setLinkFilter(new Set(vs.length ? vs : ['parent', 'rel', 'instance', 'instrel']))}
+              options={[
+                { value: 'parent', label: '继承' },
+                { value: 'rel', label: '关系' },
+                { value: 'instance', label: '属于' },
+                { value: 'instrel', label: '实例关系' },
+              ]}
+            />
+            <div className="onto-flow-info-title spaced">观感</div>
+            <Space size={6} wrap style={{ marginBottom: 4 }}>
+              <Button
+                size="small"
+                type={fog3d ? 'primary' : 'default'}
+                onClick={() => {
+                  setFog3d((v) => !v)
+                  const g = fgRef.current as any
+                  if (g && typeof g.scene === 'function') {
+                    const scn = g.scene()
+                    if (scn) scn.fog = (!fog3d ? new THREE.Fog(0xe8ebf5, 200, 900) : null)
+                  }
+                }}
+              >
+                {fog3d ? '雾效开' : '雾效关'}
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  setSelected(null)
+                  highlightRef.current = null
+                  callFg('zoomToFit', 600, 60)
+                  updateRing(null)
+                }}
+              >
+                复位全景
+              </Button>
+            </Space>
+
+            <div className="onto-flow-info-title spaced">图例</div>
+            <div className="onto-flow-legend"><span className="onto-flow-legend-badge" style={{ borderRadius: '50%', background: '#4f46e5' }} />概念（球体，按顶层根着色）</div>
+            <div className="onto-flow-legend"><span className="onto-flow-legend-badge" style={{ transform: 'rotate(45deg)', background: '#9333ea' }} />实例（八面体，继承概念色）</div>
+            <div className="onto-flow-legend"><span className="onto-flow-legend-line rel" />实线 = 关系</div>
+            <div className="onto-flow-legend"><span className="onto-flow-legend-line parent" />暗线 = 继承 / 属于</div>
+
+            <div className="onto-flow-info-title spaced">
+              根概念显隐（勾选=显示 · 点名定位）
+              <Space size={2} style={{ marginLeft: 'auto' }}>
+                <Button size="small" type="text" style={{ fontSize: 11, height: 20, padding: '0 4px' }} onClick={() => setHiddenRoots(new Set())}>全显</Button>
+                <Button size="small" type="text" style={{ fontSize: 11, height: 20, padding: '0 4px' }} onClick={() => setHiddenRoots(new Set((data.roots ?? []).map((r) => r.name)))}>全隐</Button>
+              </Space>
+            </div>
+            <Input
+              size="small"
+              placeholder="搜索根概念…"
+              value={legendQuery}
+              onChange={(e) => setLegendQuery(e.target.value)}
+              allowClear
+            />
+            <div style={{ marginTop: 6, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {rootsFiltered.map((r) => {
+                const st = rootStats.get(r.name)
+                const visible = !hiddenRoots.has(r.name)
+                return (
+                  <div key={r.name} className="onto-legend-root" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Checkbox
+                      checked={visible}
+                      onChange={(e) => toggleRoot(r.name, e.target.checked)}
+                      aria-label={`显隐 ${r.name}`}
+                    />
+                    <button
+                      type="button"
+                      className="onto-legend-root-btn"
+                      title={`定位 ${r.name}`}
+                      onClick={() => focusNodeById(`c:${r.name}`)}
+                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 0, padding: 0, cursor: 'pointer', textAlign: 'left', opacity: visible ? 1 : 0.45 }}
+                    >
+                      <span className="onto-legend-root-dot" style={{ background: r.color }} />
+                      <span className="onto-legend-root-name">{r.name}</span>
+                      <span className="onto-legend-root-meta">{st ? `${st.concepts} 概念 · ${st.instances} 实例` : '1 概念'}</span>
+                    </button>
+                  </div>
+                )
+              })}
+              {rootsFiltered.length === 0 && <p className="onto-flow-hint">无匹配根概念</p>}
+            </div>
+
+            <div className="onto-flow-info-title spaced">统计</div>
+            <div className="onto-flow-stats">
+              <span>概念 <b>{spec.concepts.length}</b></span>
+              <span>实例 <b>{spec.instances?.length ?? 0}</b></span>
+              <span>关系 <b>{spec.relations?.length ?? 0}</b></span>
+            </div>
+            <div className="onto-flow-hint" style={{ marginTop: 2 }}>
+              当前可见 <b>{visibleData.nodes.length}</b> 节点 / <b>{visibleData.links.length}</b> 边（显隐过滤后子图计数即 REQ-175 渐进装载阈值输入）
+            </div>
+
+            <div className="onto-flow-info-title spaced">选中节点</div>
+            {selected ? (
+              <div className="onto-flow-detail">
+                <div className="onto-flow-detail-name">
+                  <Tag color={selected.kind === 'concept' ? 'geekblue' : 'purple'} style={{ marginInlineEnd: 6 }}>{selected.kind === 'concept' ? '概念' : '实例'}</Tag>
+                  {selected.label}
                 </div>
-                {attrs.length > 0 && (
-                  <div className="onto-flow-detail-row">
-                    <span className="onto-flow-detail-label">属性</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {attrs.slice(0, 10).map(([k, v]) => (
-                        <Typography.Text key={k} style={{ fontSize: 12 }}>{k}: {String(v)}</Typography.Text>
-                      ))}
+                <div className="onto-flow-detail-key">{selected.name}</div>
+                {selected.definition && <p className="onto-flow-detail-def">{selected.definition}</p>}
+                {selected.kind === 'instance' && (
+                  <>
+                    <div className="onto-flow-detail-row">
+                      <span className="onto-flow-detail-label">所属概念</span>
+                      <Tag style={{ margin: 0 }} color="geekblue">{conceptOfSelected?.label || selected.concept}</Tag>
                     </div>
+                    {attrs.length > 0 && (
+                      <div className="onto-flow-detail-row">
+                        <span className="onto-flow-detail-label">属性</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {attrs.slice(0, 10).map(([k, v]) => (
+                            <Typography.Text key={k} style={{ fontSize: 12 }}>{k}: {String(v)}</Typography.Text>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+                {selected.kind === 'concept' && (
+                  <div className="onto-flow-detail-row">
+                    <span className="onto-flow-detail-label">实例</span>
+                    <Typography.Text style={{ fontSize: 12 }}>{counts.get(selected.name) ?? 0} 个</Typography.Text>
                   </div>
                 )}
-              </>
-            )}
-            {selected.kind === 'concept' && (
-              <div className="onto-flow-detail-row">
-                <span className="onto-flow-detail-label">实例</span>
-                <Typography.Text style={{ fontSize: 12 }}>{counts.get(selected.name) ?? 0} 个</Typography.Text>
               </div>
+            ) : (
+              <p className="onto-flow-hint">点击节点聚焦飞入并查看属性；搜索框可定位实体；「复位全景」回到整体视野。</p>
             )}
-          </div>
-        ) : (
-          <p className="onto-flow-hint">点击节点聚焦飞入并查看属性；搜索框可定位实体；「复位全景」回到整体视野。</p>
-        )}
-      </Card>
+          </Card>
+        </>
+      )}
     </div>
   )
 }
