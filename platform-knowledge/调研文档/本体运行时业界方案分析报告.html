@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本体建成之后：业界 Ontology Runtime 方案全景分析</title>
+<style>
+  :root{
+    --ink:#1a2332; --ink2:#4a5568; --muted:#718096;
+    --accent:#0f4c81; --accent2:#1a6fb5; --gold:#b7791f;
+    --line:#e2e8f0; --bg:#f7f9fc; --card:#ffffff;
+    --green:#276749; --red:#9b2c2c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;color:var(--ink);background:var(--bg);line-height:1.85;font-size:15.5px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 80px;}
+  header.hero{background:linear-gradient(135deg,#0f2b46 0%,#0f4c81 60%,#16649f 100%);color:#fff;padding:64px 24px 56px;margin-bottom:40px;}
+  header.hero .inner{max-width:960px;margin:0 auto;}
+  .kicker{font-size:13px;letter-spacing:2px;color:#9fc5e8;text-transform:uppercase;margin-bottom:14px;}
+  h1.title{font-size:34px;line-height:1.4;font-weight:700;margin-bottom:16px;}
+  .subtitle{font-size:16px;color:#cfe3f5;max-width:720px;}
+  .meta{margin-top:22px;font-size:13px;color:#8fb8dc;}
+  h2{font-size:23px;margin:52px 0 18px;padding-left:14px;border-left:5px solid var(--accent);color:var(--accent);line-height:1.4;}
+  h3{font-size:17.5px;margin:30px 0 12px;color:var(--ink);}
+  p{margin:0 0 14px;}
+  .lead{font-size:16px;color:var(--ink2);}
+  blockquote{background:#eef4fa;border-left:4px solid var(--accent2);padding:14px 18px;margin:18px 0;border-radius:0 8px 8px 0;color:#2a3f55;font-size:14.5px;}
+  blockquote .src{display:block;margin-top:8px;font-size:12.5px;color:var(--muted);}
+  table{width:100%;border-collapse:collapse;margin:18px 0 26px;background:var(--card);font-size:13.8px;box-shadow:0 1px 3px rgba(15,44,74,.08);border-radius:8px;overflow:hidden;}
+  th{background:#0f3a5f;color:#fff;text-align:left;padding:10px 12px;font-weight:600;font-size:13px;line-height:1.5;}
+  td{padding:10px 12px;border-top:1px solid var(--line);vertical-align:top;line-height:1.7;}
+  tr:nth-child(even) td{background:#f6f9fc;}
+  td b{color:var(--accent);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px 24px;margin:16px 0;box-shadow:0 1px 3px rgba(15,44,74,.06);}
+  .card h3{margin-top:0;}
+  .tag{display:inline-block;font-size:12px;padding:2px 10px;border-radius:20px;margin-right:6px;margin-bottom:6px;background:#e6f0fa;color:var(--accent);border:1px solid #c5dcf0;}
+  .tag.g{background:#e6f4ea;color:var(--green);border-color:#c3e2cd;}
+  .tag.o{background:#fbf0dd;color:var(--gold);border-color:#eed9b0;}
+  .tag.r{background:#fbe9e9;color:var(--red);border-color:#f0cdcd;}
+  .figure{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;margin:20px 0;text-align:center;}
+  .figure .cap{font-size:12.5px;color:var(--muted);margin-top:10px;}
+  ul,ol{margin:0 0 14px 22px;}
+  li{margin-bottom:6px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr;}}
+  .num{display:inline-block;width:26px;height:26px;line-height:26px;text-align:center;background:var(--accent);color:#fff;border-radius:50%;font-size:13px;margin-right:8px;flex-shrink:0;}
+  .rowflex{display:flex;align-items:flex-start;margin-bottom:12px;}
+  .refs{font-size:13px;color:var(--ink2);}
+  .refs li{margin-bottom:8px;}
+  a{color:var(--accent2);text-decoration:none;border-bottom:1px dotted #9ab6d0;}
+  .foot{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);}
+  .callout{background:#fffbea;border:1px solid #eed9b0;border-radius:10px;padding:16px 20px;margin:18px 0;font-size:14.5px;}
+  .callout b{color:var(--gold);}
+  code{background:#eef2f7;padding:1px 6px;border-radius:4px;font-size:13px;color:#0f3a5f;}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="inner">
+    <div class="kicker">Research Report · 2026-09</div>
+    <h1 class="title">本体建成之后：<br>业界 Ontology Runtime（企业本体运行时）方案全景分析</h1>
+    <p class="subtitle">以《本体建成之后：企业本体究竟如何运行？》提出的问题域为坐标系，对 Palantir、Microsoft、C3 AI、Cognite、SAP、Snowflake / Databricks 及国内厂商等业界方案进行系统检索、归纳与评价。</p>
+    <div class="meta">基于 2026 年 9 月公开资料检索整理 · 十余个厂商方案 / 工程实践来源</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============ 摘要 ============ -->
+<h2>摘要</h2>
+<p class="lead">原文的核心命题是：本体<b>建设</b>解决"如何定义一个业务世界"，而本体<b>运行</b>要回答"这个已定义的世界如何随真实企业持续、可信、可解释地变化"，并提出 Identity → Fact → Event/State → Rule/Function → Action 的运行闭环，以及 Version、Evidence/Provenance、Permission、Change Propagation 四个横向治理支柱；同时强调本体运行时应是<b>业务语义协调层</b>而非"大一统平台"。</p>
+<p>本报告的检索结论可以概括为四点：</p>
+<div class="card">
+  <div class="rowflex"><span class="num">1</span><div><b>业界已出现明确对标物。</b>Palantir Foundry/AIP 的 Ontology（对象+链接+Action+Function）、Microsoft Fabric IQ（Ontology + Graph + Operations Agent，2025 Ignite 发布）、C3 AI 模型驱动架构是最接近"Ontology Runtime"的成熟实现；文章描述的能力闭环，在头部平台上已不是概念，而是生产功能。</div></div>
+  <div class="rowflex"><span class="num">2</span><div><b>但业界呈"多路线并存"，能力深浅差异极大。</b>操作本体平台（深度闭环）、工业知识图谱（上下文化+孪生）、语义层/指标层（只解决"分析一致性"）、专项能力（实体调和、版本化图谱库）各占一段光谱，多数方案只覆盖原文四层闭环中的一两层。</div></div>
+  <div class="rowflex"><span class="num">3</span><div><b>文章的两个关键立场与业界主流高度一致。</b>"本体不替代规则引擎/业务系统"对应 Palantir 的 Action 依赖外部系统执行、Cognite 的 SoE 不替代 SoR、SAP 本体建立在既有 VDM 元数据之上；"语义协调层"定位正是各家的实际架构选择。</div></div>
+  <div class="rowflex"><span class="num">4</span><div><b>最大空白恰在文章第五节：</b>Change Propagation（语义定义变化后的影响分析、重新验证与重算）在业界仍以人工治理流程 + 半自动检查为主，是公认难点，也是未来的分水岭。</div></div>
+</div>
+
+<!-- ============ 一、问题域 ============ -->
+<h2>一、分析坐标系：原文提出的本体运行时问题域</h2>
+<p>为避免"各家说的本体不是一回事"，本报告直接采用原文框架作为评测坐标系——把业界方案逐一代入以下四个运行层与四个治理支柱，看它们各自覆盖哪一段、用什么机制实现。</p>
+
+<div class="figure">
+<svg viewBox="0 0 880 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:860px;">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0f4c81"/></marker>
+  </defs>
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif">
+    <rect x="20" y="40" width="150" height="64" rx="10" fill="#0f4c81"/>
+    <text x="95" y="66" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">Identity 身份</text>
+    <text x="95" y="86" text-anchor="middle" fill="#cfe3f5" font-size="11">谁是谁 · 跨系统连续</text>
+
+    <rect x="210" y="40" width="150" height="64" rx="10" fill="#1a6fb5"/>
+    <text x="285" y="66" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">Fact 事实</text>
+    <text x="285" y="86" text-anchor="middle" fill="#d9eaf7" font-size="11">观测 → 语义裁决 → 正式事实</text>
+
+    <rect x="400" y="40" width="170" height="64" rx="10" fill="#2c7fb8"/>
+    <text x="485" y="66" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">Event / State</text>
+    <text x="485" y="86" text-anchor="middle" fill="#d9eaf7" font-size="11">State(t)+Event → State(t+1)</text>
+
+    <rect x="610" y="40" width="150" height="64" rx="10" fill="#4a90c4"/>
+    <text x="685" y="66" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">Rule / Action</text>
+    <text x="685" y="86" text-anchor="middle" fill="#e2f0fa" font-size="11">判断 → 行动 → 现实反馈</text>
+
+    <line x1="170" y1="72" x2="205" y2="72" stroke="#0f4c81" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="360" y1="72" x2="395" y2="72" stroke="#1a6fb5" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="570" y1="72" x2="605" y2="72" stroke="#2c7fb8" stroke-width="2" marker-end="url(#arr)"/>
+
+    <path d="M 685 104 C 685 190, 95 190, 95 110" fill="none" stroke="#b7791f" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+    <text x="390" y="185" text-anchor="middle" fill="#b7791f" font-size="12">行动结果回到现实，成为下一轮新事实（闭环）</text>
+
+    <rect x="20" y="215" width="820" height="56" rx="10" fill="#eef4fa" stroke="#c5dcf0"/>
+    <text x="430" y="238" text-anchor="middle" fill="#0f3a5f" font-size="13" font-weight="bold">横向治理支柱：Version 版本 · Evidence/Provenance 证据溯源 · Permission 权限 · Change Propagation 变化传播</text>
+    <text x="430" y="258" text-anchor="middle" fill="#4a6d8c" font-size="11">贯穿四层，保证长期运行中"持续正确、可解释"</text>
+  </g>
+</svg>
+<div class="cap">图 1 ｜ 原文提出的 Ontology Runtime 四层闭环与四个横向治理支柱（本报告的评测坐标系）</div>
+</div>
+
+<p>同时保留原文的两个判据用于最后的评价：一是<b>边界判据</b>——本体运行时应是协调数据平台、主数据、规则引擎、事件平台、BPM 的语义协调层，而不是重建这些系统；二是<b>成熟度判据</b>——评价本体应从"建了多少（Class/Relation 数量）"转向"能否长期保持正确（身份连续、事实可溯、状态可解释、变化可传播）"。</p>
+
+<!-- ============ 二、格局总览 ============ -->
+<h2>二、业界格局：五条路线</h2>
+<p>检索 Palantir、Microsoft、C3 AI、Cognite、SAP、Google、Snowflake、Databricks、dbt/Cube/Looker、timbr、TerminusDB 以及华为云/滴普、中软国际等公开资料后，业界实践可归纳为五条路线 + 一层公共底座。它们不是竞争关系，而是覆盖了本体运行问题的不同深度。</p>
+
+<table>
+  <tr><th style="width:17%">路线</th><th style="width:26%">代表方案</th><th>核心主张</th><th style="width:24%">对四层闭环的覆盖</th></tr>
+  <tr>
+    <td><b>① 操作本体平台</b><br><span style="color:var(--muted);font-size:12px">Operational Ontology</span></td>
+    <td>Palantir Foundry/AIP；Microsoft Fabric IQ；C3 AI 平台</td>
+    <td>本体 = 数据+逻辑+行动+安全的一体化对象层，应用与 Agent 直接读写本体，Action 是受控写入口</td>
+    <td><span class="tag">Identity</span><span class="tag">Fact</span><span class="tag">Event/State</span><span class="tag">Rule/Action</span> <b>全覆盖</b>，最接近"运行时"</td>
+  </tr>
+  <tr>
+    <td><b>② 工业知识图谱</b><br><span style="color:var(--muted);font-size:12px">Industrial KG / Twin</span></td>
+    <td>Cognite Data Fusion；SAP Knowledge Graph；Azure Digital Twins / Fabric Digital Twin Builder</td>
+    <td>先把分散的 OT/IT/工程数据"上下文化"为动态工业知识图谱，再支撑孪生与运营决策</td>
+    <td><span class="tag">Identity</span><span class="tag">Fact</span><span class="tag g">Event/State（时序+孪生）</span><span class="tag o">Action 较弱</span></td>
+  </tr>
+  <tr>
+    <td><b>③ 语义层 / 指标层</b><br><span style="color:var(--muted);font-size:12px">Semantic Layer</span></td>
+    <td>Snowflake Semantic Views；Databricks UC Metric Views；dbt / Cube / Looker / AtScale；timbr（虚拟知识图谱）</td>
+    <td>统一定义业务概念与指标口径，让 BI 和 AI Agent 共享同一套受治理的语义</td>
+    <td><span class="tag o">Fact（口径级）</span><span class="tag o">Rule（指标逻辑）</span>；<b>无 Identity/Event/Action</b>，只到"分析一致性"</td>
+  </tr>
+  <tr>
+    <td><b>④ 云专项能力</b><br><span style="color:var(--muted);font-size:12px">Specialized Services</span></td>
+    <td>Google Enterprise Knowledge Graph（实体调和）；各大 MDM；SHACL/数据契约；Flink CEP / Event Sourcing / Temporal</td>
+    <td>不提供完整本体平台，而是提供闭环中某一层的最优积木</td>
+    <td>各自覆盖一层：<span class="tag">Identity（调和）</span><span class="tag">Fact（验证）</span><span class="tag">Event/State（流处理）</span></td>
+  </tr>
+  <tr>
+    <td><b>⑤ 国内平台方案</b><br><span style="color:var(--muted);font-size:12px">CN Vendors</span></td>
+    <td>华为云 AgentArts + 滴普科技；中软国际灵析 V3（allmeta 本体底座）；各指标平台语义层</td>
+    <td>以"业务本体 = 语义层 + 规则体系 + 行业知识"服务 Agent 经营分析与严肃场景</td>
+    <td><span class="tag o">Fact（指标口径）</span><span class="tag">Rule（规则沉淀）</span><span class="tag o">Action（经营建议链路）</span></td>
+  </tr>
+</table>
+
+<div class="figure">
+<svg viewBox="0 0 880 330" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:860px;">
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="12.5">
+    <rect x="30" y="20" width="820" height="60" rx="8" fill="#0f4c81"/>
+    <text x="440" y="45" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">① 操作本体平台（深度闭环）</text>
+    <text x="440" y="66" text-anchor="middle" fill="#cfe3f5" font-size="11">Palantir Foundry/AIP · Microsoft Fabric IQ · C3 AI</text>
+
+    <rect x="30" y="90" width="400" height="56" rx="8" fill="#1a6fb5"/>
+    <text x="230" y="113" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">② 工业知识图谱 / 数字孪生</text>
+    <text x="230" y="132" text-anchor="middle" fill="#d9eaf7" font-size="11">Cognite · SAP KG · Azure Digital Twins</text>
+
+    <rect x="450" y="90" width="400" height="56" rx="8" fill="#1a6fb5"/>
+    <text x="650" y="113" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">⑤ 国内业务本体方案</text>
+    <text x="650" y="132" text-anchor="middle" fill="#d9eaf7" font-size="11">华为云 AgentArts+滴普 · 中软国际灵析</text>
+
+    <rect x="30" y="156" width="820" height="56" rx="8" fill="#4a90c4"/>
+    <text x="440" y="179" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">③ 语义层 / 指标层（分析一致性）</text>
+    <text x="440" y="198" text-anchor="middle" fill="#e8f2fa" font-size="11">Snowflake Semantic Views · Databricks Metric Views · dbt / Cube / Looker · timbr 虚拟知识图谱</text>
+
+    <rect x="30" y="222" width="820" height="52" rx="8" fill="#8fb8d8"/>
+    <text x="440" y="244" text-anchor="middle" fill="#0f2b46" font-size="13" font-weight="bold">④ 云专项能力 / 积木层</text>
+    <text x="440" y="262" text-anchor="middle" fill="#26415a" font-size="11">Google 实体调和 · MDM · SHACL/数据契约 · Flink CEP · Event Sourcing · Temporal · TerminusDB</text>
+
+    <path d="M 440 284 L 440 306" stroke="#b7791f" stroke-width="2" marker-end="url(#arr2)"/>
+    <defs><marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#b7791f"/></marker></defs>
+    <text x="440" y="322" text-anchor="middle" fill="#b7791f" font-size="12">自上而下：闭环能力越完整，平台越重；自下而上：积木越通用，越需要自行组装"运行时"</text>
+  </g>
+</svg>
+<div class="cap">图 2 ｜ 业界方案分层格局：越靠上越接近原文定义的完整 Ontology Runtime，越靠下越是通用基础设施</div>
+</div>
+
+<!-- ============ 三、逐路线分析 ============ -->
+<h2>三、逐路线深析</h2>
+
+<h3>路线①　操作本体平台：最接近"Ontology Runtime"的业界对标物</h3>
+
+<div class="card">
+  <h3 style="margin-top:0">Palantir Foundry / AIP —— 事实上的标杆</h3>
+  <p>Palantir 官方平台说明将 Foundry 分为<b>数据层</b>与<b>对象层（Ontology）</b>，并明确强调："Ontology 不是语义层"，而是数据、逻辑、行动、安全四位一体的决策模型，由 <b>Language（建模语言）+ Engine（可伸缩读写引擎）+ Toolchain（OSDK 工具链）</b>构成。构件包括：Object Types（对象，含稳定主键）、Link Types（关系）、<b>Action Types（受控写操作：类型化参数、提交前验证、声明式副作用、写回外部系统）</b>、Functions（TypeScript/Python 服务端业务逻辑）、Interfaces（多态抽象）。</p>
+  <p>与原文四层闭环的对应关系 remarkably 高：</p>
+  <ul>
+    <li><b>Identity：</b>官方与第三方实现指南均指出，为对象选一个稳定唯一主键是"本体被推倒重建的最常见原因"；跨系统实体对齐被明确划入管道（pipeline）阶段解决。</li>
+    <li><b>Fact：</b>对象由数据集经 transform 物化索引，保留完整 lineage；"每晚同步的数据集，就是一个每晚刷新的对象类型"——平台坦承对象新鲜度受管道约束。</li>
+    <li><b>Action：</b>所有写入必须经 Action 类型，天然获得"验证先行、按 Action 授权、完整审计"三件事；Agent（AIP Logic）只能调用预定义 Action，不能自由写库——这正是原文"在什么状态、什么权限下允许执行什么 Action"的工程化。</li>
+    <li><b>Version/审计：</b>每个对象变更带版本可回溯；lineage 支撑上游/下游影响分析（即 Change Propagation 的雏形）。</li>
+  </ul>
+  <p style="margin-bottom:0"><b>局限：</b>重实施、高成本（FDE 深度驻场模式）；事件驱动的实时状态迁移（原文的 Event→State）主要靠数据管道同步实现，CEP 式复杂事件语义并非其核心卖点。</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Microsoft Fabric IQ —— 平台级后来者（2025 Ignite 发布，Preview）</h3>
+  <p>Fabric IQ 把 Fabric 从"统一数据平台"升级为"统一智能层"，由五个能力构成：<b>Ontology</b>（实体、关系、规则、目标的共享模型，绑定 OneLake 数据/事件流/时序）、<b>Semantic Model</b>（继承 Power BI 既有 2000 万+ 语义模型作为起点）、<b>Graph</b>（原生图引擎，GQL 标准，多跳推理）、<b>Data Agent</b>（回答业务问题）、<b>Operations Agent</b>（持续监控本体中的实体与事件→按政策与目标推理→自动执行行动，保留人工审批开关）。</p>
+  <p>值得注意的三点：其一，微软把原文所述"闭环"直接产品化为 <b>Operations Agent</b>，宣称"这不是告警，也不是工作流自动化，而是具备业务理解、决策权限、实时业务上下文的 Agentic AI"；其二，配套的 Digital Twin Builder（Real-Time Intelligence 内）支持 DTDL/RDF/OPC-UA/USD 等工业标准，铁路公司 CSX 用它构建"动态运营本体"预测燃油消耗——实例级关系快速变化、传统库难以表达，正是原文"动态本体"诉求；其三，Fabric IQ 与 Foundry IQ、Work IQ 组成跨数据/应用/办公内容的 IQ 层，说明"本体作为 Agent 的上下文基础设施"已成平台共识。</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">C3 AI —— 模型驱动架构路线</h3>
+  <p>C3 AI 以 <b>C3 AI Type System</b>（统一建模语言）为核心，把企业建成"统一本体图（Unified Ontology Graph）"，主张 Omni-Modal Data Fusion（全模态数据融合为规范模型）、模型驱动的应用/Agent/UI 生成、内置状态机与工作流、ML 全生命周期。所有应用与 Agent 继承同一本体图。与 Palantir 相比更强调"预置行业模型库 + 声明式开发"，同样走全栈垂直整合路线。其公开材料也直言：自建统一对象模型动辄数百人年，是 Fortune 500 企业 AI 失败的首要模式——这从反面印证了原文"本体需要专业运行机制"的判断。</p>
+</div>
+
+<h3>路线②　工业知识图谱：把"语义裁决"做得最扎实的领域</h3>
+<div class="card">
+  <p><b>Cognite Data Fusion</b> 的核心是 Industrial Knowledge Graph + AI 上下文化（contextualization）：用预训练模型、规则引擎与领域专家把时序、工单、P&amp;ID 图纸、3D 模型、文档自动挂接到资产上——这正是原文第二节"从观测到正式事实的语义裁决"的工业化实现。其三层数据模型设计（<b>源模型 → 领域模型 → 解决方案模型</b>）颇有启发：领域模型允许较高的熵和"演化的本体"，解决方案模型则严格受 schema 约束，兼顾演化灵活性与应用可靠性。Cognite 明确定位为 System of Engagement（参与系统），不替代 System of Record，洞察可写回 SoR——与原文"本体不重建业务系统"的边界观一致。</p>
+  <p><b>SAP Knowledge Graph</b> 则展示了另一种路径：不重新建模，而是把 SAP Virtual Data Model（VDM）的既有元数据升级为本体图，HANA Cloud 于 2025 年 Q1 起原生支持 RDF/SPARQL 多模型存储。其用途极具代表性：Joule 助手收到自然语言问题后，由知识图谱导航语义网络、定位白名单 API、构造精确查询——用本体约束 LLM，"大幅降低纯 LLM 路线的错误率"。同时 SAP 社区也坦承三点风险：企业级知识图谱不是开关即用的产品、数据质量差则图谱只会产生"结构完美的错误结论"、复杂图计算成本高昂。这三点分别呼应原文的运行机制、事实裁决与治理议题。</p>
+</div>
+
+<h3>路线③　语义层 / 指标层：只解决四层闭环中的"半层"</h3>
+<div class="card">
+  <p>Snowflake Semantic Views（GA）+ Cortex Analyst + 托管 MCP Server，Databricks Unity Catalog Metric Views（GA）+ Genie，加上 dbt Semantic Layer、Cube、Looker/LookML、AtScale、Malloy 等中立方案，构成当前最热闹的"语义层"赛道；Snowflake 还牵头 Open Semantic Interchange（OSI）推动语义定义跨平台可移植。它们做到的是：一个指标一处定义、治理继承（RBAC/lineage/审计）、Agent 经 MCP/语义接口取数而不碰裸表。timbr 这类 <b>SQL 原生虚拟知识图谱</b>更进一步：不移动数据，在源上定义概念、继承（IS-A）、推理与图遍历，支持 GraphRAG 与 NL2SQL。</p>
+  <p><b>但对照原文坐标系，语义层路线有明显边界：</b>它管理"术语与口径"（Fact 的口径级 + Rule 的指标逻辑级），不管理对象身份的跨系统连续性、不管理事件驱动的状态迁移、更没有 Action 写回现实。行业分析也普遍指出其局限——语义层保证"一次问答的正确"，不保证"一个业务世界的持续正确"。因此它更适合作为 Ontology Runtime 的<b>读侧子集</b>，而非运行时本身。</p>
+</div>
+
+<h3>路线④　专项积木：每一层的最优工程实践</h3>
+<div class="card">
+  <p>完整运行时也可以不买平台，而用积木组装。与原文各层对应的成熟积木包括：</p>
+  <ul>
+    <li><b>Identity 层：</b>Google Cloud Enterprise Knowledge Graph 的 Entity Reconciliation API（图规模达数十亿节点/万亿边，输出稳定 Machine ID）；传统 MDM；工程实践上，实体消解应是"持续后台进程"——预筛（LSH/布隆过滤器）→ 概率匹配 → same-as 链接 → 人工复核 → 合并后保留旧标识（redirect）。</li>
+    <li><b>Fact 层：</b>数据契约（Data Contract）、SHACL 结构校验、三元组级 Provenance（来源 + 置信度 + 时间戳），查询按信任度过滤（如关键财务应用只信 confidence&gt;0.95 且来自内部台账的事实）；更新操作必须幂等。</li>
+    <li><b>Event/State 层：</b>Flink CEP 提供事件时间语义与 watermark（解决乱序/迟到数据）、状态后端与 exactly-once、模式匹配状态机——与原文"多事件定序、延迟数据改写既有状态"逐点对应；Event Sourcing 以不可变事件 + 投影重建状态，天然回答"状态为什么是这样、能否重算"；Temporal（durable execution）把多步行动变成可持久化、可重试、可审计的工作流。</li>
+    <li><b>版本化存储：</b>TerminusDB 把 Git 语义（commit/diff/branch/merge/时间旅行）内建到知识图谱数据库，为"语义定义变化"提供存储级原语。</li>
+  </ul>
+</div>
+
+<h3>路线⑤　国内方案：从"指标口径"切入业务本体</h3>
+<div class="card">
+  <p>国内实践与文章描述的图景一致——"不同厂商说的本体并不完全相同"，目前的主流切入点是<b>语义层 + 规则体系</b>：华为云与滴普科技联合方案以 AgentArts 为底座，"通过业务本体构建语义层和规则体系，叠加行业知识与场景 Skills"，打通指标查询→异常识别→归因分析→策略推演→建议生成的链路，并强调"Agent 不替代财务计算，也不放任 AI 自由发挥"；中软国际灵析 V3 以 allmeta 本体底座沉淀 80 余种语义要素，把业务术语、规则、指标、结构化/非结构化数据、知识图谱纳入统一语义治理，配合多智能体协同与全生命周期 OPS。相对海外操作本体平台，国内方案普遍尚缺两块：对象级 Identity 工程与 Action 级写回治理——恰是原文第二节与第四节强调的重心。</p>
+</div>
+
+<!-- ============ 四、映射表 ============ -->
+<h2>四、核心分析：业界能力 × 原文四层闭环映射</h2>
+<p>把代表性方案代入坐标系后，可得到下面这张映射表。它同时回答了"谁在做什么"与"整条闭环上哪段最薄弱"。</p>
+
+<table>
+  <tr><th style="width:13%">闭环层</th><th style="width:29%">业界实现机制（代表）</th><th style="width:29%">与原文的对应</th><th>成熟度评估</th></tr>
+  <tr>
+    <td><b>Identity</b></td>
+    <td>稳定主键纪律（Palantir："选错主键=重建本体"）；AI 上下文化/实体匹配（Cognite）；实体调和 API + 稳定 MID（Google）；MDM；持续消解+same-as+人工复核（工程实践）</td>
+    <td>原文"身份 = 跨系统跨时间的连续性，而非统一编码"——业界已内化为第一设计原则</td>
+    <td><span class="tag g">较成熟</span>工具充足，但属持续运营而非一次性工程</td>
+  </tr>
+  <tr>
+    <td><b>Fact</b><br><span style="color:var(--muted);font-size:12px">语义裁决</span></td>
+    <td>候选→正式事实：数据契约、SHACL 验证、staging 发布门；Provenance 三元组（来源/置信度/时间）；信任过滤；Cognite 上下文化流水线；SAP"坏数据救不活"警示</td>
+    <td>几乎逐点对应原文"观测≠事实；需要来源、时间、规则与人工确认"</td>
+    <td><span class="tag g">较成熟</span>工业/数据治理领域已产品化，泛企业仍在补课</td>
+  </tr>
+  <tr>
+    <td><b>Event / State</b></td>
+    <td>Flink CEP（事件时间、watermark、状态机、exactly-once）；Event Sourcing（不可变事件+投影）；Temporal durable execution；平台侧：C3 状态机、Fabric RTI/EventHouse、Palantir 对象索引同步</td>
+    <td>对应原文 State(t)+Event→State(t+1) 及"乱序、迟到、事后无效"三难题</td>
+    <td><span class="tag o">中等</span>技术组件成熟，但与"业务本体语义"的整合尚浅，多停留在技术事件</td>
+  </tr>
+  <tr>
+    <td><b>Rule / Function</b></td>
+    <td>Palantir Functions（版本化 TS 逻辑，结论可追溯至规则版本）；规则引擎外置；语义层指标逻辑（dbt/Cube）；国内"指标口径+判断规则沉淀"</td>
+    <td>对应原文"本体管理计算的<b>业务含义</b>而非替代计算"——版本关联结论是共同做法</td>
+    <td><span class="tag g">较成熟</span>但"规则变更后历史结论语义保持"（原文案例：75 分企业重分类）仍需自建</td>
+  </tr>
+  <tr>
+    <td><b>Action</b></td>
+    <td>Palantir Action Types（唯一写入口：验证、授权、审计、副作用）；Fabric Operations Agent（自动决策+人工审批）；Cognite 写回 SoR；SAP 白名单 API 导航；Reverse ETL</td>
+    <td>原文"本体管理行动的业务上下文，执行仍归业务系统"——业界架构与此完全一致</td>
+    <td><span class="tag g">较成熟</span>（Palantir 十年生产验证）；Agent 自动执行的安全边界仍在演进</td>
+  </tr>
+  <tr>
+    <td><b>Version /<br>Change Propagation</b></td>
+    <td>本体 IRI/版本 IRI 双轨 + SemVer + 弃用周期（FIBO 实践）；SHACL 兼容性三模式（shape diff / 重放验证 / 分区验证，ISWC 2025 形式化）；多版本共存 + 渐进迁移；TerminusDB git-for-data；lineage 影响分析（Palantir/Databricks）</td>
+    <td>对应原文 Semantic Change → Impact Analysis → Revalidation → Recomputation → State Update</td>
+    <td><span class="tag r">最薄弱</span>以流程纪律+半自动检查为主，自动化影响分析仍是原型（公认难点）</td>
+  </tr>
+</table>
+
+<div class="callout"><b>一句话读表：</b>闭环的前四段（身份、事实、规则、行动）业界各有成熟答案，难点在把它们<b>作为一个整体</b>协调起来——这正是操作本体平台的存在理由；而第五段（变化传播）连头部平台也只做到了 lineage 影响分析 + 人工流程，是原文点中、业界普遍未解的"真问题"。</div>
+
+<!-- ============ 五、治理支柱 ============ -->
+<h2>五、横向治理支柱：业界工程实践的最佳沉淀</h2>
+<h3>把本体当"接口"管理（Version）</h3>
+<p>知识图谱运营社区的共识正在收敛为一套纪律：本体是被多团队绑定的<b>公开契约</b>，应遵循语义化版本——加性变更为 MINOR、破坏性变更（重命名/删除/基数收紧）为 MAJOR 并附带显式弃用周期；新旧版本 IRI 并存（当前别名指向最新，版本 IRI 永久指向不可变快照）；OWL 推理层与 SHACL 校验层必须交叉引用、同步升版。前端落地则采用 Neo4j 式约束即契约、迁移脚本版本化、图内 OntologyVersion 元数据节点、向后兼容查询视图四策略。</p>
+<h3>证据与信任（Evidence / Provenance）</h3>
+<p>运营级实践是<b>每个三元组携带来源、置信度、摄取时间</b>，查询按信任指标过滤；冲突处理区分"结构无效"（SHACL 拦截）与"来源分歧"（证据裁决）；对 Agent 场景，派生物（缓存子图、truthy 导出、摘要）必须带新鲜度戳与发布门，因为 Agent 消费的滞后与权威图不同步。</p>
+<h3>新鲜度与连续性</h3>
+<p>大规模图谱运营采用"全量快照 + 增量变更流 + 周期性重同步"三件套；实体合并后保留重定向与旧标识；身份消解"合并前保守、合并后留痕"。这些与原文"数字世界要能回答为什么相信它现在是这样"完全同构。</p>
+
+<!-- ============ 六、共识分歧空白 ============ -->
+<h2>六、共识、分歧与空白</h2>
+<div class="grid2">
+  <div class="card">
+    <h3 style="margin-top:0;color:var(--green)">强共识</h3>
+    <ul>
+      <li><b>边界观一致：</b>Palantir"Ontology 不是语义层"、Cognite"SoE 不替代 SoR"、SAP"本体建立在既有 VDM 之上"、原文"不做大一统平台"——四方说法各异，架构同构：本体管语义与协调，执行归专业系统。</li>
+      <li><b>Action 是写侧治理核心：</b>受控、验证、授权、审计、可追溯规则版本，且是 Agent 参与业务的唯一安全通道。</li>
+      <li><b>Provenance 是可信的底线：</b>没有来源与证据的"事实"不进入正式世界。</li>
+      <li><b>本体是给 Agent 的上下文基础设施：</b>从 Palantir OAG、SAP Joule 到 Fabric IQ，逻辑一致——用确定性语义约束 LLM 的不确定性。</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;color:var(--red)">分歧与空白</h3>
+    <ul>
+      <li><b>物化 vs 虚拟：</b>Palantir 物化对象索引（快而重、有同步延迟）vs timbr 虚拟知识图谱（轻而不落地）；Fabric/Databricks vs 中立语义层的平台锁定之争，OSI 尚未交付生产级导入工具。</li>
+      <li><b>深度 vs 速度：</b>操作本体平台 6–24 个月级投入；语义层数周见效但止步"分析一致性"。</li>
+      <li><b>Event→State 的语义化不足：</b>CEP 处理的是技术事件，把事件翻译为"业务事件作用于业务对象状态"的建模，各家产品普遍缺原生表达，需自行搭建。</li>
+      <li><b>Change Propagation 自动化：</b>影响分析→重验证→重算→状态更新的闭环仍以人工治理为主（ISWC 2025 的静态分析方法仍是原型），是全行业空白。</li>
+      <li><b>国内差距：</b>Identity 工程与 Action 写回治理薄弱，本体实践多从指标语义层起步。</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ 七、启示 ============ -->
+<h2>七、对企业落地者的启示</h2>
+<div class="card">
+  <div class="rowflex"><span class="num">1</span><div><b>先选坐标，再选产品。</b>用原文四层闭环自检：若只需"指标口径一致、Agent 可信取数"，语义层路线（Snowflake/Databricks/dbt/timbr）性价比最高；若要让本体进入运营决策与行动，需操作本体平台（Palantir/Fabric IQ/C3 AI）或以积木自行组装运行时。</div></div>
+  <div class="rowflex"><span class="num">2</span><div><b>身份与证据先行。</b>凡是要让本体"活"过一年的项目，第一笔投入都应放在对象主键纪律、实体消解流水线与 Provenance 模型上——这是业界反复用"推倒重建"换来的教训。</div></div>
+  <div class="rowflex"><span class="num">3</span><div><b>Action 从第一天就受控。</b>即使尚未建设完整本体，也应确立"Agent 对现实的一切改变必须经过带验证、授权、审计的 Action 接口"这一原则，否则事后补救成本极高。</div></div>
+  <div class="rowflex"><span class="num">4</span><div><b>把"变化传播"列入架构评审项。</b>规则/口径/分类变更时，能否自动列出受影响实例、区分"需重算"与"保留原语义"的历史结论？当前没有平台能开箱做到，必须预设计算重放机制与版本化结论存储。</div></div>
+  <div class="rowflex"><span class="num">5</span><div><b>评价体系随之切换。</b>从"建了多少 Class/Relation"转向原文提出的判据：身份连续吗、事实可溯吗、状态可解释吗、变化可传播吗——这也是判断厂商方案成熟度的最快试金石：拿这四个问题问任何一家 vendor，回答的深度立见高下。</div></div>
+</div>
+
+<!-- ============ 参考来源 ============ -->
+<h2>主要参考来源</h2>
+<ol class="refs">
+  <li>《本体建成之后：企业本体究竟如何运行？》，智能数据研讨，2026-09-25（本报告的分析起点与坐标系）</li>
+  <li>Palantir：Foundry Platform Summary（官方）；The Palantir Ontology, Explained: Objects, Links, and Actions；Turning Conversation Into Action（CSE 系列）</li>
+  <li>Microsoft：Fabric IQ 发布（Ignite 2025，Techzine / Neowin / ITDigest 报道与解读）；Digital Twin Builder in Fabric（ZDNET / InfoWorld / valantic；CSX 案例）</li>
+  <li>C3 AI：Agentic AI Platform 官方文档与 Model-Driven Architecture 白皮书（c3.ai / docs.c3.ai / IR 材料）</li>
+  <li>Cognite：Open Industrial Digital Twin、Industrial use cases require a system of engagement、Contextualization 资料（cognite.com）</li>
+  <li>SAP：SAP Knowledge Graph: When Relationships Become Data（E3 Magazine）；Sulzer《在 SAP HANA Cloud 中构建本体》PoC</li>
+  <li>语义层赛道：The State of Enterprise Semantic Layers 2026（Valliance）；Snowflake Semantic Views vs Databricks Metric Views（Allocating Intelligence）；The Best Data Intelligence Layers for AI Agents（Holistics）；Semantic layer for AI（Xavor）</li>
+  <li>timbr：Platform 文档与 FAQ（docs.timbr.ai，SQL 原生虚拟知识图谱）</li>
+  <li>Google Cloud：Enterprise Knowledge Graph 概览与 Entity Reconciliation API 文档</li>
+  <li>版本化与运营：Operating a Knowledge Graph: Change, Versioning, and Evolution at Scale（The Data Praxis）；Knowledge Graphs at Scale: Operational Lessons（Partenit）；Ontology in Graph Databases（GraphWiz）；Knowledge Graph lifecycle management for multi-step agents（D. Mitchell，2026）</li>
+  <li>事件/状态底座：Ververica《What is Apache Flink》（CEP 与业务过程监控）、Flink CEP 实战（华为云社区）、Temporal 与 Durable Execution 实践（M. Cann）</li>
+  <li>国内：华为云×滴普科技企业经营决策方案（AgentArts + 业务本体）；华为云×中软国际灵析 V3（allmeta 本体底座）</li>
+</ol>
+
+<div class="foot">
+  本报告基于公开网络资料检索与分析整理（检索时间 2026-09-27），观点部分为分析性结论，供研讨参考。所有引用以原始来源为准。
+</div>
+
+</div>
+</body>
+</html>
