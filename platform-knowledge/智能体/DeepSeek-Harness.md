@@ -65,7 +65,7 @@ M13/D-O13 的推理后端可插拔体系（`AgentInferenceBackend` 接口 + cliA
 
 ## 相关资料
 
-- 《本体对话Agent技术选型_Eino_vs_DeepSeekHarness_20260915.md》（research/）—— 2026-09-15 选型对照（Eino vs dsh vs Python 自研）
+- ~~《本体对话Agent技术选型_Eino_vs_DeepSeekHarness_20260915.md》~~ —— 2026-09-15 选型对照（Eino vs dsh vs Python 自研）；原档已删除（2026-09-28 文档整理），结论保留于本档附录
 - [02_智能体_技术方案设计](../../docs/02_智能体_技术方案设计.md) §6.16 —— 推理后端可插拔契约与能力矩阵
 - [DeepSeek Harness 官方仓库](https://github.com/deepseek-ai/deepseek-harness)（MIT，developer preview）
 - [harness vs framework 概念辨析（freeCodeCamp）](https://www.freecodecamp.org/news/what-is-an-agent-harness/)
