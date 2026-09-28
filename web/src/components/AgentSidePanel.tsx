@@ -168,6 +168,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   // 当前选中连接（含已停用的历史绑定，便于如实展示身份）
   const modelConnId = Form.useWatch('model_conn_id', form)
   const runtimeBackend = (Form.useWatch('runtime_backend', form) as string | undefined) ?? agent.runtime_backend
+  const companionOn = (Form.useWatch('companion_ontology', form) ?? agent.companion_ontology) as boolean
   const selectedConn = modelConnId ? allConns.find((c) => c.id === modelConnId) ?? null : null
 
   const save = async () => {
@@ -449,10 +450,37 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                     name="companion_ontology"
                     label="伴生本体"
                     valuePropName="checked"
-                    extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；资产栏「伴生本体」页签可查询；默认关闭"
+                    extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；本体模块「伴生本体」栏可查询；默认关闭"
                   >
                     <Switch checkedChildren="开" unCheckedChildren="关" />
                   </Form.Item>
+
+                  {companionOn && (
+                    <>
+                      <Form.Item
+                        name="companion_extract_hint"
+                        label="领域聚焦提示（可选，REQ-187）"
+                        extra="追加到抽取提示词：定义本 agent 领域内「什么值得沉淀」（例：重点关注 Kubernetes 部署与回滚术语；忽略寒暄与操作细节）"
+                      >
+                        <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="留空 = 通用抽取标准" />
+                      </Form.Item>
+                      <Form.Item
+                        name="companion_extract_conn_id"
+                        label="抽取模型连接（可选，REQ-187）"
+                        extra="留空 = 跟随上方「模型连接」（外部 CLI 后端 agent 无生效连接时须指定真实 chat 连接）"
+                      >
+                        <Select allowClear showSearch optionFilterProp="label" placeholder="跟随智能体模型连接" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
+                      </Form.Item>
+                      <Form.Item
+                        name="companion_auto_threshold"
+                        label="自动入图置信阈值（REQ-187）"
+                        extra="0 = 全部候选人工确认（默认，REQ-82 草稿必审）；>0 时置信 ≥ 阈值的候选自动确认入图（图内带 autoConfirmed 标记），其余仍待人工审"
+                      >
+                        <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} placeholder="0（全人工确认）" />
+                      </Form.Item>
+                    </>
+                  )}
+
                 </>
               ),
             },

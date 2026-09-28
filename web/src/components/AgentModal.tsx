@@ -48,6 +48,7 @@ export default function AgentModal({
   const [toolsErr, setToolsErr] = useState(false)
   const [skills, setSkills] = useState<Skill[]>([]) // REQ-164：技能勾选候选
   const [backends, setBackends] = useState<InferenceBackendStatus[]>([]) // M13：推理后端探测清单
+  const companionOn = Form.useWatch('companion_ontology', form) as boolean | undefined
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -299,11 +300,42 @@ export default function AgentModal({
               label="伴生本体"
               valuePropName="checked"
               initialValue={false}
-              extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；资产栏「伴生本体」页签可查询；默认关闭"
+              extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；本体模块「伴生本体」栏可查询；默认关闭"
             >
               <Switch checkedChildren="开" unCheckedChildren="关" />
             </Form.Item>
           </Col>
+              {companionOn && (
+                <>
+                  <Col span={24}>
+                    <Form.Item
+                      name="companion_extract_hint"
+                      label="领域聚焦提示（可选，REQ-187）"
+                      extra="追加到抽取提示词：定义本 agent 领域内「什么值得沉淀」"
+                    >
+                      <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="留空 = 通用抽取标准" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={24}>
+                    <Form.Item
+                      name="companion_extract_conn_id"
+                      label="抽取模型连接（可选，REQ-187）"
+                      extra="留空 = 跟随智能体模型连接"
+                    >
+                      <Select allowClear showSearch optionFilterProp="label" placeholder="跟随智能体模型连接" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={24}>
+                    <Form.Item
+                      name="companion_auto_threshold"
+                      label="自动入图置信阈值（REQ-187）"
+                      extra="0 = 全部候选人工确认（默认）；>0 时置信 ≥ 阈值自动确认入图（带 autoConfirmed 标记），其余仍待人工审"
+                    >
+                      <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} placeholder="0（全人工确认）" />
+                    </Form.Item>
+                  </Col>
+                </>
+              )}
         </Row>
               </>
             ),

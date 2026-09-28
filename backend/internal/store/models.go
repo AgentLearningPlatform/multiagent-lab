@@ -24,9 +24,13 @@ type Agent struct {
 	SandboxCPUs   float64  `json:"sandbox_cpus,omitempty"`
 	McpServe      McpServe `json:"mcp_serve"` // REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name）
 	// REQ-170/M28：伴生本体开关（默认关；开启后 Run/Resume 收尾触发伴生 worker 游标抽取）
-	CompanionOntology bool   `json:"companion_ontology"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
+	CompanionOntology bool `json:"companion_ontology"`
+	// REQ-187：伴生本体配置增强（默认空/空/0 = 现行为零回归）
+	CompanionExtractHint   string  `json:"companion_extract_hint"`
+	CompanionExtractConnID string  `json:"companion_extract_conn_id"`
+	CompanionAutoThreshold float64 `json:"companion_auto_threshold"`
+	CreatedAt              string  `json:"created_at"`
+	UpdatedAt              string  `json:"updated_at"`
 }
 
 // McpServe Agent 对外服务配置（REQ-131/M18）：开启后经平台 /mcp 端点以 agent_{id} 工具暴露。

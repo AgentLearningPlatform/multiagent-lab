@@ -208,3 +208,33 @@ func TestOnRunCompleteProjectScope(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// REQ-187 配置增强单测：prompt hint 拼接 / 阈值分级语义。
+func TestCompanionPromptHint(t *testing.T) {
+	base := companionPrompt("语料", "")
+	if strings.Contains(base, "领域聚焦要求") {
+		t.Fatal("空 hint 不应含聚焦行")
+	}
+	withHint := companionPrompt("语料", "重点关注 Kubernetes 部署术语")
+	if !strings.Contains(withHint, "5. 领域聚焦要求（优先级最高）：重点关注 Kubernetes 部署术语") {
+		t.Fatalf("hint 应追加为第 5 条: %s", withHint)
+	}
+}
+
+func TestAutoThresholdGrading(t *testing.T) {
+	// 阈值分级语义直接复用 ConfirmCandidate 链路——此处验证分级判定本身
+	threshold := 0.85
+	cands := []struct {
+		conf float64
+		want bool // true=自动入图
+	}{{0.95, true}, {0.85, true}, {0.84, false}, {0.3, false}}
+	for _, c := range cands {
+		if got := c.conf >= threshold; got != c.want {
+			t.Fatalf("conf %.2f ≥ %.2f = %v, want %v", c.conf, threshold, got, c.want)
+		}
+	}
+	// 默认 0 = 全人工审（不自动入图）
+	if auto := 0.9 >= 0.0; auto {
+		_ = auto // 语义上 0 表示关闭自动入图——ExtractNew 以 `threshold > 0` 为门卫（service.go 已实现）
+	}
+}

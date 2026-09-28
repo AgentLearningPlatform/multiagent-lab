@@ -16,7 +16,8 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var sandboxCPUs sql.NullFloat64
 	var companionOntology int
 	err := row.Scan(&a.ID, &a.Name, &a.Description, &a.Instruction, &modelConn, &temp, &maxTok,
-		&a.MaxIteration, &tools, &skills, &mcp, &a.RuntimeBackend, &a.InferenceBackend, &a.LogoURL, &a.ToolApproval, &mcpServe, &a.SandboxMemory, &sandboxCPUs, &companionOntology, &a.CreatedAt, &a.UpdatedAt)
+		&a.MaxIteration, &tools, &skills, &mcp, &a.RuntimeBackend, &a.InferenceBackend, &a.LogoURL, &a.ToolApproval, &mcpServe, &a.SandboxMemory, &sandboxCPUs, &companionOntology,
+		&a.CompanionExtractHint, &a.CompanionExtractConnID, &a.CompanionAutoThreshold, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +51,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	return &a, nil
 }
 
-const agentCols = `id,name,description,instruction,model_conn_id,temperature,max_tokens,max_iteration,tools,skills,mcp_servers,runtime_backend,inference_backend,logo_url,tool_approval,mcp_serve,sandbox_memory,sandbox_cpus,companion_ontology,created_at,updated_at`
+const agentCols = `id,name,description,instruction,model_conn_id,temperature,max_tokens,max_iteration,tools,skills,mcp_servers,runtime_backend,inference_backend,logo_url,tool_approval,mcp_serve,sandbox_memory,sandbox_cpus,companion_ontology,companion_extract_hint,companion_extract_conn_id,companion_auto_threshold,created_at,updated_at`
 
 // ListAgents 返回全部 Agent（按创建时间升序）。
 func (s *Store) ListAgents() ([]*Agent, error) {
@@ -89,9 +90,9 @@ func (s *Store) CreateAgent(a *Agent) (*Agent, error) {
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
 	mcpServeJSON, _ := json.Marshal(a.McpServe)
-	_, err := s.DB.Exec(`INSERT INTO agent (`+agentCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.DB.Exec(`INSERT INTO agent (`+agentCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.ID, a.Name, a.Description, a.Instruction, a.ModelConnID, a.Temperature, a.MaxTokens,
-		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, string(mcpServeJSON), a.SandboxMemory, a.SandboxCPUs, boolToInt(a.CompanionOntology), now(), now())
+		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, string(mcpServeJSON), a.SandboxMemory, a.SandboxCPUs, boolToInt(a.CompanionOntology), a.CompanionExtractHint, a.CompanionExtractConnID, a.CompanionAutoThreshold, now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -107,9 +108,9 @@ func (s *Store) UpdateAgent(a *Agent) (*Agent, error) {
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
 	mcpServeJSON, _ := json.Marshal(a.McpServe)
-	res, err := s.DB.Exec(`UPDATE agent SET name=?,description=?,instruction=?,model_conn_id=?,temperature=?,max_tokens=?,max_iteration=?,tools=?,skills=?,mcp_servers=?,runtime_backend=?,inference_backend=?,logo_url=?,tool_approval=?,mcp_serve=?,sandbox_memory=?,sandbox_cpus=?,companion_ontology=?,updated_at=? WHERE id=?`,
+	res, err := s.DB.Exec(`UPDATE agent SET name=?,description=?,instruction=?,model_conn_id=?,temperature=?,max_tokens=?,max_iteration=?,tools=?,skills=?,mcp_servers=?,runtime_backend=?,inference_backend=?,logo_url=?,tool_approval=?,mcp_serve=?,sandbox_memory=?,sandbox_cpus=?,companion_ontology=?,companion_extract_hint=?,companion_extract_conn_id=?,companion_auto_threshold=?,updated_at=? WHERE id=?`,
 		a.Name, a.Description, a.Instruction, a.ModelConnID, a.Temperature, a.MaxTokens,
-		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, string(mcpServeJSON), a.SandboxMemory, a.SandboxCPUs, boolToInt(a.CompanionOntology), now(), a.ID)
+		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, string(mcpServeJSON), a.SandboxMemory, a.SandboxCPUs, boolToInt(a.CompanionOntology), a.CompanionExtractHint, a.CompanionExtractConnID, a.CompanionAutoThreshold, now(), a.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict

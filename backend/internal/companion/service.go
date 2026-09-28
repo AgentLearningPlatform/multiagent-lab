@@ -62,14 +62,21 @@ type extractOut struct {
 }
 
 // companionPrompt 抽取提示词（教学口径：只抽确证的领域事实，宁缺毋滥）。
-func companionPrompt(corpus string) string {
-	return "你是本体候选抽取助手。阅读以下对话片段，抽取其中值得沉淀为知识的领域概念、概念间关系与事件。\n" +
-		"要求：\n" +
-		"1. concepts：领域实体/术语（如 Pod、滚动更新、淋巴结局限性切除），name 用唯一中文短语，definition 一句话，confidence 0~1。\n" +
-		"2. relations：概念间有意义的关联，rel_name 用动名词（如「引发」「适用于」「依赖」），source/target 引用 concepts 中的 name，evidence 为原文依据短句。\n" +
-		"3. events：带时间性的动作/变更/结论（如「2026-09 完成灰度切换」）。\n" +
-		"4. 只抽取对话中明确陈述的事实，不要推测；没有可抽内容就返回三个空数组。\n" +
-		"只输出 JSON，不要输出其他内容。对话片段：\n" + corpus
+func companionPrompt(corpus, hint string) string {
+	var b strings.Builder
+	b.WriteString("你是本体候选抽取助手。阅读以下对话片段，抽取其中值得沉淀为知识的领域概念、概念间关系与事件。\n")
+	b.WriteString("要求：\n")
+	b.WriteString("1. concepts：领域实体/术语（如 Pod、滚动更新、淋巴结局限性切除），name 用唯一中文短语，definition 一句话，confidence 0~1。\n")
+	b.WriteString("2. relations：概念间有意义的关联，rel_name 用动名词（如「引发」「适用于」「依赖」），source/target 引用 concepts 中的 name，evidence 为原文依据短句。\n")
+	b.WriteString("3. events：带时间性的动作/变更/结论（如「2026-09 完成灰度切换」）。\n")
+	b.WriteString("4. 只抽取对话中明确陈述的事实，不要推测；没有可抽内容就返回三个空数组。\n")
+	if strings.TrimSpace(hint) != "" {
+		// REQ-187：领域聚焦提示（agent 级配置）——追加领域抽取标准
+		b.WriteString("5. 领域聚焦要求（优先级最高）：" + strings.TrimSpace(hint) + "\n")
+	}
+	b.WriteString("只输出 JSON，不要输出其他内容。对话片段：\n")
+	b.WriteString(corpus)
+	return b.String()
 }
 
 // remainingAfter 游标增量定位：lastID 之后的未处理消息（lastID 不在列表 = 历史已清理，保守返回空防重抽）。
@@ -207,11 +214,12 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 		fmt.Fprintf(&corpus, "[%s] %s：%s\n", m.ID, roleLabel(m.Role), truncate(m.Content, 600))
 	}
 
-	var connID string
-	if agent.ModelConnID != nil {
+	// REQ-187：抽取模型连接覆盖（空=跟随 agent 模型连接）
+	connID := agent.CompanionExtractConnID
+	if connID == "" && agent.ModelConnID != nil {
 		connID = *agent.ModelConnID
 	}
-	res, err := chat.GenerateStructured(ctx, s.Store, s.Box, connID, companionPrompt(corpus.String()), companionSchema)
+	res, err := chat.GenerateStructured(ctx, s.Store, s.Box, connID, companionPrompt(corpus.String(), agent.CompanionExtractHint), companionSchema)
 	if err != nil {
 		return 0, fmt.Errorf("LLM 抽取失败: %w", err)
 	}
@@ -223,6 +231,21 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 	cands := toCandidates(convID, agentID, fresh, &out)
 	if err := s.Store.CreateCompanionCandidates(cands); err != nil {
 		return 0, err
+	}
+	// REQ-187：置信度阈值自动入图（0=全人工审；≥阈值自动 confirmCandidate——含矛盾旧边失效化；
+	// 自动入图走与人工确认完全相同的链路，区别仅在来源标记 bot:autoConfirmed）
+	if agent.CompanionAutoThreshold > 0 {
+		for _, c := range cands {
+			if c.Confidence >= agent.CompanionAutoThreshold {
+				if _, err := s.ConfirmCandidate(ctx, c.ID); err != nil {
+					log.Printf("[companion] 自动入图失败（候选 %s，不影响其余候选）: %v", c.ID, err)
+					continue
+				}
+				// bot:autoConfirmed 溯源标记（区分自动入图与人工确认）
+				_ = s.Engine.Update(ctx, MarkAutoConfirmed(convID, c.ID))
+				log.Printf("[companion] 候选 %s 置信 %.2f ≥ 阈值 %.2f，已自动入图", c.Name, c.Confidence, agent.CompanionAutoThreshold)
+			}
+		}
 	}
 	// 游标推进到最后一条已读消息（无论是否有产出）
 	if err := s.Store.AdvanceCompanionCursor(convID, msgs[len(msgs)-1].ID); err != nil {

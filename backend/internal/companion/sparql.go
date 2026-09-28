@@ -163,6 +163,16 @@ SELECT ?s ?p ?o WHERE {
 } ORDER BY ?s LIMIT 500`, GraphURI(convID))
 }
 
+// MarkAutoConfirmed REQ-187：自动入图溯源标记（bot:autoConfirmed——区分于人工确认）。
+func MarkAutoConfirmed(convID, candID string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+INSERT DATA {
+  GRAPH <%s> {
+    <%s> bot:autoConfirmed true .
+  }
+}`, BotNS, GraphURI(convID), EdgeURI(candID))
+}
+
 // SelectNodes 会话图节点（概念/事件实体，含定义/置信度/入图时间——REQ-154 成长可视化数据源）。
 func SelectNodes(convID string) string {
 	return fmt.Sprintf(`PREFIX bot: <%s>
