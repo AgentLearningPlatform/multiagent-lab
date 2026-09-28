@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Empty, Input, Select, Space, Tag, Typography } from 'antd'
 import * as THREE from 'three'
 import ForceGraph3D from 'react-force-graph-3d'
@@ -98,7 +98,9 @@ function buildGraphData(spec: Spec) {
       }
     }
   }
-  return { nodes, links }
+  // 根概念清单（顶层根依出现序着色——与节点 colorOf 同源，图例列表数据源）
+  const roots = [...rootColor.keys()].map((name) => ({ name, color: rootColor.get(name)! }))
+  return { nodes, links, roots }
 }
 
 /** R1②：材质池（kind+color 复用；透明材质） */
@@ -121,6 +123,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
   const fgRef = useRef<any>(null)
   const [selected, setSelected] = useState<{ kind: 'concept' | 'instance'; name: string; label: string; color: string; definition?: string; concept?: string; attributes?: Record<string, unknown> } | null>(null)
   const [query, setQuery] = useState('')
+  const [legendQuery, setLegendQuery] = useState('')
   const [kindFilter, setKindFilter] = useState<'all' | 'concept' | 'instance'>('all')
   /** R2：布局模式（力导向=默认 / 根向分簇 / 层次分层） */
   const [layout, setLayout] = useState<'force' | 'cluster' | 'layer'>('force')
@@ -128,7 +131,39 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
   const [linkFilter, setLinkFilter] = useState<Set<string>>(new Set(['parent', 'rel', 'instance', 'instrel']))
   /** R4：雾效开关 */
   const [fog3d, setFog3d] = useState(false)
-  const data = useMemo(() => (spec ? buildGraphData(spec) : { nodes: [], links: [] }), [spec])
+  const data = useMemo(() => (spec ? buildGraphData(spec) : { nodes: [], links: [], roots: [] }), [spec])
+  /** 图例根概念统计（子孙概念数 / 挂载实例数），随 legendQuery 过滤 */
+  const rootStats = useMemo(() => {
+    const m = new Map<string, { concepts: number; instances: number }>()
+    if (!spec) return m
+    const names = new Set((spec.concepts ?? []).map((c) => c.name))
+    const conceptBy = new Map((spec.concepts ?? []).map((c) => [c.name, c]))
+    const rootOf = (name: string): string => {
+      let cur = name
+      for (let i = 0; i < 32; i++) {
+        const c = conceptBy.get(cur)
+        const parent = (c?.parents ?? []).find((pp) => names.has(pp))
+        if (!parent) return cur
+        cur = parent
+      }
+      return cur
+    }
+    for (const c of spec.concepts ?? []) {
+      const r = rootOf(c.name)
+      const e = m.get(r) ?? { concepts: 0, instances: 0 }
+      e.concepts++
+      m.set(r, e)
+    }
+    for (const inst of spec.instances ?? []) {
+      const e = m.get(rootOf(inst.concept))
+      if (e) e.instances++
+    }
+    return m
+  }, [spec])
+  const rootsFiltered = useMemo(() => {
+    const q = legendQuery.trim().toLowerCase()
+    return (data.roots ?? []).filter((r) => !q || r.name.toLowerCase().includes(q))
+  }, [data.roots, legendQuery])
   const counts = useMemo(() => {
     const m = new Map<string, number>()
     for (const i of spec?.instances ?? []) m.set(i.concept, (m.get(i.concept) ?? 0) + 1)
@@ -177,6 +212,15 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     return mesh
   }
 
+  // 力布局收敛后的首次全景适配标记（数据/布局变化时重置；修复节点飘出画布视野）
+  const firstFitRef = useRef(true)
+  // 画布初始像素尺寸（容器测量；ResizeObserver 初始回调早于 graph 内部初始化会被 ref 守卫跳过，
+  // 故首挂尺寸经 props 下发——否则 canvas 以窗口尺寸渲染溢出容器）
+  const [initSize, setInitSize] = useState({ w: 0, h: 0 })
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (el && el.clientWidth > 0 && el.clientHeight > 0) setInitSize({ w: el.clientWidth, h: el.clientHeight })
+  }, [])
   // R1④+R3：聚焦高亮增量刷新——非邻居收缩 0.25x；R3 路径高亮模式=点击概念时保留到根的完整继承链
   const highlightRef = useRef<any | null>(null)
   const applyHighlight = () => {
@@ -274,6 +318,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
       }
     }
     if (typeof g.d3ReheatSimulation === 'function') g.d3ReheatSimulation()
+    firstFitRef.current = false // 布局切换改变空间分布，收敛后重新全景适配
   }, [layout, data, spec])
 
   // R1⑤：ResizeObserver 容器尺寸跟随
@@ -307,24 +352,30 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     )
   }
 
-  const locate = () => {
-    const q = query.trim().toLowerCase()
-    if (!q) return
-    const n = data.nodes.find((x) => x.name.toLowerCase() === q) ?? data.nodes.find((x) => x.name.toLowerCase().startsWith(q)) ?? data.nodes.find((x) => x.label.toLowerCase().includes(q))
-    if (!n) return
+  /** 相机聚焦到指定节点（搜索定位与图例点击共用） */
+  const focusNodeById = (id: string) => {
     const g = fgRef.current as any
-    const target = g && typeof g.graphData === 'function' ? (g.graphData().nodes as any[]).find((x) => x.id === n.id) : null
+    const target = g && typeof g.graphData === 'function' ? (g.graphData().nodes as any[]).find((x) => x.id === id) : null
     if (g && target) {
       g.cameraPosition({ x: target.x + 90, y: target.y + 45, z: target.z + 90 }, target, 900)
       setSelected({ kind: target.kind, name: target.name, label: target.label, color: target.color, definition: target.definition, concept: target.concept, attributes: target.attributes })
     }
   }
+  const locate = () => {
+    const q = query.trim().toLowerCase()
+    if (!q) return
+    const n = data.nodes.find((x) => x.name.toLowerCase() === q) ?? data.nodes.find((x) => x.name.toLowerCase().startsWith(q)) ?? data.nodes.find((x) => x.label.toLowerCase().includes(q))
+    if (n) focusNodeById(n.id)
+  }
+
+  // 画布高度随视口自适应（201~? 由 clamp 约束；360 = 资产页头部/页签 chrome 估高，全屏态由 CSS 覆盖）
+  const canvasH = 'clamp(480px, calc(100vh - 380px), 1200px)'
 
   return (
-    <div style={{ display: 'flex', gap: 12, minHeight: 480 }}>
+    <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
       <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-        <div style={{ position: 'absolute', zIndex: 5, top: 8, left: 8, right: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <Space.Compact style={{ flex: 1, maxWidth: 300 }}>
+        <div className="viz-3d-bar" style={{ position: 'absolute', zIndex: 5, top: 8, left: 8, right: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Space.Compact style={{ flex: '1 1 220px', minWidth: 170, maxWidth: 520 }}>
             <Input
               size="small"
               placeholder="搜索概念/实例定位并聚焦…"
@@ -337,7 +388,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
           </Space.Compact>
           <Select
             size="small"
-            style={{ width: 118 }}
+            style={{ width: 'clamp(104px, 9vw, 132px)' }}
             value={kindFilter}
             onChange={setKindFilter}
             options={[
@@ -348,7 +399,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
           />
           <Select
             size="small"
-            style={{ width: 128 }}
+            style={{ width: 'clamp(112px, 10vw, 140px)' }}
             value={layout}
             onChange={setLayout}
             options={[
@@ -359,7 +410,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
           />
           <Select
             size="small"
-            style={{ width: 112 }}
+            style={{ width: 'clamp(100px, 9vw, 128px)' }}
             mode="multiple"
             allowClear={false}
             maxTagCount={1}
@@ -398,10 +449,12 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
             复位全景
           </Button>
         </div>
-        <div ref={containerRef} style={{ width: '100%', height: 520, borderRadius: 8, background: 'linear-gradient(180deg,#f2f4fb 0%,#e8ebf5 100%)' }}>
+        <div ref={containerRef} className="viz-3d-box" style={{ width: '100%', height: canvasH, borderRadius: 8, background: 'linear-gradient(180deg,#f2f4fb 0%,#e8ebf5 100%)' }}>
           {hasConcepts && (
             <ForceGraph3D
               ref={fgRef}
+              width={initSize.w || undefined}
+              height={initSize.h || undefined}
               graphData={data as any}
               backgroundColor="rgba(0,0,0,0)"
               showNavInfo={false}
@@ -436,6 +489,10 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
                   g.width(el.clientWidth)
                   g.height(el.clientHeight)
                 }
+                if (!firstFitRef.current) {
+                  firstFitRef.current = true
+                  if (typeof g.zoomToFit === 'function') g.zoomToFit(0, 60) // 力布局收敛后全景适配（无边界力模型节点会飘出初始视野）
+                }
                 if (fog3d && typeof g.scene === 'function') {
                   const scn = g.scene()
                   if (scn && !scn.fog) scn.fog = new THREE.Fog(0xe8ebf5, 200, 900)
@@ -448,12 +505,40 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
           拖拽旋转 · 滚轮缩放 · 点击节点聚焦飞入（邻居保持、其余收缩）· 标签悬停可见
         </div>
       </div>
-      <Card size="small" style={{ width: 280, flexShrink: 0, overflowY: 'auto', maxHeight: 560 }}>
+      <Card size="small" style={{ width: 280, flexShrink: 0, overflowY: 'auto', height: canvasH }}>
         <div className="onto-flow-info-title">图例</div>
         <div className="onto-flow-legend"><span className="onto-flow-legend-badge" style={{ borderRadius: '50%', background: '#4f46e5' }} />概念（球体，按顶层根着色）</div>
         <div className="onto-flow-legend"><span className="onto-flow-legend-badge" style={{ transform: 'rotate(45deg)', background: '#9333ea' }} />实例（八面体，继承概念色）</div>
         <div className="onto-flow-legend"><span className="onto-flow-legend-line rel" />实线 = 关系</div>
         <div className="onto-flow-legend"><span className="onto-flow-legend-line parent" />暗线 = 继承 / 属于</div>
+
+        <div className="onto-flow-info-title spaced">根概念（点击定位；REQ-185 将扩展显隐开关）</div>
+        <Input
+          size="small"
+          placeholder="搜索根概念…"
+          value={legendQuery}
+          onChange={(e) => setLegendQuery(e.target.value)}
+          allowClear
+        />
+        <div style={{ marginTop: 6, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {rootsFiltered.map((r) => {
+            const st = rootStats.get(r.name)
+            return (
+              <button
+                key={r.name}
+                type="button"
+                className="onto-legend-root"
+                title={`定位 ${r.name}`}
+                onClick={() => focusNodeById(`c:${r.name}`)}
+              >
+                <span className="onto-legend-root-dot" style={{ background: r.color }} />
+                <span className="onto-legend-root-name">{r.name}</span>
+                <span className="onto-legend-root-meta">{st ? `${st.concepts} 概念 · ${st.instances} 实例` : '1 概念'}</span>
+              </button>
+            )
+          })}
+          {rootsFiltered.length === 0 && <p className="onto-flow-hint">无匹配根概念</p>}
+        </div>
 
         <div className="onto-flow-info-title spaced">统计</div>
         <div className="onto-flow-stats">
