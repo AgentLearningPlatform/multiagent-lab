@@ -79,31 +79,41 @@ export default function BuildPage() {
         </div>
       </div>
 
-      <div className="onto-engine-nav">
-        {PATHS.map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            className={`onto-engine-item${buildPath === p.key ? ' active' : ''}`}
-            onClick={() => select(p.key)}
-          >
-            <span className="onto-engine-top">
-              <span className="onto-engine-label">{p.label}</span>
-              <Tag color={STATE_TAG[p.key].color} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
-                {STATE_TAG[p.key].text}
-              </Tag>
-            </span>
-            <span className="onto-engine-desc">{p.desc}</span>
-          </button>
-        ))}
-      </div>
+      {/* REQ-183：左路径导航 + 右路径工作区两栏（状态徽标与差异说明常显） */}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <nav
+          aria-label="构建路径导航"
+          style={{ width: 216, flexShrink: 0, position: 'sticky', top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}
+        >
+          {PATHS.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              aria-current={buildPath === p.key || undefined}
+              className={`onto-engine-item${buildPath === p.key ? ' active' : ''}`}
+              style={{ textAlign: 'left', width: '100%' }}
+              onClick={() => select(p.key)}
+            >
+              <span className="onto-engine-top">
+                <span className="onto-engine-label">{p.label}</span>
+                <Tag color={STATE_TAG[p.key].color} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                  {STATE_TAG[p.key].text}
+                </Tag>
+              </span>
+              <span className="onto-engine-desc">{p.desc}</span>
+            </button>
+          ))}
+        </nav>
 
-      {buildPath === 'custom' && <CustomFlow onGoKbPath={() => select('kb')} />}
-      {buildPath === 'ontochat' && <OntoChatFlow onSaved={() => { /* 入库后产物进资产栏；此处留在会话页展示 done 态 */ }} />}
-      {buildPath === 'kb' && (<><KbBuildFlow /><StructuredFlow /></>)}
-      {buildPath === 'kg' && <KgGuide />}
-      {buildPath === 'ontoextend' && <OntoExtendFlow />}
-      {buildPath === 'oo' && <OoGuide />}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {buildPath === 'custom' && <CustomFlow onGoKbPath={() => select('kb')} />}
+          {buildPath === 'ontochat' && <OntoChatFlow onSaved={() => { /* 入库后产物进资产栏；此处留在会话页展示 done 态 */ }} />}
+          {buildPath === 'kb' && (<><KbBuildFlow /><StructuredFlow /></>)}
+          {buildPath === 'kg' && <KgGuide />}
+          {buildPath === 'ontoextend' && <OntoExtendFlow />}
+          {buildPath === 'oo' && <OoGuide />}
+        </div>
+      </div>
     </div>
   )
 }
