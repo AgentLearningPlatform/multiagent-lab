@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Checkbox, Empty, Input, Select, Space, Tag, Typography } from 'antd'
+import { Button, Card, Checkbox, Empty, Input, Select, Space, Spin, Tag, Typography } from 'antd'
 import * as THREE from 'three'
 import ForceGraph3D from 'react-force-graph-3d'
 // M21/VIZ-2 R0（15 号 v2.15）：react-force-graph-3d ESM 直装——消三 hack：
 //   ①UMD vendor 分发（prepare-vendor 补给链退役）②window.THREE 预挂（ESM 直接共享 three 实例）
 //   ③StrictMode 容器 DOM 搬移（React 组件生命周期自管）
 import { ControlOutlined, RightOutlined } from '@ant-design/icons'
+import { api } from '../../../api/client'
 import type { Spec } from '../../../api/types'
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,21 @@ const LEGEND_WIDTH_KEY = 'eino.viz.legend.width'
 const LEGEND_WIDTH_DEFAULT = 280
 /** R3：高度数节点标签阈值（度数 ≥ 此值常显标签，随缩放 LOD） */
 const LABEL_DEGREE_THRESHOLD = 12
+/** VIZ-5（REQ-175）：渐进装载阈值（全量节点数超此值触发 TBox+采样模式）与每概念采样上限 */
+const PROGRESSIVE_THRESHOLD = 800
+const SAMPLE_PER_CONCEPT = 10
+/** force-graph 处理 graphData 后会把 link.source/target 原地从 id 字符串变异为节点对象引用——
+ *  任何「过滤重建再喂回」的路径必须先归一化回 id，否则边全灭（REQ-185/175 冒烟抓出） */
+function normLinks<T extends { source: any; target: any }>(links: T[]): T[] {
+  return links.map((l) => ({
+    ...l,
+    source: typeof l.source === 'object' ? l.source.id : l.source,
+    target: typeof l.target === 'object' ? l.target.id : l.target,
+  }))
+}
+/** VIZ-5：SPARQL 扩展查询前缀（label 锚点——TTL 导出 owl:Class/NamedIndividual 均带 rdfs:label，base 无关） */
+const SPARQL_PREFIXES = 'PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nPREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\nPREFIX owl: <http://www.w3.org/2002/07/owl#>\n'
+const sparqlString = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 /** R3：标签 sprite 材质池（canvas 纹理，text+color 复用） */
 const labelMatPool = new Map<string, THREE.SpriteMaterial>()
 function labelMaterial(text: string, color: string): THREE.SpriteMaterial {
@@ -160,7 +176,16 @@ function materialOf(color: string, kind: string): THREE.MeshLambertMaterial {
 const sphereGeo = new THREE.SphereGeometry(1, 16, 12)
 const octaGeo = new THREE.OctahedronGeometry(1)
 
-export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRequest2D?: (nodeName: string) => void }) {
+export default function Graph3D({
+  spec,
+  onRequest2D,
+  sparqlProfile,
+}: {
+  spec: Spec | null
+  onRequest2D?: (nodeName: string) => void
+  /** VIZ-5（REQ-175）：含本体的 running 运行方案 id——渐进扩展经其 SPARQL 端点（REQ-151 受控面）；空=本地 spec 回退 */
+  sparqlProfile?: string | null
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<any>(null)
   const [selected, setSelected] = useState<{ kind: 'concept' | 'instance'; name: string; label: string; color: string; definition?: string; concept?: string; attributes?: Record<string, unknown> } | null>(null)
@@ -185,6 +210,14 @@ export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRe
   const [pathPair, setPathPair] = useState<string[]>([])
   // R4：暗色主题（画布背景/雾色/边色联动）
   const [dark3d, setDark3d] = useState(false)
+  // VIZ-5（REQ-175）：渐进装载——全量超阈值默认开（未超阈值保持全量直渲，可强制开供验证）
+  const totalRaw = (spec?.concepts?.length ?? 0) + (spec?.instances?.length ?? 0)
+  const overThreshold = totalRaw > PROGRESSIVE_THRESHOLD
+  const [progressive, setProgressive] = useState(overThreshold)
+  /** 已扩展概念 → 实例名清单（SPARQL 结果或本地全量）；在册概念不再采样截断 */
+  const [expandedMap, setExpandedMap] = useState<Map<string, string[]>>(new Map())
+  const [expandSrc, setExpandSrc] = useState<'sparql' | 'local' | null>(null)
+  const [expanding, setExpanding] = useState(false)
   const data = useMemo(() => (spec ? buildGraphData(spec) : { nodes: [], links: [], roots: [] }), [spec])
   /** 图例根概念统计（子孙概念数 / 挂载实例数），随 legendQuery 过滤 */
   const rootStats = useMemo(() => {
@@ -248,9 +281,36 @@ export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRe
     return m
   }, [spec])
 
+  // VIZ-5：渐进装载——TBox 全量 + 每概念采样实例（≤SAMPLE_PER_CONCEPT）；已扩展概念按 SPARQL/本地清单全量入图
+  const displayData = useMemo(() => {
+    if (!progressive) return data
+    const kept = new Set<string>()
+    for (const inst of spec?.instances ?? []) {
+      const full = expandedMap.get(inst.concept)
+      if (full) {
+        if (full.includes(inst.name)) kept.add(inst.name)
+      } else {
+        kept.add(inst.name)
+      }
+    }
+    const countPer = new Map<string, number>()
+    const nodes = data.nodes.filter((n) => {
+      if (n.kind !== 'instance') return true
+      if (!kept.has(n.name)) return false
+      if (expandedMap.has(n.concept ?? '')) return true
+      const c = countPer.get(n.concept ?? '') ?? 0
+      if (c >= SAMPLE_PER_CONCEPT) return false
+      countPer.set(n.concept ?? '', c + 1)
+      return true
+    })
+    const ids = new Set(nodes.map((n) => n.id))
+    const links = normLinks(data.links).filter((l) => ids.has(l.source) && ids.has(l.target))
+    return { nodes, links, roots: data.roots }
+  }, [data, progressive, spec, expandedMap])
+
   // REQ-185①：数据级过滤重建 graphData（非视觉遮挡）——隐藏根的子孙概念+挂载实例剔除，边双端可见才保留
   const visibleData = useMemo(() => {
-    const nodes = data.nodes.filter((n) => {
+    const nodes = displayData.nodes.filter((n) => {
       if (kindFilter === 'concept' && n.kind === 'instance') return false
       if (kindFilter === 'instance' && n.kind === 'concept') return false
       const root = rootOfName.get(n.kind === 'concept' ? n.name : (n.concept ?? ''))
@@ -258,13 +318,13 @@ export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRe
       return true
     })
     const ids = new Set(nodes.map((n) => n.id))
-    const links = data.links.filter((l) => ids.has(l.source) && ids.has(l.target))
-    return { nodes, links, roots: data.roots }
-  }, [data, kindFilter, hiddenRoots, rootOfName])
+    const links = normLinks(displayData.links).filter((l) => ids.has(l.source) && ids.has(l.target))
+    return { nodes, links, roots: displayData.roots }
+  }, [displayData, kindFilter, hiddenRoots, rootOfName])
 
   const neighbors = useMemo(() => {
     const m = new Map<string, Set<string>>()
-    for (const l of data.links) {
+    for (const l of normLinks(data.links)) {
       if (!m.has(l.source)) m.set(l.source, new Set())
       if (!m.has(l.target)) m.set(l.target, new Set())
       m.get(l.source)!.add(l.target)
@@ -490,6 +550,35 @@ export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRe
     })
   }
 
+  // VIZ-5：点击概念扩展其全量实例——running 方案在位走 SPARQL 受控面（REQ-151/163 同语义），否则本地 spec 回退
+  const expandConcept = async (name: string) => {
+    if (!progressive || expandedMap.has(name) || expanding) return
+    setExpanding(true)
+    try {
+      let names: string[] | null = null
+      if (sparqlProfile) {
+        try {
+          const q = `${SPARQL_PREFIXES}SELECT ?lbl WHERE { ?inst rdf:type owl:NamedIndividual ; rdf:type ?c ; rdfs:label ?lbl . ?c rdfs:label ${sparqlString(name)} . }`
+          const res = await api.runSparql(sparqlProfile, q)
+          const lbls = (res.json?.results?.bindings ?? []).map((b: any) => b.lbl?.value).filter(Boolean) as string[]
+          if (lbls.length > 0) {
+            names = Array.from(new Set(lbls))
+            setExpandSrc('sparql')
+          }
+        } catch {
+          names = null // 引擎不可达/非 running 409 → 本地回退
+        }
+      }
+      if (names === null) {
+        names = (spec?.instances ?? []).filter((i) => i.concept === name).map((i) => i.name)
+        setExpandSrc('local')
+      }
+      setExpandedMap((cur) => new Map(cur).set(name, names!))
+    } finally {
+      setExpanding(false)
+    }
+  }
+
   // R2：布局切换——fz 定轴（力导向=自由 z；仅非 force 布局执行）
   useEffect(() => {
     const g = fgRef.current as any
@@ -640,6 +729,7 @@ export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRe
                 callFg('cameraPosition', { x: n.x + dist, y: n.y + dist / 2, z: n.z + dist }, n, 900)
                 applyHighlight()
                 updateRing(n)
+                if (progressive && n.kind === 'concept') void expandConcept(n.name)
               }}
               onBackgroundClick={() => {
                 setSelected(null)
@@ -740,6 +830,26 @@ export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRe
                 ]}
               />
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Checkbox
+                checked={progressive}
+                onChange={(e) => {
+                  setProgressive(e.target.checked)
+                  setExpandedMap(new Map())
+                }}
+                aria-label="渐进装载开关"
+              >
+                <span style={{ fontSize: 12 }}>渐进装载{overThreshold ? '（超阈值）' : ''}</span>
+              </Checkbox>
+              {expanding && <Spin size="small" />}
+            </div>
+            {progressive && (
+              <div className="onto-flow-hint" style={{ marginBottom: 4 }}>
+                点击概念节点扩展其全量实例{sparqlProfile ? '（SPARQL 受控面）' : '（本地 spec 回退）'}
+                {expandedMap.size > 0 && ` · 已扩展 ${expandedMap.size} 概念 · 来源 ${expandSrc === 'sparql' ? 'SPARQL' : '本地'}`}
+              </div>
+            )}
+
             <div className="onto-flow-info-title spaced">边</div>
             <Select
               size="small"
@@ -898,6 +1008,11 @@ export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRe
                 {onRequest2D && (
                   <Button size="small" style={{ marginTop: 6 }} onClick={() => onRequest2D(selected.name)}>
                     在 2D 结构视图中查看 →
+                  </Button>
+                )}
+                {progressive && selected.kind === 'concept' && !expandedMap.has(selected.name) && (
+                  <Button size="small" type="primary" ghost style={{ marginTop: 6 }} loading={expanding} onClick={() => void expandConcept(selected.name)}>
+                    扩展全量实例（渐进）
                   </Button>
                 )}
               </div>

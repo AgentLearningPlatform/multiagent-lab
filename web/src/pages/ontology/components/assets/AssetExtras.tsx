@@ -126,6 +126,14 @@ export function RenameModal({ ontology, onClose, onSaved }: { ontology: Ontology
 export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: string }) {
   const [mode, setMode] = useState<'2d' | '3d' | 'webvowl'>('2d')
   const [focus2d, setFocus2d] = useState<string | null>(null) // R3：3D 选中 → 2D 联动聚焦
+  // VIZ-5（REQ-175）：含本体的 running 运行方案（渐进扩展 SPARQL 通道，REQ-163 同语义）
+  const [sparqlProfile, setSparqlProfile] = useState<string | null>(null)
+  useEffect(() => {
+    api
+      .listRuntimeProfiles()
+      .then((ps) => setSparqlProfile(ps.find((p) => p.status === 'running' && p.ontology_ids?.includes(ontologyId))?.id ?? null))
+      .catch(() => setSparqlProfile(null))
+  }, [ontologyId])
   const [full, setFull] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -164,6 +172,7 @@ export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: s
         <Graph3D
           key={full ? 'fs' : 'inline'}
           spec={spec}
+          sparqlProfile={sparqlProfile}
           onRequest2D={(name) => {
             setFocus2d(name)
             setMode('2d')
