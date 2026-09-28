@@ -124,6 +124,10 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
   const [kindFilter, setKindFilter] = useState<'all' | 'concept' | 'instance'>('all')
   /** R2：布局模式（力导向=默认 / 根向分簇 / 层次分层） */
   const [layout, setLayout] = useState<'force' | 'cluster' | 'layer'>('force')
+  /** R3：关系类型过滤（可见边 kind 集合） */
+  const [linkFilter, setLinkFilter] = useState<Set<string>>(new Set(['parent', 'rel', 'instance', 'instrel']))
+  /** R4：雾效开关 */
+  const [fog3d, setFog3d] = useState(false)
   const data = useMemo(() => (spec ? buildGraphData(spec) : { nodes: [], links: [] }), [spec])
   const counts = useMemo(() => {
     const m = new Map<string, number>()
@@ -142,6 +146,27 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     return m
   }, [data])
 
+  /** R3 路径高亮：概念节点→根的完整继承链（parent 边）+ 自身。返回节点 id 集合 */
+  const ancestorPath = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    if (!spec) return m
+    const conceptBy = new Map((spec.concepts ?? []).map((c) => [c.name, c]))
+    const names = new Set((spec.concepts ?? []).map((c) => c.name))
+    for (const c of spec.concepts ?? []) {
+      const chain = new Set<string>([`c:${c.name}`])
+      let cur = c.name
+      for (let i = 0; i < 32; i++) {
+        const cc = conceptBy.get(cur)
+        const parent = (cc?.parents ?? []).find((pp) => names.has(pp))
+        if (!parent) break
+        chain.add(`c:${parent}`)
+        cur = parent
+      }
+      m.set(`c:${c.name}`, chain)
+    }
+    return m
+  }, [spec])
+
   const hasConcepts = !!spec && (spec.concepts?.length ?? 0) > 0
 
   // R1①②：自定义节点对象（几何/材质池化；scale 承载半径）
@@ -152,19 +177,49 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     return mesh
   }
 
-  // R1④：聚焦高亮增量刷新——直接改写 __threeObj.scale（非邻居收缩 0.25x）
+  // R1④+R3：聚焦高亮增量刷新——非邻居收缩 0.25x；R3 路径高亮模式=点击概念时保留到根的完整继承链
   const highlightRef = useRef<any | null>(null)
   const applyHighlight = () => {
     const g = fgRef.current as any
     if (!g || typeof g.graphData !== 'function') return
     const cur = highlightRef.current
-    const keep = cur ? (neighbors.get(String(cur.id)) ?? new Set()) : null
+    let keep: Set<string> | null = null
+    if (cur) {
+      if (cur.kind === 'concept' && ancestorPath.has(String(cur.id))) {
+        // R3 路径高亮：保留到根的完整继承链 + 直接邻居（实例/关系）
+        keep = new Set(ancestorPath.get(String(cur.id)) ?? [])
+        for (const nb of neighbors.get(String(cur.id)) ?? []) keep.add(nb)
+      } else {
+        keep = new Set(neighbors.get(String(cur.id)) ?? [])
+      }
+    }
     for (const n of g.graphData().nodes as any[]) {
       const obj = n.__threeObj
       if (!obj) continue
       obj.scale.setScalar(cur && n.id !== cur.id && !keep?.has(n.id) ? n.radius * 0.25 : n.radius)
     }
     g.linkOpacity(cur ? 0.85 : 0.32)
+  }
+
+  // R4 选中环：TorusGeometry 环绕选中节点
+  const ringRef = useRef<THREE.Mesh | null>(null)
+  const updateRing = (n: any | null) => {
+    const g = fgRef.current as any
+    if (!g || typeof g.scene !== 'function') return
+    if (ringRef.current) {
+      g.scene().remove(ringRef.current)
+      ringRef.current = null
+    }
+    if (!n || !n.__threeObj) return
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.6, 0.15, 8, 32),
+      new THREE.MeshBasicMaterial({ color: '#f59e0b', transparent: true, opacity: 0.8 }),
+    )
+    ring.position.copy(n.__threeObj.position)
+    ring.scale.setScalar(n.radius * 1.1)
+    ring.lookAt(g.cameraPosition())
+    g.scene().add(ring)
+    ringRef.current = ring
   }
 
   // ref 方法守卫（react-force-graph-3d ref 转发面随版本差异，缺失方法静默跳过）
@@ -302,12 +357,42 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
               { value: 'layer', label: '层次分层' },
             ]}
           />
+          <Select
+            size="small"
+            style={{ width: 112 }}
+            mode="multiple"
+            allowClear={false}
+            maxTagCount={1}
+            value={[...linkFilter]}
+            onChange={(vs) => setLinkFilter(new Set(vs.length ? vs : ['parent', 'rel', 'instance', 'instrel']))}
+            options={[
+              { value: 'parent', label: '继承' },
+              { value: 'rel', label: '关系' },
+              { value: 'instance', label: '属于' },
+              { value: 'instrel', label: '实例关系' },
+            ]}
+          />
+          <Button
+            size="small"
+            type={fog3d ? 'primary' : 'default'}
+            onClick={() => {
+              setFog3d((v) => !v)
+              const g = fgRef.current as any
+              if (g && typeof g.scene === 'function') {
+                const scn = g.scene()
+                if (scn) scn.fog = (!fog3d ? new THREE.Fog(0xe8ebf5, 200, 900) : null)
+              }
+            }}
+          >
+            {fog3d ? '雾效开' : '雾效关'}
+          </Button>
           <Button
             size="small"
             onClick={() => {
               setSelected(null)
               highlightRef.current = null
               callFg('zoomToFit', 600, 60)
+              updateRing(null)
             }}
           >
             复位全景
@@ -323,9 +408,9 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
               nodeLabel={(n: any) => n.label}
               nodeThreeObject={nodeThreeObject}
               nodeVal={(n: any) => n.radius}
-              linkColor={(l: any) => (l.kind === 'parent' ? 'rgba(120,128,160,0.5)' : 'rgba(150,158,190,0.32)')}
               linkWidth={0}
               linkLabel={(l: any) => l.label}
+              linkColor={(l: any) => (linkFilter.has(l.kind) ? (l.kind === 'parent' ? 'rgba(120,128,160,0.5)' : 'rgba(150,158,190,0.32)') : 'rgba(0,0,0,0)')}
               linkDirectionalArrowLength={(l: any) => ((data.links.length < LINK_DECOR_THRESHOLD && l.kind !== 'parent') ? 3 : 0)}
               linkDirectionalParticles={(l: any) => ((data.links.length < LINK_DECOR_THRESHOLD && l.kind === 'rel') ? 2 : 0)}
               linkDirectionalParticleWidth={1.4}
@@ -336,11 +421,13 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
                 const dist = 90
                 callFg('cameraPosition', { x: n.x + dist, y: n.y + dist / 2, z: n.z + dist }, n, 900)
                 applyHighlight()
+                updateRing(n)
               }}
               onBackgroundClick={() => {
                 setSelected(null)
                 highlightRef.current = null
                 applyHighlight()
+                updateRing(null)
               }}
               onEngineStop={() => {
                 const el = containerRef.current
@@ -348,6 +435,10 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
                 if (el && g && typeof g.width === 'function' && el.clientWidth > 0) {
                   g.width(el.clientWidth)
                   g.height(el.clientHeight)
+                }
+                if (fog3d && typeof g.scene === 'function') {
+                  const scn = g.scene()
+                  if (scn && !scn.fog) scn.fog = new THREE.Fog(0xe8ebf5, 200, 900)
                 }
               }}
             />
