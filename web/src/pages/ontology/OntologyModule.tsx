@@ -6,12 +6,14 @@ import {
   BookOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import LearnPage from './LearnPage'
 import BuildPage from './BuildPage'
 import AssetsPage from './AssetsPage'
 import RuntimePage from './RuntimePage'
 import AuditPage from './AuditPage'
+import CompanionPage from '../CompanionPage'
 
 // ---------------------------------------------------------------------------
 // 本体模块壳（D-O11 / REQ-104）：左侧边栏栏位
@@ -21,12 +23,13 @@ import AuditPage from './AuditPage'
 // 构建栏以 buildPath 驱动路径页，运行栏以 engineKey 驱动引擎分组页。
 // ---------------------------------------------------------------------------
 
-export type SidebarKey = 'learn' | 'build' | 'assets' | 'runtime' | 'audit'
+export type SidebarKey = 'learn' | 'build' | 'assets' | 'companion' | 'runtime' | 'audit'
 
 const NAV: { key: SidebarKey; label: string; icon: React.ReactNode; desc: string }[] = [
   { key: 'learn', label: '学习中心', icon: <BookOutlined />, desc: '七阶段路径 · 方法论 · 任务卡' },
   { key: 'build', label: '本体构建', icon: <ApartmentOutlined />, desc: '六条构建路径' },
   { key: 'assets', label: '本体资产', icon: <DatabaseOutlined />, desc: '已构建本体统一管理' },
+  { key: 'companion', label: '伴生本体', icon: <TeamOutlined />, desc: '对话伴生 · 候选确认 · 成长图' },
   { key: 'runtime', label: '本体运行', icon: <CloudServerOutlined />, desc: '按运行方式分组' },
   { key: 'audit', label: '消费与审计', icon: <AuditOutlined />, desc: 'KG 图谱 · GraphRAG 试查 · 决策溯源' },
 ]
@@ -60,6 +63,8 @@ export default function OntologyModule() {
       <BuildPage />
     ) : sidebarKey === 'assets' ? (
       <AssetsPage />
+    ) : sidebarKey === 'companion' ? (
+      <CompanionPage />
     ) : sidebarKey === 'audit' ? (
       <AuditPage />
     ) : (
