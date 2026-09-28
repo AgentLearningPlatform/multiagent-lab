@@ -668,6 +668,20 @@
 .ref-body { flex: 1; overflow: auto; padding: 4px 8px 48px 2px; }
 .ref-body .antmd, .ref-body > * { max-width: 860px; }
 
+/* REQ-181/M-O17：资产左列表（来源分组 + fork 徽标 + dots/版本/状态） */
+.asset-list { display: flex; flex-direction: column; gap: 10px; }
+.asset-group-title { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--c-ink-3); padding: 0 8px; text-transform: uppercase; }
+.asset-list-item {
+  display: flex; flex-direction: column; gap: 3px; width: 100%;
+  padding: 8px 10px; border: 0; border-radius: 9px; background: none;
+  font-family: inherit; text-align: left; cursor: pointer; transition: background .15s ease;
+}
+.asset-list-item:hover { background: #eef0f6; }
+.asset-list-item.active { background: #e9ebf7; }
+.asset-list-item.active .asset-item-name { color: var(--c-brand); font-weight: 600; }
+.asset-item-name { font-size: 12.5px; font-weight: 500; color: var(--c-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-item-meta { display: flex; align-items: center; gap: 6px; }
+
 /* REQ-169 交付轮：侧栏菜单区自身滚动——分组全展开后超出视口时可滚动查阅，底部口径注记固定 */
 .ref-menu { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 8px; }
 

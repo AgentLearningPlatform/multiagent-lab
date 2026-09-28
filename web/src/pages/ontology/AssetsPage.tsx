@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, Popconfirm, Result, Space, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Input, Popconfirm, Result, Space, Splitter, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { BranchesOutlined, DeleteOutlined, EditOutlined, ImportOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
 import type { Ontology, RuntimeProfile, Spec } from '../../api/types'
@@ -10,13 +10,15 @@ import GraphEditor from './components/GraphEditor'
 import SourceView from './components/SourceView'
 import SpecEditorPane from './components/assets/SpecEditorPane'
 import { ArtifactsPane, ExportPane, ValidatePane } from './components/assets/AssetPanes'
-import { OntologyPicker, RenameModal, VizTabs } from './components/assets/AssetExtras'
+import { RenameModal, VizTabs } from './components/assets/AssetExtras'
+import AssetList from './components/assets/AssetList'
 import QualityCardPane from './components/assets/QualityCardPane'
 import ImportMergeWizard from './components/assets/ImportMergeWizard'
 
 // ---------------------------------------------------------------------------
 // 本体资产（AssetsPage，REQ-104 ③）：全部已构建本体统一管理
-//   列表（来源/形态/版本/构建段完成度/被引用）+ 详情工作区 Tabs：
+//   REQ-181 v2 重构：平台统一「左列表（来源分组）+ 右主区」两栏（原选择条在上+详情在下）；
+//   详情工作区 Tabs：
 //   Spec 编辑 | 校验 | 版本（含源码视图 REQ-93）| 产物 | 可视化 | TTL 导出 | CSV 灌装（REQ-96）
 //   正交红线：不出现任何引擎、端口、启停配置（运行看本体运行栏）
 // B1（REQ-145/M22）：Spec 编辑/校验/产物/导出/选择条/重命名/可视化拆至 components/assets/。
@@ -142,11 +144,19 @@ export default function AssetsPage() {
   }
 
   return (
-    <div className="work-main">
-      {/* 资产选择条（统一列表）：构建段完成度 dots 语义 = S1~S4 */}
-      {!listErr && ontos.length > 0 && (
-        <OntologyPicker ontos={ontos} profiles={profiles} activeId={activeId} onSelect={setActiveId} validations={validations} />
-      )}
+    <Splitter className="main sidebar-splitter">
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.assets.width')) || 260} min={200} max={420} className="sidebar-panel">
+        <aside className="sidebar">
+          <div className="side-head">
+            <span className="side-title">本体资产</span>
+            <span className="side-count">{ontos.length}</span>
+          </div>
+          <div className="ref-menu" style={{ paddingBottom: 12 }}>
+            <AssetList ontos={ontos} profiles={profiles} activeId={activeId} onSelect={setActiveId} validations={validations} />
+          </div>
+        </aside>
+      </Splitter.Panel>
+      <Splitter.Panel className="content-panel">
       {listErr ? (
         <div className="work-empty">
           <Result
@@ -348,6 +358,7 @@ export default function AssetsPage() {
           }}
         />
       )}
-    </div>
+      </Splitter.Panel>
+    </Splitter>
   )
 }
