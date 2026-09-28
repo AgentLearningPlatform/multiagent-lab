@@ -15,12 +15,13 @@ import { ERR_COLUMNS } from './shared'
 import SpecGraph from './components/SpecGraph'
 import OntoChatFlow from './OntoChatFlow'
 import KbBuildFlow from './BuildFromKBFlow'
+import OntoExtendFlow from './components/OntoExtendFlow'
 
 // ---------------------------------------------------------------------------
 // 本体构建（BuildPage，REQ-104 ②）：按构建路径分二级模块（六路径分层标注状态）
 //   自定义构建（可用，现有页面主体 S1~S4）| OntoChat 流程（可用，REQ-103 模式 A 载体）
 //   | 由知识库构建（部分可用，O13/D-O14 REQ-108 独立流程页）| KG 消费流程（入口卡，D-O15 改造）
-//   | OntoExtend 流程（引导卡）| Open Ontologies 流程（引导+回流）
+//   | OntoExtend 流程（部分可用，M-O14 P2②）| Open Ontologies 流程（引导+回流）
 //   未工程化路径显示引导卡、不做空壳交互（D-O11）
 // ---------------------------------------------------------------------------
 
@@ -31,7 +32,7 @@ const PATHS: { key: BuildPath; label: string; state: 'ok' | 'partial' | 'guide';
   { key: 'ontochat', label: 'OntoChat 流程', state: 'ok', desc: '对话式 CQ 引导 → 逐轮补全 → 草稿入库（REQ-103 模式 A）' },
   { key: 'kb', label: '由知识库构建', state: 'partial', desc: 'KB chunk→LLM / KG→直转 / 混合三策略独立流程页（O13，D-O14/REQ-108）' },
   { key: 'kg', label: 'KG 消费流程', state: 'guide', desc: '入口卡跳转「消费与审计」栏（D-O15 自研 KG，原 semantica 流程改造）' },
-  { key: 'ontoextend', label: 'OntoExtend 流程', state: 'guide', desc: '对话式扩展现有本体（引导先行，工程化另行评估）' },
+  { key: 'ontoextend', label: 'OntoExtend 流程', state: 'partial', desc: 'ODP 模式推荐 + LOV 词表扩展 → 审查入库（M-O14 P2②）' },
   { key: 'oo', label: 'Open Ontologies 流程', state: 'guide', desc: '双轨引导 + 产物回流（REQ-78 互通后顺畅）' },
 ]
 
@@ -40,7 +41,7 @@ const STATE_TAG: Record<BuildPath, { color: string; text: string }> = {
   ontochat: { color: 'green', text: '可用' },
   kb: { color: 'orange', text: '部分可用' },
   kg: { color: 'cyan', text: '引导' },
-  ontoextend: { color: 'cyan', text: '引导先行' },
+  ontoextend: { color: 'gold', text: '部分可用' },
   oo: { color: 'cyan', text: '引导' },
 }
 
@@ -100,7 +101,7 @@ export default function BuildPage() {
       {buildPath === 'ontochat' && <OntoChatFlow onSaved={() => { /* 入库后产物进资产栏；此处留在会话页展示 done 态 */ }} />}
       {buildPath === 'kb' && <KbBuildFlow />}
       {buildPath === 'kg' && <KgGuide />}
-      {buildPath === 'ontoextend' && <OntoExtendGuide />}
+      {buildPath === 'ontoextend' && <OntoExtendFlow />}
       {buildPath === 'oo' && <OoGuide />}
     </div>
   )
@@ -724,29 +725,6 @@ function KgGuide() {
 // ---------------------------------------------------------------------------
 // OntoExtend 流程（引导卡先行，工程化登记需求池）
 // ---------------------------------------------------------------------------
-
-function OntoExtendGuide() {
-  return (
-    <Card className="work-card" size="small">
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 12 }}
-        message="OntoExtend 流程——对话式扩展现有本体（引导先行，工程化另行评估）"
-        description="定位：不新建本体，而是对已有本体做对话式增量扩展（补概念/关系/实例）。工程化 = fork（REQ-83）+ REQ-82 扩展语料组合，增量成本待开发者体验引导卡后评估。"
-      />
-      <div className="onto-sec" style={{ marginTop: 0 }}>
-        <span className="onto-sec-title">手工路径（当前可用）</span>
-      </div>
-      <ol className="onto-report-list">
-        <li>「本体资产」栏选中本体 → <strong>Fork 本体</strong>（复制为独立新本体，forked_from 记录来源）</li>
-        <li>「自定义构建 → S1 → AI 创建」描述扩展方向（如"在 K8s 运维本体上补充网络策略域"）</li>
-        <li>生成草稿 → 预览 → 入库 → 回资产栏合并所需片段到 Fork 本体</li>
-      </ol>
-      <Alert type="warning" showIcon style={{ marginTop: 12 }} message="工程化排期" description="对话式扩展交互登记需求池（P2/P3 评估）；当前以 Fork + AI 创建组合覆盖核心诉求。" />
-    </Card>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Open Ontologies 流程（双轨引导 + 产物回流）

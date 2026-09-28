@@ -267,10 +267,10 @@ const BUILD_PATH_CARDS: { key: string; title: string; scene: string; points: str
   {
     key: 'ontoextend',
     title: 'OntoExtend 流程',
-    scene: '对话式扩展现有本体（fork + AI 组合）',
+    scene: 'ODP 模式推荐 + LOV 词表 → 扩展现有本体（审查入库）',
     points: '增量建模与本体演化',
-    state: { color: 'cyan', text: '引导先行' },
-    example: '—（工程化评估中）',
+    state: { color: 'gold', text: '部分可用' },
+    example: 'ontoextend：组织与人员 ODP → 合并审查 → 新版本（M-O14 P2②）',
   },
   {
     key: 'oo',

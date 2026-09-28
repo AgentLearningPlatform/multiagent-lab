@@ -23,6 +23,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/qualitygate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/repo"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/seed"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/ontoextend"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/toolchain"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/vocabsearch"
 )
@@ -68,6 +69,8 @@ func (s *Server) Mount(m *http.ServeMux) {
 	m.HandleFunc("GET /api/ontology/quality/report", s.qualityReport)
 	m.HandleFunc("POST /api/ontology/toolchain/{tool}", s.toolchain)
 	m.HandleFunc("GET /api/ontology/vocabularies/search", s.vocabSearch)
+	m.HandleFunc("GET /api/ontology/ontoextend/odps", s.ontoextendListODPs)
+	m.HandleFunc("POST /api/ontology/ontoextend/draft", s.ontoextendDraft)
 
 	// 方案生命周期（REQ-155 阶段二/M-O15：Terraform 式 plan/apply，monitor=plan 只读形态）
 	m.HandleFunc("GET /api/ontology/lifecycle/plan", s.lifecyclePlan)
@@ -312,6 +315,30 @@ func (s *Server) qualityReport(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writeJSON(w, http.StatusOK, map[string]any{"ontology_id": id, "imported_at": importedAt, "report": json.RawMessage(raw)})
+}
+
+// ontoextendListODPs M-O14 P2②（REQ-171 P2/26 号方案）：ODP 精选清单（人工 curated，编译期内嵌）
+func (s *Server) ontoextendListODPs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"odps": ontoextend.List(), "count": len(ontoextend.List())})
+}
+
+// ontoextendDraft M-O14 P2②：按 ODP 生成扩展草稿片段（spec_json 形态；LOV 附加术语由前端并入后再走 merge/preview 审查）
+func (s *Server) ontoextendDraft(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		OdpID string `json:"odp_id"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	odp := ontoextend.Get(in.OdpID)
+	if odp == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "ODP 不存在: " + in.OdpID})
+		return
+	}
+	draft := *odp.Spec
+	draft.Name = odp.Name + " 扩展片段（OntoExtend）"
+	writeJSON(w, http.StatusOK, map[string]any{"odp": odp.ID, "name": odp.Name, "description": odp.Description, "draft_spec": &draft})
 }
 
 // vocabSearch REQ-171 P1 LOV 词表搜索薄层（GET /api/ontology/vocabularies/search?q=）。
