@@ -715,8 +715,13 @@ export default function ChatWindow({
   const toggleOnto = () => {
     if (picker === 'onto') { setPicker(null); return }
     if (ontoDisabled) return
-    if (conversation.ontology_enabled) { patchConv({ ontology_enabled: false }); return }
-    if (conversation.runtime_profile_id) { patchConv({ ontology_enabled: true }); return }
+    // 未开启：已绑定方案 → 直接开启；未绑定 → 打开方案选择器
+    if (!conversation.ontology_enabled) {
+      if (conversation.runtime_profile_id) { patchConv({ ontology_enabled: true }); return }
+      setPicker('onto')
+      return
+    }
+    // 已开启：打开方案选择器（换方案保持开启；Esc/点外关闭）——2026-09-28 修复「已开启后无法换方案」
     setPicker('onto')
   }
   const toggleSkills = () => {
@@ -1718,7 +1723,7 @@ export default function ChatWindow({
                     placement="topLeft"
                     arrow={false}
                     content={pickerList(
-                      '选择本体运行方案',
+                      '选择本体运行方案（挂载方案即挂载其本体集合；多本体请先在「本体运行」栏组建方案）',
                       runningProfiles.map((p) => ({ id: p.id, name: p.name, meta: p.engine })),
                       conversation.runtime_profile_id,
                       (id) => patchConv({ runtime_profile_id: id, ontology_enabled: true }),

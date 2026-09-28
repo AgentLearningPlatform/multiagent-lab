@@ -17,11 +17,17 @@ export default function CompanionPage() {
   const [hasData, setHasData] = useState(false)
 
   useEffect(() => {
-    api
-      .listConversations({ scope: 'agent' })
-      .then((ls) => {
-        setConvs(ls)
-        setConvId((cur) => cur ?? ls[0]?.id)
+    Promise.all([
+      api.listConversations({ scope: 'agent' }),
+      api.listConversations({ scope: 'project' }),
+    ])
+      .then(([agents, projects]) => {
+        const merged = [
+          ...agents,
+          ...projects.map((p) => ({ ...p, title: `${p.title || p.id}（项目）` })),
+        ]
+        setConvs(merged)
+        setConvId((cur) => cur ?? merged[0]?.id)
       })
       .catch(() => {})
   }, [])

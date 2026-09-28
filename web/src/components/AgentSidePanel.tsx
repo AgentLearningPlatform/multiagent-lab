@@ -198,6 +198,11 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
           tool_name: (v.mcp_serve_tool_name ?? '').trim(),
           token: agent.mcp_serve?.token ?? '',
         },
+        // REQ-170/187：伴生本体（后端 PUT 全字段替换——漏传即被零值覆盖，2026-09-28 修复开关保存失效）
+        companion_ontology: !!v.companion_ontology,
+        companion_extract_hint: v.companion_extract_hint ?? '',
+        companion_extract_conn_id: v.companion_extract_conn_id ?? '',
+        companion_auto_threshold: v.companion_auto_threshold ?? 0,
       })
       showToast('已保存，下次运行生效')
       bumpData()

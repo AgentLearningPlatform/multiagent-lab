@@ -41,14 +41,22 @@ export default function CompanionPane() {
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [view, setView] = useState<'candidates' | 'graph3d'>('candidates') // REQ-154 成长可视化开关
 
+  // REQ-187 补充（2026-09-28）：项目会话（scope=project，agent 管理项目场景）的伴生候选同样可查——
+  // 此前仅列 agent 会话，项目会话产生的候选在下拉中不可见。
   const loadConvs = useCallback(() => {
     setConvsLoading(true)
-    api
-      .listConversations({ scope: 'agent' })
-      .then((ls) => {
-        setConvs(ls)
+    Promise.all([
+      api.listConversations({ scope: 'agent' }),
+      api.listConversations({ scope: 'project' }),
+    ])
+      .then(([agents, projects]) => {
+        const merged = [
+          ...agents,
+          ...projects.map((p) => ({ ...p, title: `${p.title || p.id}（项目）` })),
+        ]
+        setConvs(merged)
         setConvsErr(null)
-        setConvId((cur) => cur ?? ls[0]?.id)
+        setConvId((cur) => cur ?? merged[0]?.id)
       })
       .catch((e: any) => setConvsErr(e?.message ?? '会话列表加载失败'))
       .finally(() => setConvsLoading(false))

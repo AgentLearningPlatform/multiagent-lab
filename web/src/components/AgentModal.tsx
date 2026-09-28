@@ -96,6 +96,9 @@ export default function AgentModal({
         runtime_backend: v.runtime_backend ?? 'inprocess',
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
         companion_ontology: !!v.companion_ontology, // M28/REQ-170：伴生本体开关
+        companion_extract_hint: v.companion_extract_hint ?? '', // REQ-187
+        companion_extract_conn_id: v.companion_extract_conn_id ?? '',
+        companion_auto_threshold: v.companion_auto_threshold ?? 0,
         logo_url: (v.logo_url ?? '').trim(), // REQ-137：非内置后端登记原 logo
         tools: v.tools ?? [],
       })

@@ -1,6 +1,6 @@
 # eino-multiagent-lab · 智能体平台 需求文档（PRD）
 
-> 状态：Draft v0.68
+> 状态：Draft v0.69
 > 日期：2026-09-28
 > 负责人：董奎
 > 文档性质：**活文档**。每个迭代开始前更新「迭代记录」与「需求池」，已确认需求不要直接删除，改为在条目后标注 `（已变更/已移交，见 vX.X）`。
@@ -565,6 +565,7 @@
 
 | v0.61 | 2026-09-27 | **REQ-177 立项即交付（供应商协议重组与设置页优化，开发者指令）**：①协议降为模型连接属性——ProviderModal 编辑态只批量应用供应商身份字段（名称按约定重生成/别名/API Key/启用），不再覆写组内协议与 BaseURL；ModelModal 增协议+Base URL 字段（新建预填所选组锚点值可改、切换提供商预填目标组值、anthropic 类型锁定随表单协议）；后端连接级校验本就支持混合组零改动；供应商行与下拉去协议徽标，模型行增协议标签（混合协议组逐连接可见）；DiscoverPanel 多协议组提示按锚点协议发现；②弹窗紧凑化——协议+类型同行、API Key+启用同行、模型名+类型默认同行、提供商 Key 说明并入下拉 extra；③平台助手 GET 空值返回内置默认（空=默认语义，清空保存即恢复默认），默认文案按项目新定位重写（智能体与本体构建平台/平台知识等七模块/AI 优化约束完整性）；headless 冒烟 10 断言全过（A5 隔离复验，截图 smoke/req177/）；18 v1.49/20 v1.35 S6.7 | 董奎 × 协作 Agent |
 | v0.64 | 2026-09-27 | **REQ-173 P2 批次交付收口**：审计页两处加载失败错误卡换 LoadErrorAlert（可重试，route 拦截冒烟 4 断言全过）；Descriptions 化/pro-components 诚实评估收口（前者适用面窄不强转，后者暂不引入留 M18 评估）。01 头部顺延 | 董奎 × 协作 Agent |
+| v0.69 | 2026-09-28 | **bugfix 三连（开发者报障）**：①**伴生开关保存后重开仍关**——AgentSidePanel.save 的 PUT 载荷漏 companion 四字段（后端 PUT 全字段替换语义，未传即零值覆盖；REQ-187 加表单项时漏改载荷），AgentModal create 载荷顺补三配置；②**对话「本体」chip 无法换方案**——已开启后点击=关闭，换方案无入口；修复=已开启时点击 chip 打开方案选择器（换方案保持开启，Esc/点外关闭；未开启未绑定仍直开选择器），选择器标题注明「挂载方案即挂载其本体集合；多本体请先在『本体运行』栏组建方案」——**澄清：对话挂载粒度=运行方案（REQ-87 部署视图），多本体=组建含多本体的方案，非对话层多选裸本体**；③**项目会话伴生候选在伴生本体页不可见**——CompanionPane/CompanionPage 会话下拉仅列 scope=agent，补 project 会话合并（title 加「（项目）」后缀区分） | 董奎 × 协作 Agent |
 | v0.68 | 2026-09-28 | **REQ-187 交付回写**（伴生本体配置增强）：迁移 022（agent 三列）+ ExtractNew（hint 追加 prompt 第 5 条「领域聚焦要求」/连接覆盖解析/≥阈值 ConfirmCandidate 自动入图+MarkAutoConfirmed bot:autoConfirmed SPARQL 标记）+ AgentSidePanel「能力」页签与 AgentModal 高级区伴生开关下三字段（开关开启才展开）；**顺修 UpdateAgent SQL 缺三列致配置保存不生效**（列扩展三轮全改齐：agentCols/scan/INSERT/UPDATE——第四处漏改的教训）；单测 2 组+真机：配置往返/阈值 0.01 下项目会话 8 候选全自动入图（含矛盾失效化链路）| 董奎 × 协作 Agent |
 | v0.67 | 2026-09-28 | **REQ-187 伴生本体配置增强立项即交付（开发者拍板：接受建议全项+追加自动入图——「原草稿必审太严格」）**：迁移 022（agent 增 companion_extract_hint/companion_extract_conn_id/companion_auto_threshold 三列，默认空/空/0=现行为零回归）+ ExtractNew（领域提示词追加 prompt/连接解析覆盖/≥阈值候选 confirmCandidate 自动入图带 bot:autoConfirmed 标记）+ AgentSidePanel/AgentModal 伴生区三字段（折叠「伴生抽取设置」）；单测 6 组（阈值分级/hint 拼接/连接解析/自动入图矛盾失效化）+ 真机 E2E（阈值 0.85 下高低置信分级：自动入图+pending 并存）；REQ-82 草稿必审口径显式放宽注记；18 v1.65/20 v1.44 S2.14 | 董奎 × 协作 Agent |
 | v0.66 | 2026-09-27 | **bugfix：项目会话伴生抽取无候选（开发者报障「agent 开启伴生本体、项目中添加该 agent 且由该 agent 管理项目时，项目中的处理信息没有在伴生本体中产生候选」）**：根因——companion.OnRunComplete 归属守卫 `conv.Scope != "agent"` 把项目会话整类拦截（项目会话 scope=project 且 conv.AgentID 为空，agent 由 resolveRunTarget 按项目 coordinator/首成员解析传入），开关开的 agent 管理项目时处理信息从不触发抽取；修复=归属校验双分支（agent 会话校验 conv.AgentID==agent.ID；project 会话校验 agent 为该项目 coordinator 或成员之一，跨项目 agent 仍拦截）；单测 4 例（coordinator/成员/外部 agent/开关关）+ 真机 E2E（项目会话发消息→run.finished→7 条候选：概念 PostgreSQL/Redis/项目数据库/项目缓存+关系×2+事件） | 董奎 × 协作 Agent |
