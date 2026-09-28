@@ -140,3 +140,71 @@ func TestInsertAndInvalidate(t *testing.T) {
 }
 
 func testTime() time.Time { return time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC) }
+
+// 2026-09-27 修复验证：项目会话（scope=project）此前被 Scope 守卫整类拦截——
+// agent 开关开启且 agent 为项目 coordinator/成员时应触发抽取；跨项目 agent 仍拦截。
+func TestOnRunCompleteProjectScope(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/t.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := NewService(st, nil, nil)
+
+	// 三个 agent：coordinator（开伴生）/ 普通成员（开伴生）/ 外部 agent（开伴生）
+	for _, id := range []string{"agt_coord", "agt_member", "agt_outside"} {
+		if _, err := st.CreateAgent(&store.Agent{ID: id, Name: id, CompanionOntology: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.CreateProject(&store.Project{ID: "proj_1", Name: "p1", Coordinator: "agt_coord"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetProjectAgents("proj_1", []store.ProjectMember{{AgentID: "agt_coord", Role: "coordinator"}, {AgentID: "agt_member", Role: "member"}}); err != nil {
+		t.Fatal(err)
+	}
+	conv := &store.Conversation{ID: "conv_p1", Scope: "project", ProjectID: strPtr("proj_1")}
+
+	cases := []struct {
+		name  string
+		agent string
+		want  bool
+	}{
+		{"coordinator 触发", "agt_coord", true},
+		{"成员触发", "agt_member", true},
+		{"外部 agent 拦截", "agt_outside", false},
+	}
+	for _, c := range cases {
+		s.mu.Lock()
+		s.running = map[string]bool{}
+		s.mu.Unlock()
+		a, _ := st.GetAgent(c.agent)
+		s.OnRunComplete(conv, a)
+		s.mu.Lock()
+		_, fired := s.running[conv.ID]
+		s.mu.Unlock()
+		if fired != c.want {
+			t.Fatalf("%s: running=%v want %v", c.name, fired, c.want)
+		}
+		// 清理 goroutine
+		s.mu.Lock()
+		delete(s.running, conv.ID)
+		s.mu.Unlock()
+	}
+
+	// 开关关 → 不触发
+	s.mu.Lock()
+	s.running = map[string]bool{}
+	s.mu.Unlock()
+	a, _ := st.GetAgent("agt_coord")
+	a.CompanionOntology = false
+	s.OnRunComplete(conv, a)
+	s.mu.Lock()
+	_, fired := s.running[conv.ID]
+	s.mu.Unlock()
+	if fired {
+		t.Fatal("开关关不应触发")
+	}
+}
+
+func strPtr(s string) *string { return &s }

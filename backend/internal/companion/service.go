@@ -112,7 +112,11 @@ func NewService(st *store.Store, box *secrets.Box, engine *Engine) *Service {
 }
 
 // OnRunComplete Run/Resume 收尾触发点（API 层调用；非阻塞、零错误上抛）。
-// 开关关闭 / 非会话绑定 Agent / 引擎不可用 → 静默返回，对话主链路无感知。
+// 开关关闭 / 会话与 Agent 归属不符 → 静默返回，对话主链路无感知。
+// 归属校验（2026-09-27 修复：项目会话此前被 Scope 守卫整类拦截，候选从不产生）：
+//   - agent 会话：conv.AgentID == agent.ID；
+//   - project 会话：agent 为该项目的 coordinator 或成员之一（运行 agent 由 resolveRunTarget
+//     按主智能体优先解析传入）——「项目由开启伴生的 agent 管理」时项目处理信息同样产生候选。
 func (s *Service) OnRunComplete(conv *store.Conversation, agent *store.Agent) {
 	if s == nil || conv == nil || agent == nil {
 		return
@@ -120,7 +124,32 @@ func (s *Service) OnRunComplete(conv *store.Conversation, agent *store.Agent) {
 	if !agent.CompanionOntology {
 		return
 	}
-	if conv.Scope != "agent" || conv.AgentID == nil || *conv.AgentID != agent.ID {
+	switch conv.Scope {
+	case "agent":
+		if conv.AgentID == nil || *conv.AgentID != agent.ID {
+			return
+		}
+	case "project":
+		if conv.ProjectID == nil || *conv.ProjectID == "" {
+			return
+		}
+		p, err := s.Store.GetProject(*conv.ProjectID)
+		if err != nil {
+			return
+		}
+		member := p.Coordinator == agent.ID
+		if !member {
+			for _, id := range p.AgentIDs {
+				if id == agent.ID {
+					member = true
+					break
+				}
+			}
+		}
+		if !member {
+			return
+		}
+	default:
 		return
 	}
 	s.mu.Lock()
