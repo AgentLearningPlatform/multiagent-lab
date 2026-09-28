@@ -14,13 +14,10 @@ import XMarkdown from '@ant-design/x-markdown'
 import DocViewerModal from '../components/DocViewerModal'
 import { docFileOf, resolveRef } from '../lib/docref'
 
-// 平台知识内容（REQ-116 / REQ-161 v2）：构建期内联扫描 platform-knowledge/ 全目录，
-// 主题页发现仍是目录驱动（新增或迁移文档后重建即生效）；但页面组织不照搬存放顺序——
-// L1 分组按 GROUP_ORDER 规划（导航栏模块及其顺序，整体设计置顶、设置殿后）；目录=页面树 1:1（G-5 增补），
-// 个别专题跨目录挂载见 TOPIC_MOUNT（REQ-169 二轮，2026-09-26 开发者指定）；
-// 组内主页置顶（模块导读/平台总览）、专题按文档编号序。
-// 每篇头部 frontmatter（module/topic/desc/req/docs/decisions/synced）为页面元信息与源指针约定，
-// 语义级变更（REQ 行/决策/口径）须同步更新命中的文档（AGENTS.md 纪律 7）。
+// 平台知识内容（REQ-116 / REQ-161 v2）：构建期内联扫描 platform-knowledge/ 全目录。
+// REQ-188 起全链目录驱动：目录即页面树——顶层目录=L1 组、子目录=L2、文档=主题页；
+// 组序/组内序均由名称数字前缀（NN_）决定，新增目录/文档落入即上页并自动入位，无需改本文件；
+// 未登记的新顶层目录兜底成组置尾（不丢档）。个别跨目录挂载见 TOPIC_MOUNT。
 const KB_RAW = import.meta.glob('../../../platform-knowledge/**/*.md', {
   query: '?raw',
   import: 'default',
@@ -30,20 +27,23 @@ const KB_RAW = import.meta.glob('../../../platform-knowledge/**/*.md', {
 // 「外部资源」主题页（REQ-109/162）：内容单源仍在 seeds/learning/external-resources.md，构建期内联挂载
 import EXTERNAL_RESOURCES_MD from '../../../seeds/learning/external-resources.md?raw'
 
-/** 模块注册表：目录名 → 页面显示名 + 图标（platform-knowledge/README.md 同源维护） */
-const MODULES: { dir: string; label: string; icon: ReactNode }[] = [
-  { dir: '整体设计', label: '整体设计', icon: <CompassOutlined /> },
-  { dir: '智能体', label: '智能体', icon: <RobotOutlined /> },
-  { dir: '项目', label: '项目', icon: <ProjectOutlined /> },
-  { dir: '本体', label: '本体', icon: <ApartmentOutlined /> },
-  { dir: '知识库', label: '知识库', icon: <DatabaseOutlined /> },
-  { dir: '技能', label: '技能', icon: <ThunderboltOutlined /> },
-  { dir: '设置', label: '设置', icon: <SettingOutlined /> },
-]
+/** 图标表（可选定制，键 = 去前缀目录名；未登记目录用默认图标，补一行即生效） */
+const GROUP_ICONS: Record<string, ReactNode> = {
+  整体设计: <CompassOutlined />,
+  智能体: <RobotOutlined />,
+  项目: <ProjectOutlined />,
+  本体: <ApartmentOutlined />,
+  知识库: <DatabaseOutlined />,
+  技能: <ThunderboltOutlined />,
+  设置: <SettingOutlined />,
+}
+const DEFAULT_ICON = <LinkOutlined />
 
-/** L1 分组顺序（规划态，非目录存放顺序）：平台总览置顶为入口 → 五业务模块按导航栏顺序 →
- *  设置对应导航栏最右齿轮殿后；跨目录挂载的专题随目标组出现，不单列 L1 */
-const GROUP_ORDER = ['整体设计', '智能体', '项目', '本体', '知识库', '技能', '设置']
+/** 目录/文件名前缀解析：`NN_名称` → { order, label }；无前缀 order=Infinity（排序置尾） */
+function parsePrefix(name: string): { order: number; label: string } {
+  const m = /^(\d+)_(.+)$/.exec(name)
+  return m ? { order: Number(m[1]), label: m[2] } : { order: Number.POSITIVE_INFINITY, label: name }
+}
 
 /** 跨目录挂载（REQ-169 二轮，开发者指定）：键=主题 key（存放目录/文件），value=挂载的 L1 组 + 展示名。
  *  仅改页面归属与标题；互引解析基准 base 仍按真实存放目录，保证文内相对链接不失效 */
@@ -51,14 +51,11 @@ const TOPIC_MOUNT: Record<string, { group: string; label: string }> = {
   '外部资源/外部资源导航': { group: '本体', label: '本体学习外部资源导航' },
 }
 
-/** 各组主页文件（组内置顶；默认 `${dir}模块` 即「模块导读」，总览组为 平台总览） */
-const HOME_FILE: Record<string, string> = { 整体设计: '整体设计' }
-
 interface Topic {
   key: string
-  /** 文件名（不含 .md，保留编号前缀，供组内排序） */
+  /** 文件路径（目录下相对，保留编号前缀，供排序） */
   file: string
-  /** 展示标题：去编号前缀/模块同名前缀，「X模块」归一为「模块导读」，下划线转间隔点 */
+  /** 展示标题：去 `NN_`/`NN-` 前缀，`_`转间隔点；模块主页归一「模块导读」 */
   title: string
   md: string
   /** 主题页所在仓库目录——正文相对引用的解析基准（REQ-161 补充：文档互引用相对路径） */
@@ -66,14 +63,19 @@ interface Topic {
   group: string
   groupLabel: string
   icon: ReactNode
+  isHome: boolean
+  /** 组排序值（原始顶层目录的数字前缀；挂载主题随目标组） */
+  groupOrder: number
 }
 
 /** 文件名 → 展示标题（通用规则，新文档落目录即自动获得可读标题） */
-function topicTitle(dir: string, file: string): string {
-  if (file === `${dir}模块`) return '模块导读'
-  let t = file.replace(/^\d+_/, '')
-  if (t.startsWith(`${dir}_`)) t = t.slice(dir.length + 1)
-  return t.replace(/_/g, '·')
+function topicTitle(file: string, groupLabel: string): string {
+  const baseName = file.slice(file.lastIndexOf('/') + 1)
+  const m = /^\d+[_-](.+)$/.exec(baseName)
+  let base = m ? m[1] : baseName
+  if (base === groupLabel) return base // 组主页（如 00_整体设计）
+  if (base === `${groupLabel}模块`) return '模块导读' // 模块导读（如 00_本体模块）
+  return base.replace(/_/g, '·')
 }
 
 const TOPICS: Topic[] = (() => {
@@ -87,27 +89,26 @@ const TOPICS: Topic[] = (() => {
     if (slash < 0) continue // 根级 README.md 等不进页面
     const dir = rel.slice(0, slash)
     const file = rel.slice(slash + 1).replace(/\.md$/, '')
-    const mod = MODULES.find((m) => m.dir === dir)
-    if (!mod) continue
+    const { label } = parsePrefix(dir)
     const key = `${dir}/${file}`
     // 跨目录挂载（TOPIC_MOUNT）：归属组/展示名/图标随目标组，base 保持真实存放目录
     const mount = TOPIC_MOUNT[key]
-    const effGroup = mount?.group ?? dir
-    const effMod = MODULES.find((m) => m.dir === effGroup) ?? mod
+    const effGroup = mount?.group ?? label
     out.push({
       key,
       file,
-      title: mount?.label ?? topicTitle(dir, file),
+      title: mount?.label ?? topicTitle(file, label),
       md: raw,
       base: `platform-knowledge/${dir}/${file}`.split('/').slice(0, -1).join('/'),
       group: effGroup,
-      groupLabel: effMod.label,
-      icon: effMod.icon,
+      groupLabel: mount?.group ?? label,
+      icon: GROUP_ICONS[mount?.group ?? label] ?? DEFAULT_ICON,
+      isHome: /^00[_-]/.test(file) || file === `${label}模块`,
+      groupOrder: parsePrefix(dir).order,
     })
   }
-  // 外部资源主题页（seeds 单源）按 TOPIC_MOUNT 挂载到目标组（二轮起挂本体组）
+  // 外部资源主题页（seeds 单源）按 TOPIC_MOUNT 挂载到目标组
   const extMount = TOPIC_MOUNT['外部资源/外部资源导航']
-  const extMod = MODULES.find((m) => m.dir === extMount?.group)
   out.push({
     key: '外部资源/外部资源导航',
     file: '外部资源导航',
@@ -115,8 +116,10 @@ const TOPICS: Topic[] = (() => {
     md: EXTERNAL_RESOURCES_MD,
     base: 'seeds/learning',
     group: extMount?.group ?? '外部资源',
-    groupLabel: extMod?.label ?? '外部资源',
-    icon: extMod?.icon ?? <LinkOutlined />,
+    groupLabel: extMount?.group ?? '外部资源',
+    icon: GROUP_ICONS[extMount?.group ?? ''] ?? DEFAULT_ICON,
+    isHome: false,
+    groupOrder: Number.POSITIVE_INFINITY,
   })
   return out
 })()
@@ -131,21 +134,17 @@ interface Frontmatter {
   synced?: string
 }
 
-/** 组内排序：组主页置顶（模块导读/平台总览）→ 有文档编号者按编号升序 → 无编号者按标题（zh）排在编号文档之后 */
+/** 组内排序：组主页置顶（00_ 前缀/模块导读）→ 有数字前缀者按编号升序（兼容 NN_/NN-）→ 无前缀者按标题（zh）殿后 */
 function compareTopics(a: Topic, b: Topic): number {
-  const ga = isGroupHome(a) ? 0 : 1
-  const gb = isGroupHome(b) ? 0 : 1
-  if (ga !== gb) return ga - gb
-  const na = /^(\d+)_/.exec(a.file)?.[1]
-  const nb = /^(\d+)_/.exec(b.file)?.[1]
+  if (a.isHome !== b.isHome) return a.isHome ? -1 : 1
+  const aBase = a.file.slice(a.file.lastIndexOf('/') + 1)
+  const bBase = b.file.slice(b.file.lastIndexOf('/') + 1)
+  const na = /^(\d+)[_-]/.exec(aBase)?.[1]
+  const nb = /^(\d+)[_-]/.exec(bBase)?.[1]
   const va = na ? Number(na) : Number.POSITIVE_INFINITY
   const vb = nb ? Number(nb) : Number.POSITIVE_INFINITY
   if (va !== vb) return va - vb
   return a.title.localeCompare(b.title, 'zh-Hans-CN')
-}
-
-function isGroupHome(t: Topic): boolean {
-  return t.title === '模块导读' || t.file === (HOME_FILE[t.group] ?? `${t.group}模块`)
 }
 
 /** 解析文章头部 `---` frontmatter（轻量 key: [a, b] 格式，无需引入 YAML 依赖） */
@@ -217,27 +216,33 @@ function SourceMap({ meta, onOpenDoc }: { meta: Frontmatter; onOpenDoc: (path: s
   )
 }
 
+/** L1 分组：按顶层目录自动派生（REQ-188）——前缀序 → 未登记/无前缀目录兜底置尾（不丢档） */
+const GROUPS = (() => {
+  const m = new Map<string, Topic[]>()
+  for (const t of TOPICS) {
+    const arr = m.get(t.group)
+    if (arr) arr.push(t)
+    else m.set(t.group, [t])
+  }
+  return [...m.entries()]
+    .map(([g, topics]) => ({
+      group: g,
+      label: g,
+      icon: GROUP_ICONS[g] ?? DEFAULT_ICON,
+      order: Math.min(...topics.map((t) => t.groupOrder)),
+      topics: topics.sort(compareTopics),
+    }))
+    .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label, 'zh-Hans-CN'))
+})()
+
+/** 默认选中：首组主页（修复历史遗留的失效 key「总览/平台总览」） */
+const DEFAULT_ACTIVE = GROUPS[0]?.topics.find((t) => t.isHome)?.key ?? GROUPS[0]?.topics[0]?.key ?? ''
+
 export default function ReferencePage() {
-  const [active, setActive] = useState('总览/平台总览')
+  const [active, setActive] = useState(DEFAULT_ACTIVE)
   const [viewDoc, setViewDoc] = useState<string | null>(null) // REQ-169：点击互引相对路径 → 右侧 Drawer 阅读，默认关闭
   const topic = TOPICS.find((t) => t.key === active) ?? TOPICS[0]
   const { meta, body } = useMemo(() => parseFrontmatter(topic.md), [topic])
-  const groups = useMemo(() => {
-    const m = new Map<string, Topic[]>()
-    for (const t of TOPICS) {
-      const arr = m.get(t.group)
-      if (arr) arr.push(t)
-      else m.set(t.group, [t])
-    }
-    // 规划序在前；未来新增目录若未登记 GROUP_ORDER，按模块注册表序兜底追加（目录驱动不丢组）
-    const ordered = GROUP_ORDER.filter((g) => m.has(g))
-    const rest = MODULES.map((x) => x.dir).filter((d) => m.has(d) && !GROUP_ORDER.includes(d))
-    return [...ordered, ...rest].map((g) => {
-      const mod = MODULES.find((x) => x.dir === g)
-      const topics = (m.get(g) ?? []).sort(compareTopics)
-      return { group: g, label: mod?.label ?? g, icon: mod?.icon ?? <LinkOutlined />, topics }
-    })
-  }, [])
   /** 正文相对引用点击（REQ-169）：拦截指向仓库内 .md 的相对路径 → 右侧 Drawer 阅读；http/锚点走默认 */
   const onBodyClick = (e: MouseEvent) => {
     const a = (e.target as HTMLElement).closest?.('a')
@@ -267,7 +272,7 @@ export default function ReferencePage() {
               defaultOpenKeys={[]}
               onClick={({ key }) => setActive(String(key))}
               style={{ background: 'transparent' }}
-              items={groups.map((g) =>
+              items={GROUPS.map((g) =>
                 g.topics.length === 1
                   ? { key: g.topics[0].key, icon: g.icon, label: g.label }
                   : {
@@ -284,8 +289,14 @@ export default function ReferencePage() {
                           subMap.get(sub)!.push(t)
                         }
                         const items: any = roots.map((t) => ({ key: t.key, label: t.title }))
-                        for (const sub of [...subMap.keys()].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))) {
-                          items.push({ key: `${g.group}/${sub}`, label: sub, children: subMap.get(sub)!.map((t) => ({ key: t.key, label: t.title })) })
+                        // 子目录按数字前缀排序（REQ-188；无前缀按名置尾）
+                        const subs = [...subMap.keys()].sort((a, b) => {
+                          const pa = parsePrefix(a)
+                          const pb = parsePrefix(b)
+                          return pa.order - pb.order || pa.label.localeCompare(pb.label, 'zh-Hans-CN')
+                        })
+                        for (const sub of subs) {
+                          items.push({ key: `${g.group}/${sub}`, label: parsePrefix(sub).label, children: subMap.get(sub)!.map((t) => ({ key: t.key, label: t.title })) })
                         }
                         return items
                       })(),
@@ -296,7 +307,7 @@ export default function ReferencePage() {
           <div className="settings-note">
             内容收录目录驱动（
             <Typography.Text code style={{ fontSize: 11 }}>platform-knowledge/</Typography.Text>
-            ）；页面组织按导航模块规划，新增文档落入模块目录后重建即生效。
+            ）；新增目录/文档按数字前缀落入后重建即生效（REQ-188）。
           </div>
         </aside>
       </Splitter.Panel>
