@@ -748,8 +748,8 @@ function OoGuide() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="Open Ontologies 流程——双轨构建（oo-worker :8092 独立托管）"
-        description="open-ontologies（Rust 单二进制，MIT）：RDFS/OWL-RL 物化推理、SHACL 校验、不一致检查、变更影响分析、多源数据装载。其本体为 TTL 文件集（worker data-dir 自管），不进主线 spec_json 体系。"
+        message="Open Ontologies 流程——双轨构建（oo serve-http :8092 已集成，M8.5）"
+        description="open-ontologies v2.0.1（Rust 单二进制，MIT）：119 个 onto_* MCP 工具（推理/SHACL/映射/Data Pipeline/版本/FOL），serve-http 原生 Streamable HTTP；平台经 /api/oo/ 同源反代，对话可在智能体 MCP 预设一键挂载。其本体为 TTL 文件集（data-dir 自管），不进主线 spec_json 体系。"
       />
       <div className="onto-sec" style={{ marginTop: 0 }}>
         <span className="onto-sec-title">学习要点</span>
@@ -757,7 +757,7 @@ function OoGuide() {
       <ul className="onto-report-list">
         <li>物化推理与主线「显式重载」的差异：oo 建库即物化，主线查询时精确匹配</li>
         <li>SHACL 约束建模 vs 主线 JSON Schema + 引用完整性校验</li>
-        <li>39 个 onto_* 工具 vs 主线 facade 4 个固定签名工具</li>
+        <li>119 个 onto_* MCP 工具（v2）vs 主线 facade 5 个固定签名工具</li>
       </ul>
       <div className="onto-sec">
         <span className="onto-sec-title">产物回流（P1 手工）</span>
@@ -768,8 +768,8 @@ function OoGuide() {
         <li>REQ-78 双轨 TTL 互通（P2）后自动化</li>
       </ol>
       <Space style={{ marginTop: 12 }} wrap>
-        <Button type="primary" href="/api/oo/" target="_blank" rel="noreferrer">
-          前往 Open Ontologies 工作台
+        <Button type="primary" href="/api/oo/mcp" target="_blank" rel="noreferrer">
+          查看 oo MCP 端点（/api/oo/mcp）
         </Button>
         <Button icon={<RightOutlined />} onClick={() => { localStorage.setItem('eino.onto.sidebar', 'runtime'); window.dispatchEvent(new CustomEvent('onto-sidebar-change')) }}>
           查看运行栏 oo 引导页

@@ -38,7 +38,13 @@ const MAX_PANEL_WIDTH = 720
 
 /** 本地已知 MCP server 预设（REQ-99 ③ 通用挂载契约保留；D-O15 起 semantica 预设随「去-semantica 化」移除，
  *  通用 MCP servers 编辑能力不变，后续 open-ontologies 等预设随里程碑补入） */
-const MCP_PRESETS: { name: string; url: string; desc: string }[] = []
+const MCP_PRESETS: { name: string; url: string; desc: string }[] = [
+  {
+    name: 'open-ontologies',
+    url: 'http://127.0.0.1:8092/mcp',
+    desc: 'M8.5：oo 双轨 MCP（119 onto_* 工具，Streamable HTTP 原生；v2.0.1）——对话挂载 oo 推理/校验/映射能力；平台同源等价地址 /api/oo/mcp',
+  },
+]
 
 /** MCP server 编辑行（name + url，Form.List 受控） */
 function McpServerRow({ name, remove }: { name: number; remove: (i: number) => void }) {

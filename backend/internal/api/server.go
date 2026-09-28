@@ -7,6 +7,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
@@ -37,6 +41,34 @@ type Server struct {
 	Mux           *http.ServeMux
 	mcpMu         sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
 	mcpHTTP       http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
+}
+
+// ooProxy M8.5（REQ-100/M9 双轨集成）：/api/oo/* 反代 open-ontologies serve-http（默认 :8092）。
+// 用途：①平台同源 MCP 面（Agent 挂载可指向 /api/oo/mcp，免跨端口）；②oo 未来 Web UI 直接嵌入。
+// oo 不可达时由反代返回 502（诚实降级，不阻断平台其余功能）。
+func (s *Server) ooProxy() http.Handler {
+	target := os.Getenv("OO_SVC_URL")
+	if target == "" {
+		target = "http://127.0.0.1:8092"
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		u, _ = url.Parse("http://127.0.0.1:8092")
+	}
+	proxy := httputil.NewSingleHostReverseProxy(u)
+	orig := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		orig(req)
+		req.Host = u.Host
+		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/api/oo")
+		if req.URL.Path == "" {
+			req.URL.Path = "/"
+		}
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "open-ontologies 服务不可达（OO_SVC_URL=" + target + "）: " + err.Error()})
+	}
+	return proxy
 }
 
 // NewServer 构造并注册全部路由。
@@ -120,6 +152,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/assistant/proposal", s.assistantProposalGet)   // M-O14 阶段三：L1 提案两段式（查看）
 	m.HandleFunc("POST /api/assistant/proposal/{id}/apply", s.assistantProposalApply)   // 确认应用
 	m.HandleFunc("POST /api/assistant/proposal/{id}/discard", s.assistantProposalDiscard) // 忽略
+	m.Handle("/api/oo/", s.ooProxy()) // M8.5：oo 双轨同源反代（MCP 面 /api/oo/mcp + 工作台资源）
 	m.HandleFunc("POST /api/assistant/optimize", s.assistantOptimize)              // M27/REQ-167                                  // REQ-140：内部方案文档只读查看
 	m.HandleFunc("POST /api/conversations/{id}/auto-name", s.autoNameConversation) // REQ-136：对话自动命名
 	// M11 收尾：中断恢复（ask_human 答复定向续跑）

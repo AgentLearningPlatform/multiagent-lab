@@ -78,6 +78,17 @@ echo "[run-dev] 启动 ontology-service: http://localhost:8091"
 ADDR=":8091" DB_PATH=data/ontology.db MIGRATIONS_DIR=ontology-service/migrations \
   SIDECAR_SCRIPT="$PWD/tools/rdf-sidecar/sidecar.py" \
   data/bin/ontologyd >data/ontology-service.log 2>&1 &
+
+# M8.5：oo 双轨（open-ontologies serve-http :8092）——二进制存在才托管，无则诚实跳过
+if [ -x data/bin/open-ontologies ]; then
+  echo "[run-dev] 启动 oo 双轨: http://localhost:8092/mcp（119 工具，Streamable HTTP 原生）"
+  if [ ! -d data/oo-worker ]; then
+    ./data/bin/open-ontologies init --data-dir data/oo-worker >/dev/null 2>&1 || echo "[run-dev] oo init 未完成（离线时嵌入模型拉取失败；语义检索降级，不影响 MCP 面）"
+  fi
+  OPEN_ONTOLOGIES_HTTP_HOST=127.0.0.1 OPEN_ONTOLOGIES_HTTP_PORT=8092     nohup ./data/bin/open-ontologies serve-http --data-dir data/oo-worker >data/oo-worker.log 2>&1 &
+else
+  echo "[run-dev] oo 双轨未托管（data/bin/open-ontologies 不存在——GitHub release v2.0.1 下载后自动启用）"
+fi
 ONT_PID=$!
 
 echo "[run-dev] 启动 runtime-manager: http://localhost:8090"
