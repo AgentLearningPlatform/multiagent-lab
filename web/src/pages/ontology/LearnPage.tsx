@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Collapse, Progress, Skeleton, Space, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Collapse, Menu, Progress, Skeleton, Space, Tag, Typography } from 'antd'
 import {
   BookOutlined,
   CheckCircleOutlined,
@@ -315,6 +315,11 @@ export default function LearnPage() {
   const [checklist, setChecklist] = useState<Record<string, string>>(readChecklist)
   const [learningExamples, setLearningExamples] = useState<{ key: string; name: string; description: string }[] | null>(null)
   const [activeStage, setActiveStage] = useState<string>('s1') // REQ-162①：方块步骤条选中阶段
+  // REQ-182：左导航子模块选中（学习路径默认首屏主轴；localStorage 记忆）
+  const [section, setSection] = useState<string>(() => localStorage.getItem('eino.onto.learn.section') ?? 'path')
+  useEffect(() => {
+    localStorage.setItem('eino.onto.learn.section', section)
+  }, [section])
 
   useEffect(() => {
     api
@@ -351,103 +356,113 @@ export default function LearnPage() {
 
   const taskByStage = (stage: string) => TASKS.filter((t) => t.stage === stage)
 
-  const stagePanels = STAGE_DEFS.map((s, i) => {
+  /** REQ-182：阶段详情（方法论卡片 + 任务卡）——「学习路径」与「方法论与任务卡」两视图复用 */
+  const stageDetail = (stageKey: string) => {
+    const i = STAGE_DEFS.findIndex((x) => x.key === stageKey)
+    const s = STAGE_DEFS[i]
     const prog = stageProgress.get(s.key) ?? { total: 0, done: 0 }
     const methods = METHODOLOGY.filter((m) => m.stage === s.key)
-    const isBuildStage = i <= 3
-    return {
-      key: s.key,
-      short: s.short,
-      color: STAGE_COLORS[s.key],
-      isBuildStage,
-      children: (
-        <div className="onto-learn-stage">
-          {methods.map((m) => (
-            <Collapse
-              key={m.key}
-              size="small"
-              className="onto-learn-method"
-              items={[{
-                key: m.key,
-                label: (
-                  <Space size={6} wrap>
-                    <BookOutlined style={{ color: 'var(--c-brand)' }} />
-                    <span style={{ fontWeight: 600 }}>{m.title}</span>
-                    <Tag color="blue" style={{ margin: 0 }}>{m.tag}</Tag>
-                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>方法论卡片 · REQ-90</Typography.Text>
-                  </Space>
-                ),
-                children: (
-                  <>
-                    <StructuredText text={m.body} />
-                    <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
-                      来源：seeds/learning/methodology/ 深度全文 · 对应文档 03 §2（REQ-90）
-                    </Typography.Text>
-                    <Collapse
-                      size="small"
-                      ghost
-                      items={[
-                        {
-                          key: 'deep',
-                          label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>深度版（REQ-90 P2 补齐）</Typography.Text>,
-                          children: <StructuredText text={m.deep} small />,
-                        },
-                      ]}
-                    />
-                  </>
-                ),
-              }]}
-            />
-          ))}
-          {methods.length === 0 && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>本阶段方法论卡片随 P2 深度版补齐。</Typography.Text>
-          )}
-          {prog.total > 0 && (
-            <div className="onto-learn-tasks">
-              <div className="onto-learn-tasks-head">
-                <span>任务卡（{prog.done}/{prog.total} 已完成）</span>
-                <Progress percent={Math.round((prog.done / prog.total) * 100)} size="small" style={{ width: 120, margin: 0 }} showInfo={false} />
-              </div>
-              {taskByStage(s.key).map((t) => {
-                const done = !!checklist[t.id]
-                const prereqOk = t.prereq.every((p) => checklist[p])
-                return (
-                  <div key={t.id} className={`onto-task-card${done ? ' done' : ''}`}>
-                    <div className="onto-task-head">
-                      <Button
-                        size="small"
-                        type={done ? 'primary' : 'default'}
-                        icon={<CheckCircleOutlined />}
-                        disabled={!prereqOk && !done}
-                        title={!prereqOk && !done ? `前置任务未完成：${t.prereq.join(', ')}` : undefined}
-                        onClick={() => toggleTask(t.id)}
-                      >
-                        {done ? '已完成' : '打卡'}
-                      </Button>
-                      <span className="onto-task-title">{t.title}</span>
-                      <Tag style={{ margin: 0 }}>难度 {t.difficulty}</Tag>
-                    </div>
-                    <div className="onto-task-body">
-                      <p><b>目标：</b>{t.goal}</p>
-                      <ol>
-                        {t.steps.map((st, j) => (
-                          <li key={j}>{st}</li>
-                        ))}
-                      </ol>
-                      <p className="onto-task-accept"><b>验收问题：</b>{t.acceptance}</p>
-                      <Button size="small" type="link" icon={<RightOutlined />} onClick={() => goSidebar(t.link.sidebar)}>
-                        {t.link.text}
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })}
+    return (
+      <div className="onto-learn-stage">
+        {methods.map((m) => (
+          <Collapse
+            key={m.key}
+            size="small"
+            className="onto-learn-method"
+            items={[{
+              key: m.key,
+              label: (
+                <Space size={6} wrap>
+                  <BookOutlined style={{ color: 'var(--c-brand)' }} />
+                  <span style={{ fontWeight: 600 }}>{m.title}</span>
+                  <Tag color="blue" style={{ margin: 0 }}>{m.tag}</Tag>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>方法论卡片 · REQ-90</Typography.Text>
+                </Space>
+              ),
+              children: (
+                <>
+                  <StructuredText text={m.body} />
+                  <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
+                    来源：seeds/learning/methodology/ 深度全文 · 对应文档 03 §2（REQ-90）
+                  </Typography.Text>
+                  <Collapse
+                    size="small"
+                    ghost
+                    items={[
+                      {
+                        key: 'deep',
+                        label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>深度版（REQ-90 P2 补齐）</Typography.Text>,
+                        children: <StructuredText text={m.deep} small />,
+                      },
+                    ]}
+                  />
+                </>
+              ),
+            }]}
+          />
+        ))}
+        {methods.length === 0 && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>本阶段方法论卡片随 P2 深度版补齐。</Typography.Text>
+        )}
+        {prog.total > 0 && (
+          <div className="onto-learn-tasks">
+            <div className="onto-learn-tasks-head">
+              <span>任务卡（{prog.done}/{prog.total} 已完成）</span>
+              <Progress percent={Math.round((prog.done / prog.total) * 100)} size="small" style={{ width: 120, margin: 0 }} showInfo={false} />
             </div>
-          )}
-        </div>
-      ),
-    }
-  })
+            {taskByStage(s.key).map((t) => {
+              const done = !!checklist[t.id]
+              const prereqOk = t.prereq.every((pp) => checklist[pp])
+              return (
+                <div key={t.id} className={`onto-task-card${done ? ' done' : ''}`}>
+                  <div className="onto-task-head">
+                    <Button
+                      size="small"
+                      type={done ? 'primary' : 'default'}
+                      icon={<CheckCircleOutlined />}
+                      disabled={!prereqOk && !done}
+                      title={!prereqOk && !done ? `前置任务未完成：${t.prereq.join(', ')}` : undefined}
+                      onClick={() => toggleTask(t.id)}
+                    >
+                      {done ? '已完成' : '打卡'}
+                    </Button>
+                    <span className="onto-task-title">{t.title}</span>
+                    <Tag style={{ margin: 0 }}>难度 {t.difficulty}</Tag>
+                  </div>
+                  <div className="onto-task-body">
+                    <p><b>目标：</b>{t.goal}</p>
+                    <ol>
+                      {t.steps.map((st, j) => (
+                        <li key={j}>{st}</li>
+                      ))}
+                    </ol>
+                    <p className="onto-task-accept"><b>验收问题：</b>{t.acceptance}</p>
+                    <Button size="small" type="link" icon={<RightOutlined />} onClick={() => goSidebar(t.link.sidebar)}>
+                      {t.link.text}
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+          阶段 {i + 1}/{STAGE_DEFS.length} · {s.short}
+        </Typography.Text>
+      </div>
+    )
+  }
+
+
+  // REQ-182：左导航子模块定义（徽标带进度）
+  const menuItems = [
+    { key: 'path', label: <Space size={6}>学习路径<Tag style={{ margin: 0 }} color="geekblue">{totalDone}/{TASKS.length}</Tag></Space> },
+    { key: 'methods', label: <Space size={6}>方法论与任务卡<Tag style={{ margin: 0 }}>{STAGE_DEFS.find((x) => x.key === activeStage)?.short}</Tag></Space> },
+    { key: 'build-paths', label: '构建方式对照' },
+    { key: 'runtime-paths', label: '运行方式对照' },
+    { key: 'examples', label: '示例本体库' },
+    { key: 'pipeline', label: '工具链配置' },
+  ]
 
   return (
     <div className="work-main">
@@ -466,48 +481,74 @@ export default function LearnPage() {
         </div>
       </div>
 
-      <Card className="work-card" size="small" title="七阶段学习路径（S1 → S7）">
-        <div className="onto-learn-steps" role="tablist" aria-label="七阶段学习路径步骤条">
-          {stagePanels.map((st, i) => {
-            const prog = stageProgress.get(st.key) ?? { total: 0, done: 0 }
-            const allDone = prog.total > 0 && prog.done === prog.total
-            return (
-              <Fragment key={st.key}>
-                {i > 0 && <RightOutlined className="onto-learn-step-arrow" aria-hidden="true" />}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeStage === st.key}
-                  className={`onto-learn-step${activeStage === st.key ? ' active' : ''}${allDone ? ' done' : ''}`}
-                  onClick={() => setActiveStage(st.key)}
-                  title={st.isBuildStage ? `${st.short}（构建段）` : `${st.short}（运行段 · 见运行栏）`}
-                >
-                  <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key] }}>{st.key.toUpperCase()}</span>
-                  <span className="onto-learn-step-name">{st.short}</span>
-                  {prog.total > 0 && (
-                    <span className={`onto-learn-step-badge${allDone ? ' done' : ''}`}>{prog.done}/{prog.total}</span>
-                  )}
-                </button>
-              </Fragment>
-            )
-          })}
-        </div>
-        {(() => {
-          const panel = stagePanels.find((x) => x.key === activeStage) ?? stagePanels[0]
-          return (
-            <div className="onto-learn-stage-detail" role="tabpanel">
-              {panel.children}
-            </div>
-          )
-        })()}
-      </Card>
+      {/* REQ-182：左子模块导航 + 右内容区两栏（学习路径为默认首屏主轴） */}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <Menu
+          mode="vertical"
+          selectedKeys={[section]}
+          onClick={({ key }) => setSection(key as string)}
+          style={{ width: 188, flexShrink: 0, position: 'sticky', top: 8, background: 'transparent', borderInlineEnd: 'none' }}
+          items={menuItems}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {section === 'path' && (
+            <Card className="work-card" size="small" title="七阶段学习路径（S1 → S7）">
+              <div className="onto-learn-steps" role="tablist" aria-label="七阶段学习路径步骤条">
+                {STAGE_DEFS.map((st, i) => {
+                  const prog = stageProgress.get(st.key) ?? { total: 0, done: 0 }
+                  const allDone = prog.total > 0 && prog.done === prog.total
+                  return (
+                    <Fragment key={st.key}>
+                      {i > 0 && <RightOutlined className="onto-learn-step-arrow" aria-hidden="true" />}
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeStage === st.key}
+                        className={`onto-learn-step${activeStage === st.key ? ' active' : ''}${allDone ? ' done' : ''}`}
+                        onClick={() => setActiveStage(st.key)}
+                        title={i <= 3 ? `${st.short}（构建段）` : `${st.short}（运行段 · 见运行栏）`}
+                      >
+                        <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key] }}>{st.key.toUpperCase()}</span>
+                        <span className="onto-learn-step-name">{st.short}</span>
+                        {prog.total > 0 && (
+                          <span className={`onto-learn-step-badge${allDone ? ' done' : ''}`}>{prog.done}/{prog.total}</span>
+                        )}
+                      </button>
+                    </Fragment>
+                  )
+                })}
+              </div>
+              <div className="onto-learn-stage-detail" role="tabpanel">
+                {stageDetail(activeStage)}
+              </div>
+            </Card>
+          )}
 
-      <Tabs
-        items={[
-          {
-            key: 'build-paths',
-            label: '构建方式对照',
-            children: (
+          {section === 'methods' && (
+            <Card className="work-card" size="small" title="方法论与任务卡（按阶段）">
+              <div className="onto-learn-steps" role="tablist" aria-label="阶段切换">
+                {STAGE_DEFS.map((st) => (
+                  <button
+                    key={st.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeStage === st.key}
+                    className={`onto-learn-step${activeStage === st.key ? ' active' : ''}`}
+                    onClick={() => setActiveStage(st.key)}
+                  >
+                    <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key] }}>{st.key.toUpperCase()}</span>
+                    <span className="onto-learn-step-name">{st.short}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="onto-learn-stage-detail" role="tabpanel">
+                {stageDetail(activeStage)}
+              </div>
+            </Card>
+          )}
+
+          {section === 'build-paths' && (
+            <Card className="work-card" size="small" title="构建方式对照（六路径）">
               <div className="onto-learn-cards">
                 {BUILD_PATH_CARDS.map((c) => (
                   <div className="onto-learn-card" key={c.key}>
@@ -524,87 +565,85 @@ export default function LearnPage() {
                   </div>
                 ))}
               </div>
-            ),
-          },
-          {
-            key: 'runtime-paths',
-            label: '运行方式对照',
-            children: (
-              <>
-                <Alert
-                  type="success"
-                  showIcon
-                  style={{ marginBottom: 10 }}
-                  message="同一份本体在不同引擎下行为不同——这是本体运行环节的核心学习点"
-                  description="推理对照已随 Fuseki（O6）激活：对同一本体建两套 Fuseki 方案（推理一开一关），同一 SPARQL 并行发往两套方案对照结果差异（推荐用 subClassOf 子类实例验证类型传导）。"
-                />
-                <div className="onto-learn-cards">
-                  {RUNTIME_CARDS.map((c) => (
-                    <div className="onto-learn-card" key={c.engine}>
-                      <div className="onto-learn-card-head">
-                        <span className="onto-learn-card-title">
-                          <CloudServerOutlined style={{ marginRight: 6, color: 'var(--c-brand)' }} />
-                          {c.engine}
-                        </span>
-                        <Tag color={c.tag.color} style={{ margin: 0 }}>{c.tag.text}</Tag>
-                      </div>
-                      <p className="onto-learn-card-line"><b>推理能力：</b>{c.推理}</p>
-                      <p className="onto-learn-card-line"><b>学习要点：</b>{c.points}</p>
-                      <p className="onto-learn-card-line"><b>入口：</b>{c.entry}</p>
-                      <Button size="small" type="link" icon={<RightOutlined />} onClick={() => goSidebar('runtime')}>
-                        前往运行栏
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ),
-          },
-          {
-            key: 'examples',
-            label: '示例本体库',
-            children: learningExamples === null ? (
-              <Skeleton active title={false} paragraph={{ rows: 3 }} />
-            ) : learningExamples.length === 0 ? (
-              <Typography.Text type="secondary">构建平面未返回学习示例（需 ontology-service 就绪）。</Typography.Text>
-            ) : (
+            </Card>
+          )}
+
+          {section === 'runtime-paths' && (
+            <Card className="work-card" size="small" title="运行方式对照（引擎差异）">
+              <Alert
+                type="success"
+                showIcon
+                style={{ marginBottom: 10 }}
+                message="同一份本体在不同引擎下行为不同——这是本体运行环节的核心学习点"
+                description="推理对照已随 Fuseki（O6）激活：对同一本体建两套 Fuseki 方案（推理一开一关），同一 SPARQL 并行发往两套方案对照结果差异（推荐用 subClassOf 子类实例验证类型传导）。"
+              />
               <div className="onto-learn-cards">
-                {learningExamples.map((le) => (
-                  <div className="onto-learn-card" key={le.key}>
+                {RUNTIME_CARDS.map((c) => (
+                  <div className="onto-learn-card" key={c.engine}>
                     <div className="onto-learn-card-head">
-                      <span className="onto-learn-card-title">{le.name}</span>
-                      <Tag style={{ margin: 0 }}>{le.key}</Tag>
+                      <span className="onto-learn-card-title">
+                        <CloudServerOutlined style={{ marginRight: 6, color: 'var(--c-brand)' }} />
+                        {c.engine}
+                      </span>
+                      <Tag color={c.tag.color} style={{ margin: 0 }}>{c.tag.text}</Tag>
                     </div>
-                    <p className="onto-learn-card-line">{le.description}</p>
-                    <Button
-                      size="small"
-                      type="primary"
-                      ghost
-                      onClick={() => {
-                        api
-                          .seedLearningExample(le.key)
-                          .then((o) => {
-                            showToast((o as unknown as { seeded?: boolean }).seeded === false ? '该学习示例已存在' : `学习示例「${o.name}」已创建`)
-                          })
-                          .catch((e: any) => showToast(e.message, 'err'))
-                      }}
-                    >
-                      一键灌装到资产
+                    <p className="onto-learn-card-line"><b>推理能力：</b>{c.推理}</p>
+                    <p className="onto-learn-card-line"><b>学习要点：</b>{c.points}</p>
+                    <p className="onto-learn-card-line"><b>入口：</b>{c.entry}</p>
+                    <Button size="small" type="link" icon={<RightOutlined />} onClick={() => goSidebar('runtime')}>
+                      前往运行栏
                     </Button>
                   </div>
                 ))}
-                <Alert type="success" showIcon message="7 示例本体已齐（REQ-91 ③ + REQ-153 大型种子）" description="覆盖构建路径与规模梯度：K8s 迷你运维（手写，seed-sample）、软件缺陷管理（AI 生成）、组织与人员（复用对照 FOAF）、设备故障知识（分类+灌装路径，第 5 例随 O13 KB 构建路径）+ 医学常识（med_common，102 概念/170 实例，禁忌关系网）、基因与中心法则（gene_core，104 概念/94 实例，命名对齐 HGNC）两个百级大型种子（REQ-153，兼作 NFR-O-3 性能载体）。每份示例附建模说明（seeds/learning/examples/*.README.md：背景/CQ/决策记录/局限）。" />
               </div>
-            ),
-          },
-          {
-            key: 'pipeline',
-            label: '工具链配置',
-            children: <PipelinePane />,
-          },
-        ]}
-        style={{ marginTop: 2 }}
-      />
+            </Card>
+          )}
+
+          {section === 'examples' && (
+            <Card className="work-card" size="small" title="示例本体库">
+              {learningExamples === null ? (
+                <Skeleton active title={false} paragraph={{ rows: 3 }} />
+              ) : learningExamples.length === 0 ? (
+                <Typography.Text type="secondary">构建平面未返回学习示例（需 ontology-service 就绪）。</Typography.Text>
+              ) : (
+                <div className="onto-learn-cards">
+                  {learningExamples.map((le) => (
+                    <div className="onto-learn-card" key={le.key}>
+                      <div className="onto-learn-card-head">
+                        <span className="onto-learn-card-title">{le.name}</span>
+                        <Tag style={{ margin: 0 }}>{le.key}</Tag>
+                      </div>
+                      <p className="onto-learn-card-line">{le.description}</p>
+                      <Button
+                        size="small"
+                        type="primary"
+                        ghost
+                        onClick={() => {
+                          api
+                            .seedLearningExample(le.key)
+                            .then((o) => {
+                              showToast((o as unknown as { seeded?: boolean }).seeded === false ? '该学习示例已存在' : `学习示例「${o.name}」已创建`)
+                            })
+                            .catch((e: any) => showToast(e.message, 'err'))
+                        }}
+                      >
+                        一键灌装到资产
+                      </Button>
+                    </div>
+                  ))}
+                  <Alert type="success" showIcon message="7 示例本体已齐（REQ-91 ③ + REQ-153 大型种子）" description="覆盖构建路径与规模梯度：K8s 迷你运维（手写，seed-sample）、软件缺陷管理（AI 生成）、组织与人员（复用对照 FOAF）、设备故障知识（分类+灌装路径，第 5 例随 O13 KB 构建路径）+ 医学常识（med_common，102 概念/170 实例，禁忌关系网）、基因与中心法则（gene_core，104 概念/94 实例，命名对齐 HGNC）两个百级大型种子（REQ-153，兼作 NFR-O-3 性能载体）。每份示例附建模说明（seeds/learning/examples/*.README.md：背景/CQ/决策记录/局限）。" />
+                </div>
+              )}
+            </Card>
+          )}
+
+          {section === 'pipeline' && (
+            <Card className="work-card" size="small" title="工具链配置（REQ-75/76）">
+              <PipelinePane />
+            </Card>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
