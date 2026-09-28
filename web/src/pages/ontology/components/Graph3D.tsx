@@ -60,6 +60,12 @@ function buildGraphData(spec: Spec) {
   const colorOf = (name: string): string => {
     const hit = colorMemo.get(name)
     if (hit) return hit
+    // 顶层根自身无父级，着色必须先查 rootColor（否则全图回落灰色——VIZ-2 重写回归，2026-09-28 修复）
+    const rootHit = rootColor.get(name)
+    if (rootHit) {
+      colorMemo.set(name, rootHit)
+      return rootHit
+    }
     let color = '#6b7280'
     const c = conceptBy.get(name)
     for (const p of c?.parents ?? []) {
@@ -225,7 +231,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
   const highlightRef = useRef<any | null>(null)
   const applyHighlight = () => {
     const g = fgRef.current as any
-    if (!g || typeof g.graphData !== 'function') return
+    if (!g) return
     const cur = highlightRef.current
     let keep: Set<string> | null = null
     if (cur) {
@@ -237,12 +243,14 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
         keep = new Set(neighbors.get(String(cur.id)) ?? [])
       }
     }
-    for (const n of g.graphData().nodes as any[]) {
+    // 数据侧遍历：force-graph 就地扩展传入的节点对象（__threeObj 同引用可达）；
+    // ref 转发面无 graphData（v1.2x 拆分后数据只走 props），不得经 ref 取图数据
+    for (const n of data.nodes as any[]) {
       const obj = n.__threeObj
       if (!obj) continue
       obj.scale.setScalar(cur && n.id !== cur.id && !keep?.has(n.id) ? n.radius * 0.25 : n.radius)
     }
-    g.linkOpacity(cur ? 0.85 : 0.32)
+    if (typeof g.linkOpacity === 'function') g.linkOpacity(cur ? 0.85 : 0.32)
   }
 
   // R4 选中环：TorusGeometry 环绕选中节点
@@ -265,6 +273,24 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     g.scene().add(ring)
     ringRef.current = ring
   }
+
+  // 灯光保障（幂等）：自定义节点为 Mesh + Lambert 材质（受光照驱动），场景无灯或灯弱时全部节点呈灰色。
+  // 诊断输出场景灯光与材质样例，用于验证渲染链路。
+  useEffect(() => {
+    const g = fgRef.current as any
+    if (!g || typeof g.scene !== 'function') return
+    const scn = g.scene()
+    if (!scn) return
+    const lights = scn.children.filter((c: any) => c.isLight)
+    if (!lights.some((l: any) => l.type === 'AmbientLight')) {
+      // 强度按 three r155+ 物理光照单位制取值（×π 等效旧制 1.0；低强度下 Lambert 节点整体发灰），
+      // 与 3d-force-graph 库默认灯光同量级（Ambient π / Directional 0.6π）
+      scn.add(new THREE.AmbientLight(0xffffff, Math.PI))
+      const dir = new THREE.DirectionalLight(0xffffff, 0.6 * Math.PI)
+      dir.position.set(300, 500, 200)
+      scn.add(dir)
+    }
+  }, [])
 
   // ref 方法守卫（react-force-graph-3d ref 转发面随版本差异，缺失方法静默跳过）
   const callFg = (method: string, ...args: any[]) => {
@@ -321,16 +347,14 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     firstFitRef.current = false // 布局切换改变空间分布，收敛后重新全景适配
   }, [layout, data, spec])
 
-  // R1⑤：ResizeObserver 容器尺寸跟随
+  // R1⑤：ResizeObserver 容器尺寸跟随（props 驱动——ref 转发面无 width/height setter，
+  // 仅经 props 下发才会触发内部 renderer resize）
   useEffect(() => {
     const el = containerRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
-      const g = fgRef.current as any
-      if (!g || typeof g.width !== 'function') return
       if (el.clientWidth > 0 && el.clientHeight > 0) {
-        g.width(el.clientWidth)
-        g.height(el.clientHeight)
+        setInitSize((cur) => (cur.w === el.clientWidth && cur.h === el.clientHeight ? cur : { w: el.clientWidth, h: el.clientHeight }))
       }
     })
     ro.observe(el)
@@ -483,12 +507,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
                 updateRing(null)
               }}
               onEngineStop={() => {
-                const el = containerRef.current
                 const g = fgRef.current as any
-                if (el && g && typeof g.width === 'function' && el.clientWidth > 0) {
-                  g.width(el.clientWidth)
-                  g.height(el.clientHeight)
-                }
                 if (!firstFitRef.current) {
                   firstFitRef.current = true
                   if (typeof g.zoomToFit === 'function') g.zoomToFit(0, 60) // 力布局收敛后全景适配（无边界力模型节点会飘出初始视野）
