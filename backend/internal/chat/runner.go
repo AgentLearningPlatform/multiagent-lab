@@ -134,18 +134,24 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 
 	// M10 §6.3：执行后端分发——沙箱（docker/k8s Pod，形态由平台 SANDBOX_BACKEND 统一决定）→
 	// Start + /run SSE 透传；inprocess → 进程内装配执行。agent.RuntimeBackend 是沙箱意图
-	// （docker|k8s 均视为走沙箱），实际执行形态以平台装配的 Runtime 后端为准（不匹配发
-	// run.warning 诚实提示，2026-09-29 k8s 真机验证轮修正：原判断硬编码 docker 致 k8s 永不分发）。
+	// （docker|k8s|auto 均视为走沙箱），实际执行形态以平台装配的 Runtime 后端为准（REQ-190：
+	// auto=自动检测——分发前 Available 预检，k8s/docker 均不可达时诚实回退进程内；显式
+	// 配置与实际形态不匹配发 run.warning，auto 免告警）。
 	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend != "" && agent.RuntimeBackend != "inprocess" {
 		if s.Runtime != nil {
-			if agent.RuntimeBackend != s.Runtime.Name() {
-				emit(newEvent("run.warning", runID, map[string]any{
-					"message": fmt.Sprintf("智能体配置了 %s 执行后端，平台沙箱后端为 %s，本次以 %s 执行", agent.RuntimeBackend, s.Runtime.Name(), s.Runtime.Name()),
-				}))
+			if p, ok := s.Runtime.(runtime.Prober); ok && !p.Available(ctx) {
+				emit(newEvent("run.warning", runID, map[string]any{"message": "自动检测：k8s/docker 沙箱均不可用，本次以进程内执行"}))
+			} else {
+				if agent.RuntimeBackend != "auto" && agent.RuntimeBackend != s.Runtime.Name() {
+					emit(newEvent("run.warning", runID, map[string]any{
+						"message": fmt.Sprintf("智能体配置了 %s 执行后端，平台沙箱后端为 %s，本次以 %s 执行", agent.RuntimeBackend, s.Runtime.Name(), s.Runtime.Name()),
+					}))
+				}
+				return s.runDocker(ctx, conv, agent, runID, input, debug, debugPersist, emit)
 			}
-			return s.runDocker(ctx, conv, agent, runID, input, debug, debugPersist, emit)
-		} // 资源限制经 StartSpec 传入（10b）
-		emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了沙箱执行后端但平台未启用（SANDBOX_IMAGE 未配置），已回退 inprocess"}))
+		} else {
+			emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了沙箱执行后端但平台未启用（SANDBOX_IMAGE 未配置），已回退 inprocess"}))
+		}
 	}
 
 	// M13/D-O13 §6.16：推理后端分发——外部 CLI 后端（非 eino-adk）走适配器路径（能力降级见 §6.16.4）

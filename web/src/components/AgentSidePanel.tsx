@@ -307,15 +307,17 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
                     <InputNumber min={1} max={100} style={{ width: '100%' }} />
                   </Form.Item>
-                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱（需平台配置 SANDBOX_IMAGE），容器内同一套装配代码">
+                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱；k8s=Pod 沙箱；auto=自动检测（REQ-190：k8s pod 优先→docker 次之→均不可用进程内兜底；平台需配置 SANDBOX_IMAGE）">
                     <Select
                       options={[
                         { value: 'inprocess', label: 'inprocess（进程内）' },
                         { value: 'docker', label: 'docker（沙箱容器）' },
+                        { value: 'k8s', label: 'k8s（Pod 沙箱）' },
+                        { value: 'auto', label: 'auto（自动检测：k8s 优先）' },
                       ]}
                     />
                   </Form.Item>
-                  {runtimeBackend === 'docker' && (
+                  {(runtimeBackend === 'docker' || runtimeBackend === 'k8s' || runtimeBackend === 'auto') && (
                     <>
                       <Form.Item name="sandbox_memory" label="沙箱内存上限" extra="M10/10b：留空 = 默认 512m">
                         <Select

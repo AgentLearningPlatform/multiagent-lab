@@ -38,7 +38,8 @@ func stubKubectl(t *testing.T, phase, podIP string) (bin, logPath, manifestPath 
 		"  *\"jsonpath={.status.phase}\"*) echo \"" + phase + "\" ;;\n" +
 		"  *\"jsonpath={.status.podIP}\"*) echo \"" + podIP + "\" ;;\n" +
 		"  *\" apply \"*|*\"apply -f -\"*) cat > \"" + manifestPath + "\" ;;\n" +
-		"  *\"port-forward\"*) sleep 60 ;;\n" +
+		// port-forward 桩需真实服务本地端口：就绪等待拨通 + healthz 200 应答（nc 循环单发）
+		"  *\"port-forward\"*) PORT=${3%%:*}; while true; do printf 'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\nok' | nc -l 127.0.0.1 \"$PORT\" >/dev/null 2>&1; done ;;\n" +
 		"  *) exit 0 ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {

@@ -31,6 +31,12 @@ type DockerBackend struct {
 
 func (d *DockerBackend) Name() string { return "docker" }
 
+// Available 探测 docker 守护进程可达（REQ-190 auto 候选探测；超时由调用方 ctx 控制）。
+func (d *DockerBackend) Available(ctx context.Context) bool {
+	out, err := exec.CommandContext(ctx, d.dockerBin(), "version", "--format", "{{.Server.Version}}").Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
 func (d *DockerBackend) containerName(agentID string) string { return "agt-" + agentID }
 
 // instanceName 实例名（10c 作用域）：run 域且携带 RunID → agt-{agentID}-r-{run8}（每次 Run

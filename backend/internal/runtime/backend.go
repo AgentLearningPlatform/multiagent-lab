@@ -48,6 +48,12 @@ type Backend interface {
 	Status(ctx context.Context, agentID string) (BackendStatus, error)
 }
 
+// Prober 可用性探测（REQ-190 自动检测）：AutoBackend 按候选序调用，秒级超时由调用方
+// ctx 控制；未实现此接口的后端视为恒可用（显式构造即启用）。
+type Prober interface {
+	Available(ctx context.Context) bool
+}
+
 // Scope 沙箱实例作用域（M10 10c，SANDBOX_SCOPE）：agent（默认，每 Agent 一个常驻实例复用）
 // | run（每次 Run 一个独立实例，Run 收尾即清——更强隔离，免去跨 Run 状态残留）。
 // 非法/缺省一律回退 agent。

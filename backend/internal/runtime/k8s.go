@@ -44,6 +44,15 @@ type K8sBackend struct {
 
 func (k *K8sBackend) Name() string { return "k8s" }
 
+// Available 探测集群 API 可达（REQ-190 auto 候选探测；kubectl get --raw=/readyz，
+// 超时由调用方 ctx 控制——5s 硬上限防无集群环境 kubectl 长挂）。
+func (k *K8sBackend) Available(ctx context.Context) bool {
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := k.kubectl(pctx, "get", "--raw=/readyz")
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
 func (k *K8sBackend) podName(agentID string) string { return "agt-" + agentID }
 
 // instanceName 实例名（10c 作用域，与 DockerBackend 同规则）：run 域且携带 RunID →
@@ -276,7 +285,28 @@ func (k *K8sBackend) portForwardEndpoint(ctx context.Context, inst string) (Endp
 	}
 	k.forwards[inst] = cmd
 	k.ports[inst] = port
-	return Endpoint{URL: "http://127.0.0.1:" + port}, nil
+	// 就绪等待：kubectl 需 ~1s 与 API server 完成隧道协商，期间本地端口虽被监听但
+	// 数据不通——拨通即就绪、进程早退即报错，消除「复用路径拿到冷转发」竞态
+	//（REQ-190 验证轮：Pod 已 Running 而后端进程新起时必现 connection refused）。
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		select {
+		case <-done:
+			return Endpoint{}, fmt.Errorf("kubectl port-forward %s exited early", inst)
+		default:
+		}
+		conn, derr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), 500*time.Millisecond)
+		if derr == nil {
+			_ = conn.Close()
+			return Endpoint{URL: "http://127.0.0.1:" + port}, nil
+		}
+		if time.Now().After(deadline) {
+			return Endpoint{}, fmt.Errorf("port-forward %s not ready in 8s", inst)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 func (k *K8sBackend) endpointMode() string {

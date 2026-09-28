@@ -95,6 +95,26 @@ func main() {
 				TokenIssue:  srv.IssueManifestToken,
 			}
 			log.Printf("[backend] k8s sandbox backend enabled: image=%s namespace=%q endpoint_mode=%s", img, getenv("SANDBOX_K8S_NAMESPACE", ""), getenv("SANDBOX_K8S_ENDPOINT_MODE", "port-forward"))
+		case "auto":
+			// REQ-190：自动检测——k8s pod 优先 → docker 次之 → 均不可用进程内兜底
+			//（chat 分发前 Available 预检；探测粘滞缓存，环境变化自动换档）
+			svc.Runtime = &runtime.AutoBackend{Candidates: []runtime.Backend{
+				&runtime.K8sBackend{
+					Image:       img,
+					Bin:         getenv("KUBECTL_BIN", ""),
+					Namespace:   getenv("SANDBOX_K8S_NAMESPACE", ""),
+					Context:     getenv("SANDBOX_K8S_CONTEXT", ""),
+					PlatformURL: getenv("PLATFORM_URL_IN_CLUSTER", platformURL),
+					TokenIssue:  srv.IssueManifestToken,
+				},
+				&runtime.DockerBackend{
+					Image:       img,
+					Bin:         getenv("DOCKER_BIN", ""),
+					PlatformURL: platformURL,
+					TokenIssue:  srv.IssueManifestToken,
+				},
+			}}
+			log.Printf("[backend] auto sandbox backend enabled: image=%s (k8s → docker → inprocess)", img)
 		default:
 			svc.Runtime = &runtime.DockerBackend{
 				Image:       img,

@@ -47,6 +47,8 @@
 
 ## 当前状态（2026-09-27，由协作 Agent 维护）
 
+- **REQ-190 运行后端自动检测已交付（2026-09-29，开发者指令「增加需求」立项即开发，同轮交付）**：①`agent.runtime_backend` 增 **auto**——k8s pod 优先→docker 次之→进程内兜底：runtime.AutoBackend 双候选按序探测（K8sBackend.Available=kubectl get --raw=/readyz / DockerBackend.Available=daemon ping，ProbeWait 3s）、**lastGood 粘滞缓存**（稳态零重复探测、失效自动换档）、全不可用 ErrNoSandbox；Prober 接口入 Backend 体系（未实现者恒可用）；②chat 分发 Available 预检——不可达 run.warning「自动检测：k8s/docker 沙箱均不可用」诚实回退进程内；auto 免形态告警，显式 docker/k8s 不匹配照旧提示（存量零回归）；③main.go SANDBOX_BACKEND=auto 双候选装配；前端 AgentSidePanel Select 补 k8s/auto 选项 + 沙箱资源字段条件扩 k8s/auto（**10d 前端欠账顺补**：此前 Select 无 k8s 选项）；④顺修 **port-forward 冷启动竞态**——portForwardEndpoint 就绪等待（拨通即就绪/进程早退即报错；治「Pod 已 Running 而后端进程新起」复用路径 connection refused），桩 kubectl 升级 nc 循环 200 应答。单测新增 8 组 + runtime/chat/api 全绿 + vite 构建；**真机三档**（kind）：auto→k8s（backend=k8s 标注）/auto→docker（bogus context 探测失败自动换档）/auto→inprocess（双不可达告警精确命中），证据 smoke/req190/；配方入 16 号（推荐本地常置 SANDBOX_BACKEND=auto）。01 v0.76/02 v0.114/20 v1.58 S2.9a/18 v1.74。
+
 - **M-O17 ④ REQ-183 构建路径导航两栏已交付 + M-O17 全项收口（2026-09-29，领取排期项）**：BuildPage 自横排路径卡改「左路径导航（竖排六项：状态徽标+一句话差异说明常显，sticky）+右路径工作区」两栏（REQ-183 首选方案定案，备选侧栏方案不启用；工作区与 localStorage 记忆语义零改动）；headless 12 断言全过（导航六项/三类状态徽标常显/OntoChat·KG·OO 工作区切换/刷新记忆）。**M-O17 四项全 ✅**（180/181 2026-09-27 + 182/183 2026-09-29）。定案回写 17 号本体构建行。03 v0.65/02 v0.112 M-O17 行收口/17 定案注。
 
 - **M-O17 ③ REQ-182 学习中心两栏布局已交付（2026-09-29，领取排期项）**：LearnPage 自「页首步骤条+Tabs 纵向长页」重构为「左子模块导航+右内容区」两栏——导航六项（学习路径带任务进度徽标/方法论与任务卡带当前阶段名徽标/构建方式对照/运行方式对照/示例本体库/工具链配置）；学习路径默认首屏主轴（七方块步骤条+当前阶段详情同区，一页总览+当前阶段）；「方法论与任务卡」独立视图带七阶段切换；选中 localStorage 记忆（eino.onto.learn.section）；定案回写 17 号 §2.1。headless 14 断言全过（导航六项/默认选中/方块切详情/四视图切换/刷新记忆）。M-O17 剩余：④REQ-183 构建路径导航优化。03 v0.64/02 v0.111/17 定案注。
