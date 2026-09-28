@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
@@ -242,6 +243,52 @@ func (s *Server) selectableForOntologyBuild(w http.ResponseWriter, r *http.Reque
 // buildFromKB POST /api/ontologies/build-from-kb
 // {kb_id, strategy: chunk-llm|kg-direct|hybrid, cq_mode: auto|custom|skip, custom_cqs?, conn_id?}
 // → {spec_json, validation_report, cqs, rounds, ...}（草稿预览用；入库走构建平面 POST /api/ontologies + PUT spec）。
+
+// buildFromStructured M-O14 P2⑤（REQ-171 P2/23 号 §7.1 借鉴）：结构化数据→本体骨架映射推导。
+// 规则推导（首列→实例名/主概念，余列→属性+类型推断）+ 可选目标本体概念命中标注；
+// 关系推导不做规则臆断（诚实注记指向 REQ-82 LLM 加工）。返回映射报告与草稿骨架，不入库。
+func (s *Server) buildFromStructured(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Filename           string      `json:"filename"`
+		Content            string      `json:"content"`
+		TargetOntologyID   string      `json:"target_ontology_id,omitempty"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if strings.TrimSpace(in.Content) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content 必填（CSV/JSON 文本）"})
+		return
+	}
+	var targets [][2]string
+	if in.TargetOntologyID != "" && s.Ontology != nil {
+		// 经构建平面反代拉目标本体 spec（概念名/标签用于命中标注；不可达静默降级为无标注，推导仍可用）
+		req2, _ := http.NewRequest(http.MethodGet, "/api/ontologies/"+in.TargetOntologyID+"/spec", nil)
+		rec := httptest.NewRecorder()
+		s.Ontology.BuildProxy().ServeHTTP(rec, req2)
+		if rec.Code == 200 {
+			var sp struct {
+				Concepts []struct {
+					Name  string `json:"name"`
+					Label string `json:"label"`
+				} `json:"concepts"`
+			}
+			if json.Unmarshal(rec.Body.Bytes(), &sp) == nil {
+				for _, c := range sp.Concepts {
+					targets = append(targets, [2]string{c.Name, c.Label})
+				}
+			}
+		}
+	}
+	d, err := ontobuild.InferStructuredDraft(in.Filename, in.Content, targets)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
 func (s *Server) buildFromKB(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		KBID      string   `json:"kb_id"`

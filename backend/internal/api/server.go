@@ -167,6 +167,7 @@ func (s *Server) routes() {
 	// O13 由知识库构建本体（D-O14/REQ-108，M15）：精确路由压过 /api/ontologies* 反代前缀
 	m.HandleFunc("GET /api/kbs/selectable-for-ontology-build", s.selectableForOntologyBuild)
 	m.HandleFunc("POST /api/ontologies/build-from-kb", s.buildFromKB)
+	m.HandleFunc("POST /api/ontologies/build-from-structured", s.buildFromStructured)
 	m.HandleFunc("POST /api/ontologies/kg-to-spec-json", s.kgToSpecJSON)
 
 	// KG 自存 + 消费/审计（D-O15/REQ-110：去-semantica 化，零外部进程）

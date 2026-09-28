@@ -4,9 +4,11 @@ package ontobuild
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
@@ -489,4 +491,173 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(rs[:n]) + "…"
+}
+
+// ---------------------------------------------------------------------------
+// M-O14 P2⑤（REQ-171 P2/23 号 §7.1 借鉴）：结构化数据 → 本体骨架的映射自动推导。
+// oo 的 Data Pipeline（map→ingest→shacl）核心思想 = 从数据 schema 推导映射配置，减少手工建模。
+// 本实现：CSV/JSON 解析 → 列角色推断（实例名列/属性列/类型）→ 草稿骨架（行→实例+attributes，
+// 列→属性）→ 可选对目标本体概念名匹配标注「命中/新增」。关系推导不做规则化臆断（需语义判断，
+// 留给 REQ-82 LLM 端点后续增强），诚实标注。
+// ---------------------------------------------------------------------------
+
+// StructuredMapping 单列映射推荐
+type StructuredMapping struct {
+	Column     string   `json:"column"`
+	Role       string   `json:"role"`  // instance-name | attribute
+	InferType  string   `json:"infer_type"` // string | number | boolean
+	Sample     string   `json:"sample,omitempty"`
+	MatchedCon []string `json:"matched_concepts,omitempty"` // 目标本体中按名/标签命中的概念
+}
+
+// StructuredDraft 结构化→骨架推导结果
+type StructuredDraft struct {
+	SourceKind string              `json:"source_kind"` // csv | json
+	Mapping    []StructuredMapping `json:"mapping"`
+	MainConcept string             `json:"main_concept"`
+	Draft      *buildSpec          `json:"draft_spec"`
+	Notes      []string            `json:"notes"`
+}
+
+// InferStructuredDraft 从 CSV/JSON 内容推导本体骨架与映射报告。
+// targetConcepts：目标本体（可选）的概念名+标签，用于命中标注。
+func InferStructuredDraft(filename, content string, targetConcepts [][2]string) (*StructuredDraft, error) {
+	kind := ""
+	var headers []string
+	var rows [][]string
+	if strings.HasSuffix(strings.ToLower(filename), ".json") || strings.TrimSpace(content)[:1] == "[" || strings.TrimSpace(content)[:1] == "{" {
+		kind = "json"
+		var arr []map[string]any
+		if err := json.Unmarshal([]byte(content), &arr); err != nil {
+			var obj map[string]any
+			if err2 := json.Unmarshal([]byte(content), &obj); err2 != nil {
+				return nil, fmt.Errorf("JSON 解析失败: %v", err2)
+			}
+			for _, v := range obj {
+				if sub, ok := v.([]any); ok {
+					b, _ := json.Marshal(sub)
+					json.Unmarshal(b, &arr)
+					break
+				}
+			}
+			if arr == nil {
+				arr = []map[string]any{obj}
+			}
+		}
+		seen := map[string]bool{}
+		for _, r := range arr {
+			for k := range r {
+				if !seen[k] {
+					seen[k] = true
+					headers = append(headers, k)
+				}
+			}
+		}
+		for _, r := range arr {
+			row := make([]string, len(headers))
+			for i, h := range headers {
+				row[i] = fmt.Sprintf("%v", r[h])
+			}
+			rows = append(rows, row)
+		}
+	} else {
+		kind = "csv"
+		cr := csv.NewReader(strings.NewReader(content))
+		cr.FieldsPerRecord = -1
+		recs, err := cr.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("CSV 解析失败: %v", err)
+		}
+		if len(recs) < 1 {
+			return nil, fmt.Errorf("CSV 无表头行")
+		}
+		headers, rows = recs[0], recs[1:]
+	}
+	if len(headers) == 0 {
+		return nil, fmt.Errorf("未识别到任何列")
+	}
+
+	notes := []string{
+		"映射为规则推导：首列→实例名，其余列→属性；关系推导需语义判断，建议在草稿基础上用「AI 创建」继续加工（REQ-82）。",
+	}
+	if kind == "csv" {
+		notes = append(notes, "CSV 假定首行为表头。")
+	}
+
+	draft := &buildSpec{Name: "结构化骨架（" + filename + "）", Concepts: []buildConcept{}, Relations: []buildRelation{}, Instances: []buildInstance{}}
+	base := headers[0]
+	for _, suf := range []string{"编号", "名称", "_id", "ID", "id"} {
+		if strings.HasSuffix(base, suf) && strings.TrimSuffix(base, suf) != "" {
+			base = strings.TrimSuffix(base, suf)
+			break
+		}
+	}
+	base = strings.TrimSpace(base)
+	mainConcept := base + "实体"
+	if base == "" {
+		mainConcept = "记录实体"
+	}
+	draft.Concepts = append(draft.Concepts, buildConcept{Name: mainConcept, Label: mainConcept, Definition: "由结构化数据 " + filename + " 首列推导的主实体概念"})
+
+	mapping := make([]StructuredMapping, 0, len(headers))
+	seenInst := map[string]bool{}
+	limit := rows
+	if len(limit) > 200 {
+		limit = limit[:200]
+		notes = append(notes, "实例仅采样前 200 行（避免超大文件一次全量灌入；余量可二次灌装）。")
+	}
+	for i, row := range limit {
+		if i >= len(rows) {
+			break
+		}
+		name := strings.TrimSpace(row[0])
+		if name == "" {
+			continue
+		}
+		inst := buildInstance{Name: name, Concept: mainConcept, Attributes: map[string]any{}}
+		for c := 1; c < len(headers) && c < len(row); c++ {
+			v := strings.TrimSpace(row[c])
+			if v != "" {
+				inst.Attributes[headers[c]] = v
+			}
+		}
+		if !seenInst[name] {
+			seenInst[name] = true
+			draft.Instances = append(draft.Instances, inst)
+		}
+	}
+
+	for c, h := range headers {
+		role, typ := "attribute", "string"
+		if c == 0 {
+			role = "instance-name"
+		}
+		sample := ""
+		if len(rows) > 0 && c < len(rows[0]) {
+			sample = rows[0][c]
+			if isNum(sample) {
+				typ = "number"
+			} else if strings.EqualFold(sample, "true") || strings.EqualFold(sample, "false") {
+				typ = "boolean"
+			}
+		}
+		sm := StructuredMapping{Column: h, Role: role, InferType: typ, Sample: sample}
+		if targetConcepts != nil {
+			for _, tc := range targetConcepts {
+				if strings.EqualFold(tc[0], h) || strings.EqualFold(tc[1], h) {
+					sm.MatchedCon = append(sm.MatchedCon, tc[0])
+				}
+			}
+		}
+		mapping = append(mapping, sm)
+	}
+	return &StructuredDraft{SourceKind: kind, Mapping: mapping, MainConcept: mainConcept, Draft: draft, Notes: notes}, nil
+}
+
+func isNum(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
 }

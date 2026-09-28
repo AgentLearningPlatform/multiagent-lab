@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, Radio, Segmented, Space, Steps, Table, Tag, Typography } from 'antd'
-import { CheckCircleOutlined, DatabaseOutlined, ReloadOutlined, RightOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Empty, Input, Radio, Segmented, Select, Space, Steps, Table, Tag, Typography, Upload } from 'antd'
+import { CheckCircleOutlined, DatabaseOutlined, ReloadOutlined, RightOutlined, ThunderboltOutlined, UploadOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
 import type { OntoBuildSelectableKB, OntoBuildResult, ValidationError } from '../../api/types'
 import { useUI } from '../../store/ui'
 import { ERR_COLUMNS } from './shared'
+import LoadErrorAlert from '../../components/LoadErrorAlert'
 
 // ---------------------------------------------------------------------------
 // 由知识库构建本体——独立流程页（O13，D-O14/REQ-108，04 §3.7）：
@@ -360,3 +361,136 @@ function KbBuildFlow() {
 }
 
 export default KbBuildFlow
+
+// ---------------------------------------------------------------------------
+// M-O14 P2⑤（REQ-171 P2/23 号 §7.1 借鉴）：结构化数据映射（CSV/JSON → 本体骨架）。
+// 独立于 KB 选择——规则推导（首列→实例名/主概念，余列→属性+类型推断），可选目标本体
+// 概念命中标注；预览映射报告与骨架 → 一键创建为新本体（走既有 create+saveSpec+校验）。
+// 关系推导不做规则臆断（后端诚实注记指向 REQ-82 LLM 加工）。
+// ---------------------------------------------------------------------------
+export function StructuredFlow() {
+  const { showToast } = useUI()
+  const [file, setFile] = useState<{ filename: string; content: string } | null>(null)
+  const [targetId, setTargetId] = useState<string | undefined>(undefined)
+  const [ontos, setOntos] = useState<{ id: string; name: string }[]>([])
+  const [result, setResult] = useState<Awaited<ReturnType<typeof api.buildFromStructured>> | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    api
+      .listOntologies()
+      .then((ls: any) => setOntos(Array.isArray(ls) ? ls : []))
+      .catch(() => setOntos([]))
+  }, [])
+
+  const infer = async () => {
+    if (!file) return
+    setLoading(true)
+    setErr(null)
+    setResult(null)
+    try {
+      const r = await api.buildFromStructured({ filename: file.filename, content: file.content, target_ontology_id: targetId })
+      setResult(r)
+    } catch (e: any) {
+      setErr(e?.message ?? '推导失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const createAsOntology = async () => {
+    if (!result?.draft_spec) return
+    setCreating(true)
+    try {
+      const draft = result.draft_spec as { name: string; description?: string; concepts: unknown[]; relations: unknown[]; instances: unknown[] }
+      const created = await api.createOntology({ name: `${draft.name}-${new Date().toLocaleDateString()}`, description: draft.description ?? '由结构化数据映射推导（M-O14 P2⑤）' })
+      await api.saveSpec(created.id, draft as any)
+      showToast(`已创建新本体「${created.name ?? created.id}」（骨架含 ${draft.concepts.length} 概念 / ${draft.instances.length} 实例）——到「本体资产」查看与编辑`)
+    } catch (e: any) {
+      showToast(e?.message ?? '创建失败', 'err')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <Card size="small" style={{ marginTop: 12 }}>
+      <div className="onto-sec" style={{ marginTop: 0 }}>
+        <span className="onto-sec-title">结构化数据映射（CSV/JSON → 本体骨架，M-O14 P2⑤）</span>
+      </div>
+      <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
+        规则推导：首列→实例名（主概念），其余列→属性（类型推断）；可选对目标本体做概念命中标注。关系推导需语义判断——建议在骨架上用「AI 创建」继续加工。
+      </Typography.Paragraph>
+      <Space wrap style={{ marginBottom: 8 }}>
+        <Upload maxCount={1} accept=".csv,.json" showUploadList={false} beforeUpload={() => false} onChange={({ fileList }) => {
+          const raw = (fileList[0] as any)?.originFileObj
+          if (!raw) return
+          const rd = new FileReader()
+          rd.onload = () => {
+            setFile({ filename: raw.name, content: String(rd.result ?? '') })
+            setResult(null)
+          }
+          rd.readAsText(raw)
+        }}>
+          <Button icon={<UploadOutlined />}>选择 CSV/JSON 文件</Button>
+        </Upload>
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 240 }}
+          placeholder="可选：目标本体（概念命中标注）"
+          value={targetId}
+          onChange={setTargetId}
+          options={ontos.map((o) => ({ value: o.id, label: o.name }))}
+        />
+        <Button type="primary" disabled={!file} loading={loading} onClick={infer}>
+          推导映射与骨架
+        </Button>
+        {result && (
+          <Button type="primary" ghost loading={creating} onClick={createAsOntology}>
+            创建为新本体
+          </Button>
+        )}
+      </Space>
+      {file && (
+        <div style={{ marginBottom: 8 }}>
+          <Tag color="geekblue">{file.filename}</Tag>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>{file.content.length} 字符</Typography.Text>
+        </div>
+      )}
+      {err && <LoadErrorAlert title="结构化推导失败" message={err} onRetry={() => setErr(null)} style={{ marginBottom: 8 }} />}
+      {result && (
+        <>
+          <Space size={12} wrap style={{ marginBottom: 6 }}>
+            <Tag color="processing">源 {result.source_kind.toUpperCase()}</Tag>
+            <Tag color="purple">主概念 {result.main_concept}</Tag>
+            <Tag>{result.mapping.length} 列</Tag>
+            <Tag>{result.draft_spec ? (result.draft_spec as any).instances.length : 0} 实例（采样≤200）</Tag>
+          </Space>
+          <table className="onto-report-table" style={{ width: '100%', fontSize: 12, marginBottom: 6 }}>
+            <thead>
+              <tr><th>列</th><th>角色</th><th>推断类型</th><th>样例</th><th>目标本体命中</th></tr>
+            </thead>
+            <tbody>
+              {result.mapping.map((m) => (
+                <tr key={m.column}>
+                  <td>{m.column}</td>
+                  <td>{m.role === 'instance-name' ? '实例名' : '属性'}</td>
+                  <td>{m.infer_type}</td>
+                  <td>{m.sample || '—'}</td>
+                  <td>{m.matched_concepts?.length ? <Tag color="green" style={{ margin: 0 }}>{m.matched_concepts.join(', ')}</Tag> : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {result.notes.map((n, i) => (
+            <Typography.Paragraph key={i} type="secondary" style={{ fontSize: 11, marginBottom: 2 }}>· {n}</Typography.Paragraph>
+          ))}
+        </>
+      )}
+    </Card>
+  )
+}

@@ -14,7 +14,7 @@ import { useUI } from '../../store/ui'
 import { ERR_COLUMNS } from './shared'
 import SpecGraph from './components/SpecGraph'
 import OntoChatFlow from './OntoChatFlow'
-import KbBuildFlow from './BuildFromKBFlow'
+import KbBuildFlow, { StructuredFlow } from './BuildFromKBFlow'
 import OntoExtendFlow from './components/OntoExtendFlow'
 import OoTtlImport from './components/OoTtlImport'
 
@@ -100,7 +100,7 @@ export default function BuildPage() {
 
       {buildPath === 'custom' && <CustomFlow onGoKbPath={() => select('kb')} />}
       {buildPath === 'ontochat' && <OntoChatFlow onSaved={() => { /* 入库后产物进资产栏；此处留在会话页展示 done 态 */ }} />}
-      {buildPath === 'kb' && <KbBuildFlow />}
+      {buildPath === 'kb' && (<><KbBuildFlow /><StructuredFlow /></>)}
       {buildPath === 'kg' && <KgGuide />}
       {buildPath === 'ontoextend' && <OntoExtendFlow />}
       {buildPath === 'oo' && <OoGuide />}
