@@ -16,6 +16,7 @@ import SpecGraph from './components/SpecGraph'
 import OntoChatFlow from './OntoChatFlow'
 import KbBuildFlow from './BuildFromKBFlow'
 import OntoExtendFlow from './components/OntoExtendFlow'
+import OoTtlImport from './components/OoTtlImport'
 
 // ---------------------------------------------------------------------------
 // 本体构建（BuildPage，REQ-104 ②）：按构建路径分二级模块（六路径分层标注状态）
@@ -33,7 +34,7 @@ const PATHS: { key: BuildPath; label: string; state: 'ok' | 'partial' | 'guide';
   { key: 'kb', label: '由知识库构建', state: 'partial', desc: 'KB chunk→LLM / KG→直转 / 混合三策略独立流程页（O13，D-O14/REQ-108）' },
   { key: 'kg', label: 'KG 消费流程', state: 'guide', desc: '入口卡跳转「消费与审计」栏（D-O15 自研 KG，原 semantica 流程改造）' },
   { key: 'ontoextend', label: 'OntoExtend 流程', state: 'partial', desc: 'ODP 模式推荐 + LOV 词表扩展 → 审查入库（M-O14 P2②）' },
-  { key: 'oo', label: 'Open Ontologies 流程', state: 'guide', desc: '双轨引导 + 产物回流（REQ-78 互通后顺畅）' },
+  { key: 'oo', label: 'Open Ontologies 流程', state: 'guide', desc: '双轨引导 + TTL 产物回流走审查底座（M-O14 P2③；REQ-78 互通仍冻结）' },
 ]
 
 const STATE_TAG: Record<BuildPath, { color: string; text: string }> = {
@@ -756,7 +757,7 @@ function OoGuide() {
         <li>「自定义构建 → S1 → 导入文件」上传该 TTL（有损导入，映射规则见导入报告）</li>
         <li>REQ-78 双轨 TTL 互通（P2）后自动化</li>
       </ol>
-      <Space style={{ marginTop: 12 }}>
+      <Space style={{ marginTop: 12 }} wrap>
         <Button type="primary" href="/api/oo/" target="_blank" rel="noreferrer">
           前往 Open Ontologies 工作台
         </Button>
@@ -764,6 +765,7 @@ function OoGuide() {
           查看运行栏 oo 引导页
         </Button>
       </Space>
+      <OoTtlImport />
     </Card>
   )
 }

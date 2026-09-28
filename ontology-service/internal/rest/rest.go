@@ -410,7 +410,7 @@ func (s *Server) lifecycleApply(w http.ResponseWriter, r *http.Request) {
 
 // mergeIncoming 解析合并请求体：multipart 文件（filename+content 走 importer.Import）或 JSON {filename,content} / {spec}；
 // strategy/prefix 取表单值或 JSON 字段（REQ-157 审查向导走 JSON）。
-func (s *Server) mergeIncoming(r *http.Request) (filename, content string, spec *pkgspec.Spec, strategy, prefix string, err error) {
+func (s *Server) mergeIncoming(r *http.Request) (filename, content string, spec *pkgspec.Spec, strategy, prefix string, imp *importer.Report, err error) {
 	strategy = r.FormValue("strategy")
 	prefix = r.FormValue("prefix")
 	ct := r.Header.Get("Content-Type")
@@ -454,7 +454,7 @@ func (s *Server) mergeIncoming(r *http.Request) (filename, content string, spec 
 		if filename == "" {
 			filename = "incoming.md"
 		}
-		spec, _, err = importer.Import(s.Sidecar, filename, content)
+		spec, imp, err = importer.Import(s.Sidecar, filename, content)
 		if err != nil {
 			return
 		}
@@ -465,7 +465,7 @@ func (s *Server) mergeIncoming(r *http.Request) (filename, content string, spec 
 // mergePreview REQ-157：导入合并冲突预览（字段级冲突/新增/重命名/合并结果 spec）。
 func (s *Server) mergePreview(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	_, _, spec, strategy, prefix, err := s.mergeIncoming(r)
+	_, _, spec, strategy, prefix, imp, err := s.mergeIncoming(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -488,13 +488,18 @@ func (s *Server) mergePreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// M-O14 P2③：TTL 等内容走 importer 时附有损导入报告（warnings 诚实呈现给审查方）
+	if imp != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"import_report": imp, "preview": pv})
+		return
+	}
 	writeJSON(w, http.StatusOK, pv)
 }
 
 // mergeApply REQ-157：按策略应用合并（结构校验 + strict 门禁 + 版本快照）。
 func (s *Server) mergeApply(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	_, _, spec, strategy, prefix, err := s.mergeIncoming(r)
+	_, _, spec, strategy, prefix, _, err := s.mergeIncoming(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
