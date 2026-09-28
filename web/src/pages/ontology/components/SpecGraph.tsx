@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Empty, Splitter, Space, Tag, Typography } from 'antd'
-import { Background, BackgroundVariant, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, useEdgesState, useNodesState } from '@xyflow/react'
+import { Background, BackgroundVariant, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow } from '@xyflow/react'
 import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 // React Flow 基础样式表（v12 必需）：缺失时画布/节点/连线/MiniMap 全部无样式错乱（bugfix：此前从未引入）
 import '@xyflow/react/dist/style.css'
@@ -141,13 +141,23 @@ function ConceptNode({ data, selected }: NodeProps<ConceptFlowNode>) {
 // nodeTypes 必须定义在组件外，避免每次渲染重建导致 React Flow 重挂载
 const nodeTypes: NodeTypes = { concept: ConceptNode }
 
-export default function SpecGraph({ spec }: { spec: Spec | null }) {
+function SpecGraphInner({ spec, focusName }: { spec: Spec | null; focusName?: string | null }) {
   const hasConcepts = !!spec && (spec.concepts?.length ?? 0) > 0
   const initialNodes = useMemo(() => (spec ? buildNodes(spec) : []), [spec])
   const initialEdges = useMemo(() => (spec ? buildEdges(spec) : []), [spec])
   const [nodes, setNodes, onNodesChange] = useNodesState<ConceptFlowNode>(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const { setCenter } = useReactFlow()
+
+  // R3（VIZ-2）：3D→2D 联动——focusName 变化时居中该概念并选中
+  useEffect(() => {
+    if (!focusName) return
+    const n = initialNodes.find((x) => x.id === `c:${focusName}`)
+    if (!n) return
+    setSelectedId(focusName)
+    setCenter(n.position.x + NODE_W / 2, n.position.y + 40, { zoom: 1.1, duration: 600 })
+  }, [focusName, initialNodes, setCenter])
 
   // Spec 变化时重置图谱（拖拽后的坐标不跨 Spec 版本保留）
   useEffect(() => {
@@ -264,5 +274,14 @@ export default function SpecGraph({ spec }: { spec: Spec | null }) {
         </div>
       </Splitter.Panel>
     </Splitter>
+  )
+}
+
+/** R3（VIZ-2）：Provider 包装（useReactFlow 需要上下文）；3D↔2D 联动经 focusName 传入 */
+export default function SpecGraph(props: { spec: Spec | null; focusName?: string | null }) {
+  return (
+    <ReactFlowProvider>
+      <SpecGraphInner {...props} />
+    </ReactFlowProvider>
   )
 }

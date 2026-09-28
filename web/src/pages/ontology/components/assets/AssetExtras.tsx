@@ -125,6 +125,7 @@ export function RenameModal({ ontology, onClose, onSaved }: { ontology: Ontology
  */
 export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: string }) {
   const [mode, setMode] = useState<'2d' | '3d' | 'webvowl'>('2d')
+  const [focus2d, setFocus2d] = useState<string | null>(null) // R3：3D 选中 → 2D 联动聚焦
   const [full, setFull] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -158,8 +159,17 @@ export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: s
           {full ? '退出全屏' : '全屏'}
         </Button>
       </div>
-      {mode === '2d' && <SpecGraph spec={spec} />}
-      {mode === '3d' && <Graph3D key={full ? 'fs' : 'inline'} spec={spec} />}
+      {mode === '2d' && <SpecGraph spec={spec} focusName={focus2d} />}
+      {mode === '3d' && (
+        <Graph3D
+          key={full ? 'fs' : 'inline'}
+          spec={spec}
+          onRequest2D={(name) => {
+            setFocus2d(name)
+            setMode('2d')
+          }}
+        />
+      )}
       {mode === 'webvowl' && <WebVowlView ontologyId={ontologyId} />}
     </div>
   )

@@ -28,6 +28,38 @@ const LINK_DECOR_THRESHOLD = 800
 /** REQ-185③：图例面板宽度三常量与 localStorage 键 */
 const LEGEND_WIDTH_KEY = 'eino.viz.legend.width'
 const LEGEND_WIDTH_DEFAULT = 280
+/** R3：高度数节点标签阈值（度数 ≥ 此值常显标签，随缩放 LOD） */
+const LABEL_DEGREE_THRESHOLD = 12
+/** R3：标签 sprite 材质池（canvas 纹理，text+color 复用） */
+const labelMatPool = new Map<string, THREE.SpriteMaterial>()
+function labelMaterial(text: string, color: string): THREE.SpriteMaterial {
+  const key = `${text}|${color}`
+  let mat = labelMatPool.get(key)
+  if (!mat) {
+    const canvas = document.createElement('canvas')
+    const measure = canvas.getContext('2d')!
+    const fs = 30
+    measure.font = `600 ${fs}px system-ui, sans-serif`
+    const w = Math.min(460, Math.ceil(measure.measureText(text).width) + 28)
+    canvas.width = w
+    canvas.height = fs + 18
+    const ctx = canvas.getContext('2d')!
+    ctx.font = `600 ${fs}px system-ui, sans-serif`
+    const r = 10
+    ctx.beginPath()
+    ctx.roundRect(0, 0, canvas.width, canvas.height, r)
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'
+    ctx.fill()
+    ctx.strokeStyle = color
+    ctx.lineWidth = 3
+    ctx.stroke()
+    ctx.fillStyle = '#1f2937'
+    ctx.fillText(text, 14, fs + 6)
+    mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false })
+    labelMatPool.set(key, mat)
+  }
+  return mat
+}
 
 interface GNode {
   id: string
@@ -128,7 +160,7 @@ function materialOf(color: string, kind: string): THREE.MeshLambertMaterial {
 const sphereGeo = new THREE.SphereGeometry(1, 16, 12)
 const octaGeo = new THREE.OctahedronGeometry(1)
 
-export default function Graph3D({ spec }: { spec: Spec | null }) {
+export default function Graph3D({ spec, onRequest2D }: { spec: Spec | null; onRequest2D?: (nodeName: string) => void }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<any>(null)
   const [selected, setSelected] = useState<{ kind: 'concept' | 'instance'; name: string; label: string; color: string; definition?: string; concept?: string; attributes?: Record<string, unknown> } | null>(null)
@@ -149,6 +181,10 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     return saved >= 240 && saved <= 420 ? saved : 280
   })
   const [legendOpen, setLegendOpen] = useState(true)
+  // R3：两节点路径高亮（Shift+点击顺序选两点 → 可见图 BFS 最短路；空数组=未启用）
+  const [pathPair, setPathPair] = useState<string[]>([])
+  // R4：暗色主题（画布背景/雾色/边色联动）
+  const [dark3d, setDark3d] = useState(false)
   const data = useMemo(() => (spec ? buildGraphData(spec) : { nodes: [], links: [], roots: [] }), [spec])
   /** 图例根概念统计（子孙概念数 / 挂载实例数），随 legendQuery 过滤 */
   const rootStats = useMemo(() => {
@@ -237,6 +273,45 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     return m
   }, [data])
 
+  // R3：两节点最短路径（可见子图 BFS；不可达返回 null）
+  const pathSet = useMemo(() => {
+    if (pathPair.length !== 2) return null
+    const [s, e] = pathPair
+    if (s === e) return new Set([s])
+    const prev = new Map<string, string>([[s, '']])
+    const queue = [s]
+    while (queue.length) {
+      const cur = queue.shift()!
+      if (cur === e) break
+      for (const nb of neighbors.get(cur) ?? []) {
+        if (!prev.has(nb)) {
+          prev.set(nb, cur)
+          queue.push(nb)
+        }
+      }
+    }
+    if (!prev.has(e)) return null
+    const chain = new Set<string>()
+    let cur: string | undefined = e
+    while (cur) {
+      chain.add(cur)
+      cur = prev.get(cur)
+    }
+    return chain
+  }, [pathPair, neighbors])
+
+  // R3：根/高度数标签判定（根常显；高度数随缩放 LOD）
+  const labelWorthy = useMemo(() => {
+    const m = new Map<string, boolean>() // id → always(根)
+    for (const n of data.nodes as GNode[]) {
+      if (n.kind !== 'concept') continue
+      const deg = neighbors.get(n.id)?.size ?? 0
+      const isRoot = rootOfName.get(n.name) === n.name
+      if (isRoot || deg >= LABEL_DEGREE_THRESHOLD) m.set(n.id, isRoot)
+    }
+    return m
+  }, [data, neighbors, rootOfName])
+
   /** R3 路径高亮：概念节点→根的完整继承链（parent 边）+ 自身。返回节点 id 集合 */
   const ancestorPath = useMemo(() => {
     const m = new Map<string, Set<string>>()
@@ -265,8 +340,38 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     const geo = n.kind === 'instance' ? octaGeo : sphereGeo
     const mesh = new THREE.Mesh(geo, materialOf(n.color, n.kind))
     mesh.scale.setScalar(n.radius)
+    const always = labelWorthy.get(n.id)
+    if (always !== undefined) {
+      // R3：根/高度数节点标签 sprite（子节点随 mesh.scale 缩放，尺度与偏移按 radius 补偿回世界尺寸）
+      const mat = labelMaterial(n.label, n.color)
+      const img = mat.map!.image as HTMLCanvasElement
+      const worldW = 64
+      const sp = new THREE.Sprite(mat)
+      sp.scale.set(worldW / n.radius, (worldW * img.height) / img.width / n.radius, 1)
+      sp.position.y = (n.radius + 16) / n.radius
+      n.__labelAlways = always
+      n.__labelSprite = sp
+      const group = new THREE.Group()
+      group.add(mesh, sp)
+      return group
+    }
     return mesh
   }
+
+  // R3：标签 LOD 轮询（根常显；高度数按相机距离 520 内显示）
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const g = fgRef.current as any
+      if (!g || typeof g.cameraPosition !== 'function') return
+      const cam = g.cameraPosition()
+      for (const n of data.nodes as any[]) {
+        const sp = n.__labelSprite
+        if (!sp) continue
+        sp.visible = n.__labelAlways || Math.hypot(cam.x - n.x, cam.y - n.y, cam.z - n.z) < 520
+      }
+    }, 300)
+    return () => clearInterval(iv)
+  }, [data])
 
   // 力布局收敛后的首次全景适配标记（数据/布局变化时重置；修复节点飘出画布视野）
   const firstFitRef = useRef(true)
@@ -284,7 +389,9 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     if (!g) return
     const cur = highlightRef.current
     let keep: Set<string> | null = null
-    if (cur) {
+    if (pathSet) {
+      keep = pathSet // R3 两节点路径：仅链上节点保持，其余收缩
+    } else if (cur) {
       if (cur.kind === 'concept' && ancestorPath.has(String(cur.id))) {
         // R3 路径高亮：保留到根的完整继承链 + 直接邻居（实例/关系）
         keep = new Set(ancestorPath.get(String(cur.id)) ?? [])
@@ -298,9 +405,10 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     for (const n of data.nodes as any[]) {
       const obj = n.__threeObj
       if (!obj) continue
-      obj.scale.setScalar(cur && n.id !== cur.id && !keep?.has(n.id) ? n.radius * 0.25 : n.radius)
+      const dim = (cur && n.id !== cur.id && !keep?.has(n.id)) || (pathSet !== null && !pathSet.has(n.id))
+      obj.scale.setScalar(dim ? n.radius * 0.25 : n.radius)
     }
-    if (typeof g.linkOpacity === 'function') g.linkOpacity(cur ? 0.85 : 0.32)
+    if (typeof g.linkOpacity === 'function') g.linkOpacity(cur || pathSet ? 0.85 : 0.32)
   }
 
   // R4 选中环：TorusGeometry 环绕选中节点
@@ -447,6 +555,22 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     setSelected(null)
   }, [data])
 
+  // R3：路径选择变化 → 重算高亮；完成时相机框住路径两端
+  useEffect(() => {
+    if (pathPair.length === 2 && pathSet) {
+      applyHighlight()
+      const [a, b] = pathPair.map((id) => (visibleData.nodes as any[]).find((n) => n.id === id)).filter(Boolean)
+      if (a && b) {
+        const g = fgRef.current as any
+        if (typeof g.zoomToFit === 'function') {
+          g.zoomToFit(600, 90, (node: any) => pathSet.has(node.id))
+        }
+      }
+    } else if (pathPair.length === 1) {
+      applyHighlight()
+    }
+  }, [pathPair, pathSet])
+
   const conceptOfSelected = selected?.concept ? spec?.concepts.find((c) => c.name === selected.concept) ?? null : null
   const attrs = selected?.attributes ? Object.entries(selected.attributes) : []
 
@@ -458,13 +582,18 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
     )
   }
 
-  /** 相机聚焦到指定节点（搜索定位与图例点击共用） */
+  /** 相机聚焦到指定节点（搜索定位与图例点击共用）——数据经 props（ref 转发面无 graphData，v1.2x） */
   const focusNodeById = (id: string) => {
     const g = fgRef.current as any
-    const target = g && typeof g.graphData === 'function' ? (g.graphData().nodes as any[]).find((x) => x.id === id) : null
+    const target = (visibleData.nodes as any[]).find((x) => x.id === id) ?? null
     if (g && target) {
-      g.cameraPosition({ x: target.x + 90, y: target.y + 45, z: target.z + 90 }, target, 900)
+      if (typeof g.cameraPosition === 'function') {
+        g.cameraPosition({ x: target.x + 90, y: target.y + 45, z: target.z + 90 }, target, 900)
+      }
       setSelected({ kind: target.kind, name: target.name, label: target.label, color: target.color, definition: target.definition, concept: target.concept, attributes: target.attributes })
+      highlightRef.current = target
+      applyHighlight()
+      updateRing(target)
     }
   }
   const locate = () => {
@@ -480,7 +609,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
   return (
     <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
       <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-        <div ref={containerRef} className="viz-3d-box" style={{ width: '100%', height: canvasH, borderRadius: 8, background: 'linear-gradient(180deg,#f2f4fb 0%,#e8ebf5 100%)' }}>
+        <div ref={containerRef} className="viz-3d-box" style={{ width: '100%', height: canvasH, borderRadius: 8, background: dark3d ? 'linear-gradient(180deg,#0f172a 0%,#1e293b 100%)' : 'linear-gradient(180deg,#f2f4fb 0%,#e8ebf5 100%)' }}>
           {hasConcepts && (
             <ForceGraph3D
               ref={fgRef}
@@ -494,11 +623,17 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
               nodeVal={(n: any) => n.radius}
               linkWidth={0}
               linkLabel={(l: any) => l.label}
-              linkColor={(l: any) => (linkFilter.has(l.kind) ? (l.kind === 'parent' ? 'rgba(120,128,160,0.5)' : 'rgba(150,158,190,0.32)') : 'rgba(0,0,0,0)')}
+              linkColor={(l: any) => (linkFilter.has(l.kind) ? (l.kind === 'parent' ? (dark3d ? 'rgba(148,163,190,0.55)' : 'rgba(120,128,160,0.5)') : (dark3d ? 'rgba(170,178,210,0.35)' : 'rgba(150,158,190,0.32)')) : 'rgba(0,0,0,0)')}
+              linkCurvature={(l: any) => (visibleData.links.length > LINK_DECOR_THRESHOLD && l.kind !== 'parent' ? 0.35 : 0)}
               linkDirectionalArrowLength={(l: any) => ((visibleData.links.length < LINK_DECOR_THRESHOLD && l.kind !== 'parent') ? 3 : 0)}
               linkDirectionalParticles={(l: any) => ((visibleData.links.length < LINK_DECOR_THRESHOLD && l.kind === 'rel') ? 2 : 0)}
               linkOpacity={0.32}
-              onNodeClick={(n: any) => {
+              onNodeClick={(n: any, ev: any) => {
+                if (ev?.shiftKey) {
+                  // R3 两节点路径：Shift+点击顺序选两点（再选重开）
+                  setPathPair((cur) => (cur.length === 2 || cur[0] === n.id ? [n.id] : [...cur, n.id]))
+                  return
+                }
                 setSelected({ kind: n.kind, name: n.name, label: n.label, color: n.color, definition: n.definition, concept: n.concept, attributes: n.attributes })
                 highlightRef.current = n
                 const dist = 90
@@ -509,6 +644,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
               onBackgroundClick={() => {
                 setSelected(null)
                 highlightRef.current = null
+                setPathPair([])
                 applyHighlight()
                 updateRing(null)
               }}
@@ -520,7 +656,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
                 }
                 if (fog3d && typeof g.scene === 'function') {
                   const scn = g.scene()
-                  if (scn && !scn.fog) scn.fog = new THREE.Fog(0xe8ebf5, 200, 900)
+                  if (scn && !scn.fog) scn.fog = new THREE.Fog(dark3d ? 0x0f172a : 0xe8ebf5, 200, 900)
                 }
               }}
             />
@@ -543,7 +679,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
           </Button>
         )}
         <div style={{ position: 'absolute', zIndex: 5, bottom: 8, left: 10, fontSize: 11, color: 'var(--ant-color-text-tertiary, #888)' }}>
-          拖拽旋转 · 滚轮缩放 · 点击节点聚焦飞入（邻居保持、其余收缩）· 标签悬停可见
+          拖拽旋转 · 滚轮缩放 · 点击聚焦 · Shift+点击两节点高亮最短路径 · 根与高度数节点带标签（LOD）
         </div>
       </div>
       {legendOpen && (
@@ -630,7 +766,7 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
                   const g = fgRef.current as any
                   if (g && typeof g.scene === 'function') {
                     const scn = g.scene()
-                    if (scn) scn.fog = (!fog3d ? new THREE.Fog(0xe8ebf5, 200, 900) : null)
+                    if (scn) scn.fog = !fog3d ? new THREE.Fog(dark3d ? 0x0f172a : 0xe8ebf5, 200, 900) : null
                   }
                 }}
               >
@@ -638,9 +774,28 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
               </Button>
               <Button
                 size="small"
+                type={dark3d ? 'primary' : 'default'}
+                onClick={() => {
+                  setDark3d((v) => !v)
+                  const g = fgRef.current as any
+                  if (g && typeof g.scene === 'function') {
+                    const scn = g.scene()
+                    if (scn) {
+                      const wantFog = fog3d
+                      scn.fog = wantFog ? new THREE.Fog(dark3d ? 0xe8ebf5 : 0x0f172a, 200, 900) : scn.fog
+                      if (wantFog) scn.fog = new THREE.Fog(dark3d ? 0x0f172a : 0xe8ebf5, 200, 900)
+                    }
+                  }
+                }}
+              >
+                {dark3d ? '暗色开' : '暗色关'}
+              </Button>
+              <Button
+                size="small"
                 onClick={() => {
                   setSelected(null)
                   highlightRef.current = null
+                  setPathPair([])
                   callFg('zoomToFit', 600, 60)
                   updateRing(null)
                 }}
@@ -739,6 +894,11 @@ export default function Graph3D({ spec }: { spec: Spec | null }) {
                     <span className="onto-flow-detail-label">实例</span>
                     <Typography.Text style={{ fontSize: 12 }}>{counts.get(selected.name) ?? 0} 个</Typography.Text>
                   </div>
+                )}
+                {onRequest2D && (
+                  <Button size="small" style={{ marginTop: 6 }} onClick={() => onRequest2D(selected.name)}>
+                    在 2D 结构视图中查看 →
+                  </Button>
                 )}
               </div>
             ) : (
