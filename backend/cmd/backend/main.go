@@ -75,6 +75,10 @@ func main() {
 	if err := chat.RegisterAssistantTools(reg, chat.AssistantDeps{Store: st, DocsRoot: getenv("DOCS_ROOT", "../docs"), ResearchRoot: getenv("RESEARCH_ROOT", "../research"), KnowledgeRoot: getenv("KNOWLEDGE_ROOT", "../platform-knowledge")}); err != nil {
 		log.Printf("[backend] assistant tools register: %v", err)
 	}
+	// REQ-186 阶段一/三（M-O14 流水线）：平台知识 KB 化工具（sync/search_platform_kb）与 L1 提案工具（propose_assistant_config 两段式）
+	if err := chat.RegisterAssistantL1Tools(reg, chat.AssistantDeps{Store: st, KnowledgeRoot: getenv("KNOWLEDGE_ROOT", "../platform-knowledge")}, kbSvc); err != nil {
+		log.Printf("[backend] assistant L1 tools register: %v", err)
+	}
 	// M10 §6.3：沙箱执行后端（SANDBOX_IMAGE 配置即启用；SANDBOX_BACKEND=docker|k8s，默认 docker）
 	if img := getenv("SANDBOX_IMAGE", ""); img != "" {
 		platformURL := getenv("PLATFORM_URL_EXTERNAL", "http://host.docker.internal"+addr)

@@ -117,6 +117,9 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/docs/read", s.docRead)
 	m.HandleFunc("GET /api/assistant/config", s.assistantConfigGet) // M27/REQ-166
 	m.HandleFunc("PUT /api/assistant/config", s.assistantConfigPut)
+	m.HandleFunc("GET /api/assistant/proposal", s.assistantProposalGet)   // M-O14 阶段三：L1 提案两段式（查看）
+	m.HandleFunc("POST /api/assistant/proposal/{id}/apply", s.assistantProposalApply)   // 确认应用
+	m.HandleFunc("POST /api/assistant/proposal/{id}/discard", s.assistantProposalDiscard) // 忽略
 	m.HandleFunc("POST /api/assistant/optimize", s.assistantOptimize)              // M27/REQ-167                                  // REQ-140：内部方案文档只读查看
 	m.HandleFunc("POST /api/conversations/{id}/auto-name", s.autoNameConversation) // REQ-136：对话自动命名
 	// M11 收尾：中断恢复（ask_human 答复定向续跑）

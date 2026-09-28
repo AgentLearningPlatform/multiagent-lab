@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, DatePicker, Input, InputNumber, Menu, Popconfirm, Result, Segmented, Select, Slider, Space, Spin, Splitter, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
@@ -817,6 +817,16 @@ function AssistantPanel() {
   const [temp, setTemp] = useState<number | null>(null)
   const [conns, setConns] = useState<{ id: string; name: string; model_name: string }[]>([])
 
+  // M-O14 阶段三：L1 提案两段式——助手 propose_assistant_config 暂存的变更在此确认应用/忽略
+  const [proposal, setProposal] = useState<{ proposal_id: string; changes: { field: string; from: string; to: string }[]; created_at: string } | null>(null)
+
+  const loadProposal = useCallback(() => {
+    api
+      .assistantProposalGet()
+      .then((d) => setProposal(d.pending && d.proposal ? d.proposal : null))
+      .catch(() => setProposal(null))
+  }, [])
+
   useEffect(() => {
     Promise.all([api.assistantConfigGet(), api.listConnections()])
       .then(([cfg, cs]) => {
@@ -827,7 +837,37 @@ function AssistantPanel() {
       })
       .catch((e) => showToast(e.message, 'err'))
       .finally(() => setLoading(false))
-  }, [showToast])
+    loadProposal()
+    const iv = setInterval(loadProposal, 15000) // 助手对话中提案暂存后轮询呈现（10 分钟 TTL）
+    return () => clearInterval(iv)
+  }, [showToast, loadProposal])
+
+  const applyProposal = async () => {
+    if (!proposal) return
+    try {
+      await api.assistantProposalApply(proposal.proposal_id)
+      showToast('提案已应用：平台助手配置已更新')
+      setProposal(null)
+      const cfg = await api.assistantConfigGet()
+      setPrompt(cfg.system_prompt ?? '')
+      setConnID(cfg.model_conn_id ?? null)
+      setTemp(cfg.temperature ?? null)
+    } catch (e: any) {
+      showToast(e.message, 'err')
+      loadProposal()
+    }
+  }
+
+  const discardProposal = async () => {
+    if (!proposal) return
+    try {
+      await api.assistantProposalDiscard(proposal.proposal_id)
+      setProposal(null)
+      showToast('提案已忽略')
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    }
+  }
 
   const save = async () => {
     setSaving(true)
@@ -843,6 +883,28 @@ function AssistantPanel() {
 
   return (
     <>
+      {proposal && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="平台助手配置提案待确认（对话中 propose_assistant_config 产出，两段式确认前不落库）"
+          description={
+            <div style={{ fontSize: 12 }}>
+              {proposal.changes.map((c, i) => (
+                <div key={i}>
+                  <b>{c.field}</b>：{c.from || '（空）'} → {c.to || '（空）'}
+                </div>
+              ))}
+              <Space style={{ marginTop: 6 }}>
+                <Button size="small" type="primary" onClick={applyProposal}>确认应用</Button>
+                <Button size="small" onClick={discardProposal}>忽略</Button>
+              </Space>
+            </div>
+          }
+        />
+      )}
+
       <div className="settings-head">
         <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>平台助手</Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>

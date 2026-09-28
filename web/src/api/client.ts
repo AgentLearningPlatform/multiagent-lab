@@ -194,6 +194,12 @@ export const api = {
   // M27/REQ-166：平台助手配置与 AI 内容优化
   assistantConfigGet: () =>
     req<{ system_prompt?: string; model_conn_id?: string; temperature?: number | null }>('/api/assistant/config'),
+  /** M-O14 阶段三：L1 提案两段式（查看/应用/忽略） */
+  assistantProposalGet: () => req<{ pending: boolean; proposal?: { proposal_id: string; changes: { field: string; from: string; to: string }[]; created_at: string } }>('/api/assistant/proposal'),
+  assistantProposalApply: (id: string) =>
+    req<{ applied: boolean }>('/api/assistant/proposal/' + id + '/apply', { method: 'POST', body: '{}' }),
+  assistantProposalDiscard: (id: string) =>
+    req<{ discarded: boolean }>('/api/assistant/proposal/' + id + '/discard', { method: 'POST', body: '{}' }),
   assistantConfigPut: (body: { system_prompt?: string; model_conn_id?: string; temperature?: number | null }) =>
     req<any>('/api/assistant/config', { method: 'PUT', body: JSON.stringify(body) }),
   assistantOptimize: (kind: 'agent_instruction' | 'project_constraints', content: string) =>

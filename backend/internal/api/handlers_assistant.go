@@ -111,3 +111,45 @@ func (s *Server) assistantOptimize(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"optimized": optimized})
 }
+
+
+// assistantProposalGet M-O14 阶段三（REQ-186 L1 两段式）：拉取最新暂存提案（不消费）。
+func (s *Server) assistantProposalGet(w http.ResponseWriter, r *http.Request) {
+	p := chat.PeekAssistantProposal()
+	if p == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"pending": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pending": true, "proposal": p})
+}
+
+// assistantProposalApply POST /api/assistant/proposal/{id}/apply：取出提案并写入配置（用户在设置页确认触发）。
+func (s *Server) assistantProposalApply(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p := chat.TakeAssistantProposal(id)
+	if p == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "提案不存在或已过期（10 分钟 TTL）"})
+		return
+	}
+	if err := s.Store.SaveAssistantConfig(p.Proposed); err != nil {
+		writeErr(w, err)
+		return
+	}
+	c, err := s.Store.GetAssistantConfig()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"applied": true, "config": c})
+}
+
+// assistantProposalDiscard POST /api/assistant/proposal/{id}/discard：忽略提案（不落库）。
+func (s *Server) assistantProposalDiscard(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p := chat.TakeAssistantProposal(id)
+	if p == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "提案不存在或已过期"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"discarded": true})
+}
