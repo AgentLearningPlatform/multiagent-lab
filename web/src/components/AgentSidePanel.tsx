@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons'
 import { api, connDisplayName } from '../api/client'
 import AIOptimizeButton from './AIOptimizeButton'
+import AgentCompanionManage from './AgentCompanionManage'
 import type { SandboxStatus } from '../api/client'
 import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, Skill, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
@@ -28,6 +29,12 @@ const providerOfConn = (c: ModelConnection) => {
   const i = c.name.indexOf('·')
   return i > 0 ? c.name.slice(0, i) : c.name
 }
+
+/** REQ-189：侧板宽度三常量与 localStorage 键（拖拽 clamp 320~720，记忆 eino.agentpanel.width） */
+const PANEL_WIDTH_KEY = 'eino.agentpanel.width'
+const DEFAULT_PANEL_WIDTH = 560
+const MIN_PANEL_WIDTH = 320
+const MAX_PANEL_WIDTH = 720
 
 /** 本地已知 MCP server 预设（REQ-99 ③ 通用挂载契约保留；D-O15 起 semantica 预设随「去-semantica 化」移除，
  *  通用 MCP servers 编辑能力不变，后续 open-ontologies 等预设随里程碑补入） */
@@ -79,8 +86,40 @@ export default function AgentSidePanel({
   onClose: () => void
   onChanged?: () => void
 }) {
+  // REQ-189：侧板宽度可调（默认上调 364→560；拖拽 320~720；localStorage 记忆；双击复位）
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
+    return saved >= MIN_PANEL_WIDTH && saved <= MAX_PANEL_WIDTH ? saved : DEFAULT_PANEL_WIDTH
+  })
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = panelWidth
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, startW + (startX - ev.clientX)))
+      setPanelWidth(w)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setPanelWidth((w) => {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(w))
+        return w
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
   return (
-    <aside className={`proj-panel${open ? ' open' : ''}`}>
+    <aside className={`proj-panel${open ? ' open' : ''}`} style={{ width: panelWidth }} data-panel-width={panelWidth}>
+      <div
+        className="proj-panel-resizer"
+        role="separator"
+        aria-label="拖拽调整侧边栏宽度"
+        aria-orientation="vertical"
+        onMouseDown={(e) => startResize(e)}
+        onDoubleClick={() => { setPanelWidth(DEFAULT_PANEL_WIDTH); localStorage.setItem(PANEL_WIDTH_KEY, String(DEFAULT_PANEL_WIDTH)) }}
+      />
       <div className="proj-panel-bar" role="tablist" aria-label="智能体侧边栏视图">
         <Tooltip title="配置" placement="left">
           <button type="button" className="proj-bar-btn active" aria-label="配置" aria-selected role="tab">
@@ -451,11 +490,22 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                       ]}
                     />
                   </Form.Item>
+                </>
+              ),
+            },
+            {
+              // REQ-189：伴生本体专有页签——配置（开关+REQ-187 三字段自「能力」页签内聚迁入）
+              // 与管理（AgentCompanionManage 紧凑视图）同页签；整体摘除留本体模块全量管理面
+              key: 'companion',
+              label: '伴生本体',
+              forceRender: true,
+              children: (
+                <>
                   <Form.Item
                     name="companion_ontology"
-                    label="伴生本体"
+                    label="伴生本体开关"
                     valuePropName="checked"
-                    extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；本体模块「伴生本体」栏可查询；默认关闭"
+                    extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；下方为本智能体各会话的候选管理；本体模块「伴生本体」栏为全量管理面；默认关闭"
                   >
                     <Switch checkedChildren="开" unCheckedChildren="关" />
                   </Form.Item>
@@ -472,7 +522,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                       <Form.Item
                         name="companion_extract_conn_id"
                         label="抽取模型连接（可选，REQ-187）"
-                        extra="留空 = 跟随上方「模型连接」（外部 CLI 后端 agent 无生效连接时须指定真实 chat 连接）"
+                        extra="留空 = 跟随「模型与参数」页签的模型连接（外部 CLI 后端 agent 无生效连接时须指定真实 chat 连接）"
                       >
                         <Select allowClear showSearch optionFilterProp="label" placeholder="跟随智能体模型连接" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
                       </Form.Item>
@@ -483,9 +533,13 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                       >
                         <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} placeholder="0（全人工确认）" />
                       </Form.Item>
+                      <Divider titlePlacement="left" plain style={{ margin: '4px 0 12px' }}>
+                        本智能体会话伴生管理
+                      </Divider>
                     </>
                   )}
 
+                  <AgentCompanionManage agent={agent} />
                 </>
               ),
             },
