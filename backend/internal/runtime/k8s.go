@@ -46,6 +46,19 @@ func (k *K8sBackend) Name() string { return "k8s" }
 
 func (k *K8sBackend) podName(agentID string) string { return "agt-" + agentID }
 
+// instanceName 实例名（10c 作用域，与 DockerBackend 同规则）：run 域且携带 RunID →
+// agt-{agentID}-r-{run8}；否则 agent 域常驻 Pod。
+func (k *K8sBackend) instanceName(spec StartSpec) string {
+	if Scope() == "run" && spec.RunID != "" {
+		run := spec.RunID
+		if len(run) > 8 {
+			run = run[:8]
+		}
+		return "agt-" + spec.AgentID + "-r-" + run
+	}
+	return "agt-" + spec.AgentID
+}
+
 func (k *K8sBackend) containerPort() int {
 	if k.ContainerPort > 0 {
 		return k.ContainerPort
@@ -100,10 +113,11 @@ func (k *K8sBackend) podManifest(spec StartSpec, token string) map[string]any {
 			env = append(env, map[string]string{"name": key, "value": v})
 		}
 	}
+	name := k.instanceName(spec)
 	return map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata":   map[string]any{"name": k.podName(spec.AgentID), "labels": map[string]string{"app": "agentd", "agent": spec.AgentID}},
+		"metadata":   map[string]any{"name": name, "labels": map[string]string{"app": "agentd", "agent": spec.AgentID}},
 		"spec": map[string]any{
 			"restartPolicy": "Always",
 			"containers": []any{map[string]any{
@@ -119,12 +133,17 @@ func (k *K8sBackend) podManifest(spec StartSpec, token string) map[string]any {
 	}
 }
 
-// Start 启动（或复用）agentd Pod 并等待就绪（对账：Running 且健康则直接复用端点）。
+// Start 启动（或复用）agentd Pod 并等待就绪（agent 域对账：Running 且健康则复用；run 域
+// 10c：每次 Start 建新 Pod，调用方 Run 收尾 Stop 清理）。
 func (k *K8sBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error) {
 	agentID := spec.AgentID
-	if st, _ := k.Status(ctx, agentID); st.State == "running" {
-		if ep, perr := k.endpointOf(ctx, agentID); perr == nil {
-			return ep, nil
+	inst := k.instanceName(spec)
+	runScoped := Scope() == "run" && spec.RunID != ""
+	if !runScoped {
+		if st, _ := k.Status(ctx, agentID); st.State == "running" {
+			if ep, perr := k.endpointOf(ctx, inst); perr == nil {
+				return ep, nil
+			}
 		}
 	}
 	if k.TokenIssue == nil {
@@ -139,7 +158,7 @@ func (k *K8sBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error
 		return Endpoint{}, err
 	}
 	// 覆盖式重建：删旧 Pod（含 Nonexistent 容错）再 apply，保证镜像/env 变更生效
-	_, _ = k.kubectl(ctx, "delete", "pod", k.podName(agentID), "--ignore-not-found=true", "--wait=false")
+	_, _ = k.kubectl(ctx, "delete", "pod", inst, "--ignore-not-found=true", "--wait=false")
 	if err := k.applyStdin(ctx, manifest); err != nil {
 		return Endpoint{}, err
 	}
@@ -150,7 +169,7 @@ func (k *K8sBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		ep, perr := k.endpointOf(ctx, agentID)
+		ep, perr := k.endpointOf(ctx, inst)
 		if perr == nil {
 			cli := &http.Client{Timeout: 2 * time.Second}
 			resp, herr := cli.Get(ep.URL + "/healthz")
@@ -162,7 +181,7 @@ func (k *K8sBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error
 			}
 		}
 		if time.Now().After(deadline) {
-			return Endpoint{}, fmt.Errorf("agentd pod %s not healthy in %s", k.podName(agentID), wait)
+			return Endpoint{}, fmt.Errorf("agentd pod %s not healthy in %s", inst, wait)
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -194,29 +213,30 @@ func (k *K8sBackend) applyStdin(ctx context.Context, manifest []byte) error {
 }
 
 // endpointOf 按端点模式组装 endpoint（port-forward 模式懒建转发进程）。
-func (k *K8sBackend) endpointOf(ctx context.Context, agentID string) (Endpoint, error) {
-	ip, err := k.kubectl(ctx, "get", "pod", k.podName(agentID),
+func (k *K8sBackend) endpointOf(ctx context.Context, inst string) (Endpoint, error) {
+	ip, err := k.kubectl(ctx, "get", "pod", inst,
 		"-o", "jsonpath={.status.podIP}")
 	if err != nil || ip == "" {
-		return Endpoint{}, fmt.Errorf("pod %s 无 podIP: %v", k.podName(agentID), err)
+		return Endpoint{}, fmt.Errorf("pod %s 无 podIP: %v", inst, err)
 	}
 	if k.endpointMode() == "pod-ip" {
 		return Endpoint{URL: fmt.Sprintf("http://%s:%d", ip, k.containerPort())}, nil
 	}
-	return k.portForwardEndpoint(ctx, agentID)
+	return k.portForwardEndpoint(ctx, inst)
 }
 
-// portForwardEndpoint 建立本机端口转发（幂等：已有转发且进程存活则复用）。
-func (k *K8sBackend) portForwardEndpoint(ctx context.Context, agentID string) (Endpoint, error) {
+// portForwardEndpoint 建立本机端口转发（幂等：已有转发且进程存活则复用；键=实例名，
+// run 域每次 Run 的转发随各自 Stop 回收）。
+func (k *K8sBackend) portForwardEndpoint(ctx context.Context, inst string) (Endpoint, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if k.forwards == nil {
 		k.forwards = map[string]*exec.Cmd{}
 		k.ports = map[string]string{}
 	}
-	if cmd := k.forwards[agentID]; cmd != nil && cmd.Process != nil {
+	if cmd := k.forwards[inst]; cmd != nil && cmd.Process != nil {
 		if cmd.ProcessState == nil {
-			return Endpoint{URL: "http://127.0.0.1:" + k.ports[agentID]}, nil
+			return Endpoint{URL: "http://127.0.0.1:" + k.ports[inst]}, nil
 		}
 	}
 	port, err := freePort()
@@ -231,7 +251,7 @@ func (k *K8sBackend) portForwardEndpoint(ctx context.Context, agentID string) (E
 			bin = "kubectl"
 		}
 	}
-	args := []string{"port-forward", "pod/" + k.podName(agentID), fmt.Sprintf("%s:%d", port, k.containerPort())}
+	args := []string{"port-forward", "pod/" + inst, fmt.Sprintf("%s:%d", port, k.containerPort())}
 	if k.Context != "" {
 		args = append([]string{"--context", k.Context}, args...)
 	}
@@ -242,8 +262,8 @@ func (k *K8sBackend) portForwardEndpoint(ctx context.Context, agentID string) (E
 	if err := cmd.Start(); err != nil {
 		return Endpoint{}, fmt.Errorf("kubectl port-forward: %w", err)
 	}
-	k.forwards[agentID] = cmd
-	k.ports[agentID] = port
+	k.forwards[inst] = cmd
+	k.ports[inst] = port
 	return Endpoint{URL: "http://127.0.0.1:" + port}, nil
 }
 
@@ -257,17 +277,18 @@ func (k *K8sBackend) endpointMode() string {
 	return "port-forward"
 }
 
-// Stop 删除 Pod 并回收本机转发进程。
-func (k *K8sBackend) Stop(ctx context.Context, agentID string) error {
+// Stop 删除 Pod 并回收本机转发进程（10c：run 域按 (AgentID, RunID) 定位实例）。
+func (k *K8sBackend) Stop(ctx context.Context, spec StopSpec) error {
+	inst := k.instanceName(StartSpec{AgentID: spec.AgentID, RunID: spec.RunID})
 	k.mu.Lock()
-	if cmd := k.forwards[agentID]; cmd != nil && cmd.Process != nil {
+	if cmd := k.forwards[inst]; cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait() // 同步回收（SIGKILL 即刻退出；避免僵尸进程干扰状态断言）
 	}
-	delete(k.forwards, agentID)
-	delete(k.ports, agentID)
+	delete(k.forwards, inst)
+	delete(k.ports, inst)
 	k.mu.Unlock()
-	_, err := k.kubectl(ctx, "delete", "pod", k.podName(agentID), "--ignore-not-found=true", "--wait=false")
+	_, err := k.kubectl(ctx, "delete", "pod", inst, "--ignore-not-found=true", "--wait=false")
 	return err
 }
 

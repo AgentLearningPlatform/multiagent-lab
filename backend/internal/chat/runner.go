@@ -1028,14 +1028,30 @@ func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent
 		histVals[i] = *m
 	}
 
-	// 2) 确保沙箱实例就绪
-	ep, err := s.Runtime.Start(ctx, runtime.StartSpec{AgentID: agent.ID, Memory: agent.SandboxMemory, CPUs: agent.SandboxCPUs})
+	// 2) 确保沙箱实例就绪（10c：SANDBOX_SCOPE=run 时每次 Run 独立容器，收尾即清）
+	runScoped := runtime.Scope() == "run"
+	spec := runtime.StartSpec{AgentID: agent.ID, Memory: agent.SandboxMemory, CPUs: agent.SandboxCPUs}
+	if runScoped {
+		spec.RunID = runID
+	}
+	ep, err := s.Runtime.Start(ctx, spec)
 	if err != nil {
 		s.emitAndRecord(ctx, conv, runID, newEvent("run.error", runID, map[string]any{
 			"code": "sandbox_start_failed", "message": err.Error(), "elapsed_ms": time.Since(start).Milliseconds(),
 		}), emit)
 		res.Error = err.Error()
 		return res, nil
+	}
+	if runScoped {
+		// per-run 容器用后即清：Run 结束（成功/失败/客户端断开）都回收；清理上下文独立于
+		// Run ctx（断开时 Run ctx 已取消，清理仍需执行）
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if serr := s.Runtime.Stop(cleanupCtx, runtime.StopSpec{AgentID: agent.ID, RunID: runID}); serr != nil {
+				log.Printf("[runtime] per-run sandbox cleanup %s: %v", runID, serr)
+			}
+		}()
 	}
 
 	// 3) POST {endpoint}/run 并透传 SSE

@@ -193,13 +193,13 @@ func TestK8sStopCleansForward(t *testing.T) {
 	}
 	port := strings.TrimPrefix(ep.URL, "http://127.0.0.1:")
 	k.mu.Lock()
-	cmd := k.forwards["a3"]
+	cmd := k.forwards["agt-a3"]
 	k.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		t.Fatal("转发进程应存在")
 	}
 	time.Sleep(100 * time.Millisecond) // 给 stub 启动时间
-	if err := k.Stop(context.Background(), "a3"); err != nil {
+	if err := k.Stop(context.Background(), StopSpec{AgentID: "a3"}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)

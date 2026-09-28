@@ -31,6 +31,19 @@ type DockerBackend struct {
 
 func (d *DockerBackend) containerName(agentID string) string { return "agt-" + agentID }
 
+// instanceName 实例名（10c 作用域）：run 域且携带 RunID → agt-{agentID}-r-{run8}（每次 Run
+// 独立容器，用后即清）；否则 agent 域常驻实例 agt-{agentID}（跨 Run 复用）。
+func (d *DockerBackend) instanceName(spec StartSpec) string {
+	if Scope() == "run" && spec.RunID != "" {
+		run := spec.RunID
+		if len(run) > 8 {
+			run = run[:8]
+		}
+		return "agt-" + spec.AgentID + "-r-" + run
+	}
+	return "agt-" + spec.AgentID
+}
+
 // dockerBin 解析 docker CLI 路径（10a 实测补强）：DOCKER_BIN > PATH > Docker Desktop 常见安装位置。
 // macOS Docker Desktop 装于 ~/.docker/bin 且不一定在服务进程 PATH 上，回退避免"找不到可执行文件"。
 func (d *DockerBackend) dockerBin() string {
@@ -75,16 +88,21 @@ func (d *DockerBackend) docker(ctx context.Context, args ...string) (string, err
 }
 
 // Start 启动（或复用）agentd 容器并等待其就绪（资源限制按 spec，空 = 默认 512m/1CPU）。
+// agent 域：容器已在跑则复用（进程重启后注册表丢失的场景）；run 域（10c）：每次 Start
+// 建新容器（对账复用跳过），Run 收尾由调用方 Stop 清理。
 func (d *DockerBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error) {
 	agentID := spec.AgentID
-	name := d.containerName(agentID)
-	// 对账：容器已在跑则复用（进程重启后注册表丢失的场景）
-	if st, _ := d.Status(ctx, agentID); st.State == "running" {
-		if ep, perr := d.endpointOf(ctx, agentID); perr == nil {
-			return ep, nil
+	name := d.instanceName(spec)
+	runScoped := Scope() == "run" && spec.RunID != ""
+	// 对账：agent 域容器已在跑则复用；run 域不复用（每次全新实例）
+	if !runScoped {
+		if st, _ := d.Status(ctx, agentID); st.State == "running" {
+			if ep, perr := d.endpointOf(ctx, d.containerName(agentID)); perr == nil {
+				return ep, nil
+			}
 		}
 	}
-	// 清理同名的停止容器（容器名冲突）
+	// 清理同名残留（容器名冲突）
 	_, _ = d.docker(ctx, "rm", "-f", name)
 
 	if d.TokenIssue == nil {
@@ -107,6 +125,9 @@ func (d *DockerBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, er
 	runArgs := []string{
 		"run", "-d", "--name", name,
 		"--memory=" + mem, fmt.Sprintf("--cpus=%g", cpus),
+		// Linux 原生 dockerd 无 host.docker.internal DNS（Docker Desktop 特性，10c WSL 实测）——
+		// host-gateway 别名三平台通用（Docker 20.10+/Podman），容器内经该名回访主平台
+		"--add-host=host.docker.internal:host-gateway",
 		"-e", "AGENT_ID=" + agentID,
 		"-e", "PLATFORM_URL=" + d.PlatformURL,
 		"-e", "MANIFEST_TOKEN=" + token,
@@ -130,7 +151,7 @@ func (d *DockerBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, er
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		ep, perr := d.endpointOf(ctx, agentID)
+		ep, perr := d.endpointOf(ctx, name)
 		if perr == nil {
 			cli := &http.Client{Timeout: 2 * time.Second}
 			resp, herr := cli.Get(ep.URL + "/healthz")
@@ -142,15 +163,19 @@ func (d *DockerBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, er
 			}
 		}
 		if time.Now().After(deadline) {
+			// run 域：启动失败不留残容器（用后即清语义覆盖失败路径）
+			if runScoped {
+				_, _ = d.docker(ctx, "rm", "-f", name)
+			}
 			return Endpoint{}, fmt.Errorf("agentd container %s not healthy in %s", name, wait)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 }
 
-// endpointOf 查询容器端口映射并组装 endpoint。
-func (d *DockerBackend) endpointOf(ctx context.Context, agentID string) (Endpoint, error) {
-	out, err := d.docker(ctx, "port", d.containerName(agentID), "8080/tcp")
+// endpointOf 查询容器端口映射并组装 endpoint（10c：name 由调用方按作用域给实例名）。
+func (d *DockerBackend) endpointOf(ctx context.Context, name string) (Endpoint, error) {
+	out, err := d.docker(ctx, "port", name, "8080/tcp")
 	if err != nil {
 		return Endpoint{}, err
 	}
@@ -163,10 +188,11 @@ func (d *DockerBackend) endpointOf(ctx context.Context, agentID string) (Endpoin
 	return Endpoint{URL: "http://127.0.0.1:" + parts[1]}, nil
 }
 
-// Stop 停止并移除容器。
-func (d *DockerBackend) Stop(ctx context.Context, agentID string) error {
-	if _, err := d.docker(ctx, "rm", "-f", d.containerName(agentID)); err != nil {
-		log.Printf("[runtime] stop container agt-%s: %v", agentID, err)
+// Stop 停止并移除容器（10c：run 域按 (AgentID, RunID) 定位实例）。
+func (d *DockerBackend) Stop(ctx context.Context, spec StopSpec) error {
+	name := d.instanceName(StartSpec{AgentID: spec.AgentID, RunID: spec.RunID})
+	if _, err := d.docker(ctx, "rm", "-f", name); err != nil {
+		log.Printf("[runtime] stop container %s: %v", name, err)
 		return err
 	}
 	return nil

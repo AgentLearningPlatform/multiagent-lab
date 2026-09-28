@@ -273,7 +273,7 @@ func (s *Server) sandboxStop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "沙箱后端未启用（需配置 SANDBOX_IMAGE）"})
 		return
 	}
-	if err := s.Chat.Runtime.Stop(r.Context(), r.PathValue("id")); err != nil {
+	if err := s.Chat.Runtime.Stop(r.Context(), runtime.StopSpec{AgentID: r.PathValue("id")}); err != nil {
 		writeErr(w, err)
 		return
 	}
