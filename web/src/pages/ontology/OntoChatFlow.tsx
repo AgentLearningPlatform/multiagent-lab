@@ -31,6 +31,7 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
   const [draft, setDraft] = useState<Spec | null>(null)
   const [draftWarning, setDraftWarning] = useState('')
   const [saveName, setSaveName] = useState('')
+  const [restored, setRestored] = useState<{ round: number; draft: boolean } | null>(null)
   const listEndRef = useRef<HTMLDivElement>(null)
 
   const refreshList = useCallback(async () => {
@@ -83,6 +84,7 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
 
   const newSession = async () => {
     try {
+      setRestored(null)
       const s = await api.createOntoChatSession(`引导 ${new Date().toLocaleString()}`)
       await refreshList()
       setActive(s)
@@ -234,11 +236,14 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
             <Empty description="新建或选择一个会话开始" style={{ padding: 40 }} />
           ) : (
             <>
-              <Space size={8} style={{ marginBottom: 8 }}>
+              <Space size={8} style={{ marginBottom: 8 }} wrap>
                 <Tag {...stageTag} style={{ margin: 0 }}>{stageTag.text}</Tag>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>轮数 {active.round}</Typography.Text>
                 {active.ontology_id && (
                   <Tag color="green" style={{ margin: 0 }}>产物 {active.ontology_id}</Tag>
+                )}
+                {restored && restored.round > 0 && (
+                  <Tag color="blue" style={{ margin: 0 }}>中断恢复：已还原 {restored.round} 轮{restored.draft ? '与草稿' : ''}（服务端持久化）</Tag>
                 )}
               </Space>
               <div
