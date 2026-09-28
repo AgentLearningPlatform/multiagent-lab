@@ -2,7 +2,7 @@
 // （.gitignore 覆盖），克隆或重装依赖后目录为空——Graph3D 经 /vendor/3d-force-graph.min.js
 // 注入会 404→SPA fallback 回 HTML→「三维视图初始化失败」。本脚本自 node_modules 的
 // 3d-force-graph npm 包复制 UMD，挂接在 npm run dev / build 前自动执行（免手工放置）。
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -19,6 +19,19 @@ const jobs = [
   { from: 'angular-webvowl/dist/webvowl.js', to: 'webvowl/webvowl.js' },
   { from: 'angular-webvowl/dist/webvowl.css', to: 'webvowl/webvowl.css' },
 ]
+
+// 依赖包缺失（典型场景：拉取了新增 devDependency 的代码但未重新 npm install）时给出可行动
+// 指引——2026-09-27 他机报障「npm run build 报 ENOENT copyfile angular-webvowl」：脚本路径
+// 均经 import.meta.url 相对解析非绝对路径硬编码，实为其 node_modules 落后于 package.json。
+const missingPkgs = [...new Set(jobs.map((j) => j.from.split('/')[0]))].filter(
+  (pkg) => !existsSync(join(root, 'node_modules', pkg)),
+)
+if (missingPkgs.length > 0) {
+  console.warn(
+    `[prepare-vendor] 提示: 依赖包未安装（${missingPkgs.join(', ')}）——请在 web/ 目录执行 npm install 后重新构建；` +
+      '本次构建继续，缺失的可视化资源将在运行时诚实降级报错',
+  )
+}
 
 for (const { from, to } of jobs) {
   try {
