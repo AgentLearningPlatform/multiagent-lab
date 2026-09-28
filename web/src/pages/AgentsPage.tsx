@@ -56,6 +56,11 @@ export default function AgentsPage() {
 
   /** 智能体节点 ⚙ → 右侧边栏配置视图（侧边栏若未开则同时打开） */
   const configureAgent = (agentId: string) => {
+    // REQ-186：内置助手配置面锁定（设置页「平台助手」分区承载其配置）
+    if (agents.find((a) => a.id === agentId)?.is_builtin) {
+      showToast('内置助手不可编辑；其配置在「设置 → 平台助手」分区', 'err')
+      return
+    }
     setActiveAgentId(agentId)
     setSidePanelOpen(true)
   }

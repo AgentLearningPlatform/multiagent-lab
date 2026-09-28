@@ -25,6 +25,8 @@ type Agent struct {
 	McpServe      McpServe `json:"mcp_serve"` // REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name）
 	// REQ-170/M28：伴生本体开关（默认关；开启后 Run/Resume 收尾触发伴生 worker 游标抽取）
 	CompanionOntology bool `json:"companion_ontology"`
+	// REQ-186：内置助手标记（1=平台助手内置行——列表分区展示、不可编辑删除；行为上仍内置隔离）
+	IsBuiltin bool `json:"is_builtin"`
 	// REQ-187：伴生本体配置增强（默认空/空/0 = 现行为零回归）
 	CompanionExtractHint   string  `json:"companion_extract_hint"`
 	CompanionExtractConnID string  `json:"companion_extract_conn_id"`

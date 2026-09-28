@@ -88,6 +88,11 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = r.PathValue("id")
+	// REQ-186：内置助手行不可编辑（列表可见但配置面锁定）
+	if prev, perr := s.Store.GetAgent(a.ID); perr == nil && prev != nil && prev.IsBuiltin {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "内置助手不可编辑（REQ-186）"})
+		return
+	}
 	if err := s.normalizeInferenceBackend(&a); err != nil {
 		writeErr(w, err)
 		return
@@ -110,6 +115,11 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// REQ-186：内置助手行不可删除
+	if prev, perr := s.Store.GetAgent(id); perr == nil && prev != nil && prev.IsBuiltin {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "内置助手不可删除（REQ-186）"})
+		return
+	}
 	s.mcpSync()
 	if err := s.Store.DeleteAgent(id); err != nil {
 		writeErr(w, err)

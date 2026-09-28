@@ -14,10 +14,11 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var temp sql.NullFloat64
 	var maxTok sql.NullInt64
 	var sandboxCPUs sql.NullFloat64
-	var companionOntology int
+	var companionOntology, isBuiltin int
 	err := row.Scan(&a.ID, &a.Name, &a.Description, &a.Instruction, &modelConn, &temp, &maxTok,
 		&a.MaxIteration, &tools, &skills, &mcp, &a.RuntimeBackend, &a.InferenceBackend, &a.LogoURL, &a.ToolApproval, &mcpServe, &a.SandboxMemory, &sandboxCPUs, &companionOntology,
-		&a.CompanionExtractHint, &a.CompanionExtractConnID, &a.CompanionAutoThreshold, &a.CreatedAt, &a.UpdatedAt)
+		&a.CompanionExtractHint, &a.CompanionExtractConnID, &a.CompanionAutoThreshold, &isBuiltin, &a.CreatedAt, &a.UpdatedAt)
+	a.IsBuiltin = isBuiltin == 1
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	return &a, nil
 }
 
-const agentCols = `id,name,description,instruction,model_conn_id,temperature,max_tokens,max_iteration,tools,skills,mcp_servers,runtime_backend,inference_backend,logo_url,tool_approval,mcp_serve,sandbox_memory,sandbox_cpus,companion_ontology,companion_extract_hint,companion_extract_conn_id,companion_auto_threshold,created_at,updated_at`
+const agentCols = `id,name,description,instruction,model_conn_id,temperature,max_tokens,max_iteration,tools,skills,mcp_servers,runtime_backend,inference_backend,logo_url,tool_approval,mcp_serve,sandbox_memory,sandbox_cpus,companion_ontology,companion_extract_hint,companion_extract_conn_id,companion_auto_threshold,is_builtin,created_at,updated_at`
 
 // ListAgents 返回全部 Agent（按创建时间升序）。
 func (s *Store) ListAgents() ([]*Agent, error) {
@@ -90,7 +91,9 @@ func (s *Store) CreateAgent(a *Agent) (*Agent, error) {
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
 	mcpServeJSON, _ := json.Marshal(a.McpServe)
-	_, err := s.DB.Exec(`INSERT INTO agent (`+agentCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	// 显式列清单（不含 is_builtin——用户创建恒非内置；内置行仅由迁移 seed）
+	const createCols = `id,name,description,instruction,model_conn_id,temperature,max_tokens,max_iteration,tools,skills,mcp_servers,runtime_backend,inference_backend,logo_url,tool_approval,mcp_serve,sandbox_memory,sandbox_cpus,companion_ontology,companion_extract_hint,companion_extract_conn_id,companion_auto_threshold,created_at,updated_at`
+	_, err := s.DB.Exec(`INSERT INTO agent (`+createCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.ID, a.Name, a.Description, a.Instruction, a.ModelConnID, a.Temperature, a.MaxTokens,
 		a.MaxIteration, string(tools), string(skills), string(mcp), a.RuntimeBackend, a.InferenceBackend, a.LogoURL, a.ToolApproval, string(mcpServeJSON), a.SandboxMemory, a.SandboxCPUs, boolToInt(a.CompanionOntology), a.CompanionExtractHint, a.CompanionExtractConnID, a.CompanionAutoThreshold, now(), now())
 	if err != nil {

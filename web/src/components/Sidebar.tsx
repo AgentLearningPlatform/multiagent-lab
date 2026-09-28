@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from 'antd'
+import { Button, Tag } from 'antd'
 import {
   PlusOutlined,
   SettingOutlined,
@@ -23,6 +23,7 @@ interface TreeNode {
   name: string
   logo?: string
   backend?: string
+  builtin?: boolean // REQ-186：内置助手（置顶分区、内置徽标、无配置入口）
   convs: Conversation[]
 }
 
@@ -68,13 +69,18 @@ export default function Sidebar({
   const nodes = useMemo<TreeNode[]>(() => {
     const byCreated = (a: Conversation, b: Conversation) => a.created_at.localeCompare(b.created_at)
     if (mode === 'agent') {
-      return agents.map((a) => ({
-        key: a.id,
-        name: a.name,
-        logo: a.logo_url,
-        backend: a.inference_backend,
-        convs: conversations.filter((c) => c.scope === 'agent' && c.agent_id === a.id).sort(byCreated),
-      }))
+      // REQ-186：内置助手节点置顶（内置徽标、无配置入口）；用户智能体照常
+      return agents
+        .slice()
+        .sort((x, y) => (y.is_builtin ? 1 : 0) - (x.is_builtin ? 1 : 0))
+        .map((a) => ({
+          key: a.id,
+          name: a.name,
+          logo: a.logo_url,
+          backend: a.inference_backend,
+          builtin: !!a.is_builtin,
+          convs: conversations.filter((c) => c.scope === 'agent' && c.agent_id === a.id).sort(byCreated),
+        }))
     }
     return projects.map((p) => ({
       key: p.id,
@@ -189,11 +195,12 @@ export default function Sidebar({
                   {/* 智能体用品牌同源的三节点标记；项目保留各自图标，一眼可辨 */}
                   <span className="side-node-dot">{isAgent ? <AgentLogo backend={n.backend} logoUrl={n.logo} size={16} /> : <ProjectOutlined />}</span>
                   <span className="side-node-name" title={n.name}>{n.name}</span>
+                  {n.builtin && <Tag color="geekblue" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>内置</Tag>}
                   <span className="side-node-count">{n.convs.length}</span>
                 </button>
                 <span className="side-node-ops">
-                  <Button type="text" size="small" icon={<PlusOutlined />} title="新建对话" onClick={() => onNewConversation(n.key)} />
-                  <Button type="text" size="small" icon={<SettingOutlined />} title="配置" onClick={() => configure(n.key)} />
+                  <Button type="text" size="small" icon={<PlusOutlined />} title={n.builtin ? '与平台助手开始对话' : '新建对话'} onClick={() => onNewConversation(n.key)} />
+                  {!n.builtin && <Button type="text" size="small" icon={<SettingOutlined />} title="配置" onClick={() => configure(n.key)} />}
                 </span>
               </div>
 

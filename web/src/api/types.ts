@@ -24,6 +24,8 @@ export interface Agent {
   mcp_serve?: { enabled: boolean; token?: string; tool_name?: string }
   /** M28/REQ-170：伴生本体开关（对话收尾旁路抽取 KG 入伴生引擎；默认关） */
   companion_ontology?: boolean
+  /** REQ-186：内置助手标记（智能体列表分区置顶、内置徽标、无配置入口） */
+  is_builtin?: boolean
   /** REQ-187：伴生本体配置增强 */
   companion_extract_hint?: string
   companion_extract_conn_id?: string
