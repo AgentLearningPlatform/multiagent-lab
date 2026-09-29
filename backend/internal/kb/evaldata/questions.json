@@ -1,0 +1,57 @@
+{
+  "note": "KB-14/M35 评测基准问题集：keyword=词法臂（FTS5 Recall@5）、multihop=图臂（递归 CTE 可达边）、community=全局臂（社区摘要评分命中）。gold 为内容子串或 gold_edges 边对。",
+  "questions": [
+    {
+      "id": "kw-1",
+      "type": "keyword",
+      "q": "BUG-1024 弱网超时的修复方案是什么",
+      "gold": ["BUG-1024"]
+    },
+    {
+      "id": "kw-2",
+      "type": "keyword",
+      "q": "HNSW 索引与 cosine 相似度",
+      "gold": ["HNSW"]
+    },
+    {
+      "id": "kw-3",
+      "type": "keyword",
+      "q": "Qdrant 客户端超时配置",
+      "gold": ["显式设置 3 秒拨号超时"]
+    },
+    {
+      "id": "kw-4",
+      "type": "keyword",
+      "q": "Retriever 组件对接外部检索后端",
+      "gold": ["Retriever 组件对接外部检索后端"]
+    },
+    {
+      "id": "mh-1",
+      "type": "multihop",
+      "q": "从 Eino 框架到向量库服务的完整依赖链",
+      "seed_entity": "Eino框架",
+      "hops": 3,
+      "gold_edges": [
+        ["Eino框架", "封装", "eino-ext组件"],
+        ["eino-ext组件", "连接", "Qdrant服务"],
+        ["Qdrant服务", "内置", "HNSW索引"]
+      ]
+    },
+    {
+      "id": "mh-2",
+      "type": "multihop",
+      "q": "超时缺陷与哪个服务相关",
+      "seed_entity": "BUG-1024",
+      "hops": 1,
+      "gold_edges": [
+        ["BUG-1024", "涉及", "Qdrant服务"]
+      ]
+    },
+    {
+      "id": "cm-1",
+      "type": "community",
+      "q": "Eino 框架与 Qdrant 服务的整体介绍",
+      "gold_label": "__any__"
+    }
+  ]
+}

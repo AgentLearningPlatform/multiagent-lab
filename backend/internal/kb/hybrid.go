@@ -115,7 +115,7 @@ func (s *Service) hybridSearch(ctx context.Context, kbID, query string, vec []fl
 	if !s.lexicalArmed(query) {
 		return vecHits, nil
 	}
-	lexHits, lerr := s.Store.SearchChunksFTS(kbID, store.FTSQuote(query), topK*2)
+	lexHits, lerr := s.Store.SearchChunksFTS(kbID, store.FTSMatchQuery(query), topK*2)
 	if lerr != nil {
 		log.Printf("[kb] 词法臂失败，退化纯向量 (kb=%s): %v", kbID, lerr)
 		return vecHits, nil

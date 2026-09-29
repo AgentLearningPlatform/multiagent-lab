@@ -100,3 +100,60 @@ func (s *Store) DeleteChunkFTSByKB(kbID string) {
 func FTSQuote(query string) string {
 	return `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
 }
+
+// FTSMatchQuery 自然语言问句 → FTS5 MATCH 表达式（KB-10①：trigram 下整句短语=逐字子串匹配，
+// 问句几乎必失配；改为 OR 连接的关键词短语组——ASCII/数字词取整词（≥2 字符），CJK 连续段取
+// 3 字滑窗（步长 2，每段 ≤6 窗）；任一命中即出榜，bm25 按命中数兜排序。上限 16 短语防表达式爆炸）。
+func FTSMatchQuery(question string) string {
+	// 按空白与常用标点切分
+	splitFn := func(r rune) bool {
+		switch r {
+		case ' ', '\t', '\n', '，', '。', '？', '！', '、', '：', '；', ',', '.', '?', '!', ':', ';', '（', '）', '(', ')', '\u201c', '\u201d', '\u2018', '\u2019':
+			return true
+		}
+		return false
+	}
+	terms := []string{}
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s != "" && !seen[s] && len(terms) < 16 {
+			seen[s] = true
+			terms = append(terms, s)
+		}
+	}
+	for _, field := range strings.FieldsFunc(question, splitFn) {
+		rs := []rune(field)
+		if len(rs) == 0 {
+			continue
+		}
+		isASCII := true
+		for _, r := range rs {
+			if r > 127 {
+				isASCII = false
+				break
+			}
+		}
+		if isASCII {
+			if len(rs) >= 2 { // 编号/术语类：BUG-1024、HNSW
+				add(field)
+			}
+			continue
+		}
+		// CJK 段：3 字滑窗步长 2
+		if len(rs) < 3 {
+			continue
+		}
+		windows := 0
+		for i := 0; i+3 <= len(rs) && windows < 6; i, windows = i+2, windows+1 {
+			add(string(rs[i : i+3]))
+		}
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	quoted := make([]string, 0, len(terms))
+	for _, t := range terms {
+		quoted = append(quoted, FTSQuote(t))
+	}
+	return strings.Join(quoted, " OR ")
+}
