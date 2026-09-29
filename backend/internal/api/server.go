@@ -245,6 +245,10 @@ func (s *Server) routes() {
 		// REQ-171/156/157/M-O15：质量门禁（quality check/report）+ 工具链（toolchain 五工具）+
 		// LOV 词表搜索 + 导入合并（merge preview/apply）+ 质量门禁开关（quality-config）——构建平面新端点前缀
 		m.Handle("/api/ontology/", s.Ontology.BuildProxy())
+		// M-O17 重构补遗（工具链配置页 404 修复）：PipelinePane 走 /api/pipelines*（REST 工具链配置，:8091）——
+		// REQ-75/76 交付时页面挂本体模块内但平台反代从未覆盖该前缀
+		m.Handle("/api/pipelines", s.Ontology.BuildProxy())
+		m.Handle("/api/pipelines/", s.Ontology.BuildProxy())
 		m.Handle("/api/runtime-profiles", s.Ontology.RuntimeProxy()) // → 运行平面 RUNTIME_MGR_URL(:8090)
 		m.Handle("/api/runtime-profiles/", s.Ontology.RuntimeProxy())
 		// REQ-179/M-O16：全局运行配置（执行方式）——运行平面单行配置表

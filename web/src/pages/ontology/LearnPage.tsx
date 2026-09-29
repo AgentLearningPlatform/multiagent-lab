@@ -525,25 +525,29 @@ export default function LearnPage() {
           )}
 
           {section === 'methods' && (
-            <Card className="work-card" size="small" title="方法论与任务卡（按阶段）">
-              <div className="onto-learn-steps" role="tablist" aria-label="阶段切换">
-                {STAGE_DEFS.map((st) => (
-                  <button
-                    key={st.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeStage === st.key}
-                    className={`onto-learn-step${activeStage === st.key ? ' active' : ''}`}
-                    onClick={() => setActiveStage(st.key)}
-                  >
-                    <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key] }}>{st.key.toUpperCase()}</span>
-                    <span className="onto-learn-step-name">{st.short}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="onto-learn-stage-detail" role="tabpanel">
-                {stageDetail(activeStage)}
-              </div>
+            /* bugfix（开发者报障「学习路径与方法论与任务卡模块重复」）：原视图与学习路径同构
+            （同一步骤条+同一 stageDetail）——改为全阶段方法论总览平铺（每阶段一组、默认全部展开），
+            与「学习路径」的单阶段聚焦视图职责区分 */
+            <Card className="work-card" size="small" title="方法论与任务卡（全阶段总览）">
+              <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 10 }}>
+                七阶段方法论卡片（REQ-90）与任务卡（REQ-91）全量平铺——单阶段聚焦请切「学习路径」点击对应阶段。
+              </Typography.Paragraph>
+              {STAGE_DEFS.map((st) => {
+                const prog = stageProgress.get(st.key) ?? { total: 0, done: 0 }
+                return (
+                  <div key={st.key} className="onto-learn-methods-group" style={{ marginBottom: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key], display: 'inline-flex', width: 34, height: 22, borderRadius: 5, alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 600 }}>{st.key.toUpperCase()}</span>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{st.short}</span>
+                      {prog.total > 0 && <Tag style={{ margin: 0 }}>任务 {prog.done}/{prog.total}</Tag>}
+                      <Button size="small" type="link" style={{ padding: 0 }} onClick={() => { setActiveStage(st.key); setSection('path') }}>
+                        聚焦此阶段 →
+                      </Button>
+                    </div>
+                    {stageDetail(st.key)}
+                  </div>
+                )
+              })}
             </Card>
           )}
 
