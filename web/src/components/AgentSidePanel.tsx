@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Card, Collapse, Divider, Form, FormInstance, Input, InputNumber, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Button, Card, Collapse, Divider, Empty, Form, FormInstance, Input, InputNumber, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   ApiOutlined,
   ClusterOutlined,
@@ -258,7 +258,18 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
 
   return (
     <div className="proj-view-body">
-      <Space size={4} style={{ marginBottom: 10 }}>
+      {/* REQ-195：两页各带标题+一句话说明（页切换右置），替代裸 Segmented 孤行 */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text strong style={{ fontSize: 13 }}>{page === 'config' ? '伴生配置' : '伴生管理'}</Typography.Text>
+          <div>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              {page === 'config'
+                ? '伴生开关与抽取三字段（REQ-187）；保存后下次运行生效'
+                : '本智能体跨会话候选确认流（铺平视图）；入图写入来源会话伴生图'}
+            </Typography.Text>
+          </div>
+        </div>
         <Segmented
           size="small"
           value={page}
@@ -268,7 +279,7 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
             { value: 'manage', label: '伴生管理' },
           ]}
         />
-      </Space>
+      </div>
       {page === 'config' ? (
         <Form form={form} layout="vertical" requiredMark={false} size="small">
           <Form.Item
@@ -306,8 +317,19 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
             </Button>
           </div>
         </Form>
-      ) : (
+      ) : agent.companion_ontology ? (
         <AgentCompanionManage agent={agent} />
+      ) : (
+        // REQ-195：开关未开启时管理页不再照常呈现（此前与开关状态脱节）——引导先开启
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          style={{ padding: '24px 0' }}
+          description={<span style={{ fontSize: 12 }}>伴生开关未开启——开启并对话一轮后，抽取候选在此跨会话确认入图</span>}
+        >
+          <Button type="primary" size="small" onClick={() => setPage('config')}>
+            去开启伴生本体
+          </Button>
+        </Empty>
       )}
     </div>
   )

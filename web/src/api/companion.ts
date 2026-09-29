@@ -21,6 +21,20 @@ export interface CompanionCandidate {
   status: 'pending' | 'confirmed' | 'rejected'
   created_at: string
   decided_at?: string
+  /** REQ-194①：抽取时实体对齐标记（aligned=沿用已有实体 / new=新造；空=存量未标） */
+  aligned?: '' | 'aligned' | 'new'
+  /** REQ-194⑤：审计注记（语义矛盾「疑似矛盾待人工」等） */
+  note?: string
+}
+
+/** REQ-194⑥：按实体归组（group_by=entity；代表候选=组内置信最高） */
+export interface CandidateGroup {
+  key: string
+  entity: string
+  count: number
+  pending_count: number
+  representative: CompanionCandidate
+  members: CompanionCandidate[]
 }
 
 export interface CompanionStatus {
@@ -30,6 +44,8 @@ export interface CompanionStatus {
   graph: string
   engine_running: boolean
   engine_endpoint: string
+  /** REQ-195：引擎加载详情（实际二进制/数据目录/端点；后端旧版无此字段=undefined） */
+  engine_detail?: { binary: string; data_dir: string; endpoint: string }
   labels?: string[]
 }
 
@@ -79,6 +95,15 @@ export const companionApi = {
     if (agentId) q.set('agent_id', agentId)
     const s = q.toString()
     return req<CompanionCandidate[]>(`/api/companion/candidates${s ? '?' + s : ''}`)
+  },
+  // REQ-194⑥：按实体归组形态（group_by=entity；桶过滤照常在 status 参数）
+  listCandidatesGrouped: (conversationId = '', status = '', agentId = '') => {
+    const q = new URLSearchParams()
+    if (conversationId) q.set('conversation_id', conversationId)
+    if (status) q.set('status', status)
+    if (agentId) q.set('agent_id', agentId)
+    q.set('group_by', 'entity')
+    return req<{ groups: CandidateGroup[] }>(`/api/companion/candidates?${q.toString()}`)
   },
   confirmCandidate: (id: string) =>
     req<{ candidate: CompanionCandidate; graph: string }>(`/api/companion/candidates/${id}/confirm`, { method: 'POST', body: '{}' }),

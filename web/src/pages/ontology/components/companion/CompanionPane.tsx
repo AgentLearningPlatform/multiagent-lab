@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Card, Empty, Popconfirm, Segmented, Select, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Empty, Popconfirm, Segmented, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { DeleteOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
-import { api } from '../../../../api/client'
-import type { Conversation } from '../../../../api/types'
+import { DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { companionApi } from '../../../../api/companion'
 import type { CompanionCandidate } from '../../../../api/companion'
 import LoadErrorAlert from '../../../../components/LoadErrorAlert'
-import CompanionGraph3D from './CompanionGraph3D'
 
 // ---------------------------------------------------------------------------
-// REQ-170/M28 P2：伴生本体页签（资产栏第九 Tab，D-O19 第三来源「对话」边界——
-// 不入第五栏 KG 检索区；来源徽标「对话」）。
-// 能力：会话选择 → 管线状态（引擎/游标/pending/图内实体标签）→ 候选人工确认流
-//（confirm 入图 / reject）→ 会话级整体摘除（DROP GRAPH + 清表）
-// → REQ-154 成长图 3D 可视化（本会话伴生图 force 视图，入图时间=成长序）。
+// REQ-170/M28 P2：伴生候选确认流面板（D-O19 第三来源「对话」边界——不入第五栏 KG 检索区）。
+// REQ-195 重构：会话选择与成长图 3D 上提页级（CompanionPage 单源驱动）——本组件收
+// convId/convs props，只保留「管线状态卡 + 候选三桶确认流 + 整体摘除」；confirm/reject/
+// reset 后经 onGraphChanged 通知页级刷新成长图。此前组件内自带会话下拉与第二个成长图
+// 入口，与页首图两套状态互不相通（上下重复/显示对象不可切换/入图后图不更新的根因）。
 // ---------------------------------------------------------------------------
 
 const KIND_META: Record<CompanionCandidate['kind'], { color: string; text: string }> = {
@@ -23,12 +20,14 @@ const KIND_META: Record<CompanionCandidate['kind'], { color: string; text: strin
   event: { color: 'geekblue', text: '事件' },
 }
 
-export default function CompanionPane() {
-  const [convs, setConvs] = useState<Conversation[]>([])
-  const [convId, setConvId] = useState<string | undefined>(undefined)
-  const [convsErr, setConvsErr] = useState<string | null>(null)
-  const [convsLoading, setConvsLoading] = useState(false)
-
+export default function CompanionPane({
+  convId,
+  onChangedGraph,
+}: {
+  convId: string | undefined
+  /** confirm/reject/reset 入图状态变化后通知页级刷新成长图（REQ-195） */
+  onChangedGraph?: () => void
+}) {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof companionApi.status>> | null>(null)
   const [statusLoading, setStatusLoading] = useState(false)
 
@@ -39,28 +38,6 @@ export default function CompanionPane() {
   const [deciding, setDeciding] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [actionErr, setActionErr] = useState<string | null>(null)
-  const [view, setView] = useState<'candidates' | 'graph3d'>('candidates') // REQ-154 成长可视化开关
-
-  // REQ-187 补充（2026-09-28）：项目会话（scope=project，agent 管理项目场景）的伴生候选同样可查——
-  // 此前仅列 agent 会话，项目会话产生的候选在下拉中不可见。
-  const loadConvs = useCallback(() => {
-    setConvsLoading(true)
-    Promise.all([
-      api.listConversations({ scope: 'agent' }),
-      api.listConversations({ scope: 'project' }),
-    ])
-      .then(([agents, projects]) => {
-        const merged = [
-          ...agents,
-          ...projects.map((p) => ({ ...p, title: `${p.title || p.id}（项目）` })),
-        ]
-        setConvs(merged)
-        setConvsErr(null)
-        setConvId((cur) => cur ?? merged[0]?.id)
-      })
-      .catch((e: any) => setConvsErr(e?.message ?? '会话列表加载失败'))
-      .finally(() => setConvsLoading(false))
-  }, [])
 
   const loadAll = useCallback((cid: string) => {
     setStatusLoading(true)
@@ -84,10 +61,6 @@ export default function CompanionPane() {
   }, [])
 
   useEffect(() => {
-    loadConvs()
-  }, [loadConvs])
-
-  useEffect(() => {
     if (convId) loadAll(convId)
     else {
       setStatus(null)
@@ -102,6 +75,7 @@ export default function CompanionPane() {
     try {
       await (action === 'confirm' ? companionApi.confirmCandidate(id) : companionApi.rejectCandidate(id))
       loadAll(convId)
+      onChangedGraph?.()
     } catch (e: any) {
       setActionErr(e?.message ?? '操作失败')
     } finally {
@@ -116,6 +90,7 @@ export default function CompanionPane() {
     try {
       await companionApi.resetConversation(convId)
       loadAll(convId)
+      onChangedGraph?.()
     } catch (e: any) {
       setActionErr(e?.message ?? '摘除失败')
     } finally {
@@ -187,52 +162,8 @@ export default function CompanionPane() {
 
   return (
     <div>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 12 }}
-        message="伴生本体（动态薄本体，M28/REQ-170）"
-        description="Agent 开启「伴生本体」后，对话收尾自动抽取领域知识候选（旁路管线，不改对话主链路）；在此人工确认后写入该会话的伴生图（独立 Oxigraph 引擎，按会话 named graph 隔离，矛盾旧边失效化而非删除）。来源徽标「对话」（D-O19 第三来源，不入 KG 检索区）。"
-      />
-
-      <div className="onto-sec">
-        <span className="onto-sec-title">会话（伴生图按会话隔离）</span>
-        <span className="hit-spacer" />
-        <Select
-          style={{ width: 340 }}
-          showSearch
-          optionFilterProp="label"
-          value={convId}
-          loading={convsLoading}
-          onChange={setConvId}
-          placeholder={convsErr ? '会话列表不可用' : '选择 Agent 会话'}
-          notFoundContent={convsLoading ? <Spin size="small" /> : '暂无 Agent 会话'}
-          options={convs.map((c) => ({ value: c.id, label: c.title || c.id }))}
-        />
-        <Button size="small" icon={<ReloadOutlined />} onClick={loadConvs} aria-label="刷新会话列表">
-          刷新
-        </Button>
-        {convId && (
-          <Popconfirm
-            title={`摘除该会话伴生图？`}
-            description="DROP 会话图 + 清空候选与游标（产物整体摘除，低侵入三原则③）；对话本身不受影响。"
-            okText="摘除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={doReset}
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} loading={resetting}>
-              整体摘除
-            </Button>
-          </Popconfirm>
-        )}
-      </div>
-
-      {convsErr && <LoadErrorAlert title="会话列表加载失败" message={convsErr} onRetry={loadConvs} style={{ marginBottom: 12 }} />}
-      {actionErr && <LoadErrorAlert title="伴生操作失败" message={actionErr} onRetry={() => setActionErr(null)} style={{ marginBottom: 12 }} />}
-
-      {!convId && !convsErr ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先选择一个 Agent 会话查看其伴生本体" />
+      {!convId ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先在上方选择伴生对象（会话）" />
       ) : (
         <>
           <Card size="small" className="work-card" style={{ marginBottom: 12 }}>
@@ -243,6 +174,11 @@ export default function CompanionPane() {
                 <Tag color={status.engine_running ? 'green' : 'default'} style={{ margin: 0 }}>
                   伴生引擎{status.engine_running ? '运行中' : '未启动'}
                 </Tag>
+                {status.engine_running && status.engine_endpoint && (
+                  <Tooltip title={`端点 ${status.engine_endpoint}${status.engine_detail?.binary ? ` ｜ 二进制 ${status.engine_detail.binary} ｜ 数据 ${status.engine_detail.data_dir}` : ''}`}>
+                    <Tag style={{ margin: 0 }}>{status.engine_endpoint.replace(/^https?:\/\/[^/]+/, '')}</Tag>
+                  </Tooltip>
+                )}
                 <Tag color="blue" style={{ margin: 0 }}>待确认 {status.pending_count}</Tag>
                 <Tooltip title={`游标位置：消息 ${status.cursor?.last_message_id || '—'}`}>
                   <Tag style={{ margin: 0 }}>已抽取至游标 {status.cursor?.last_message_id ? status.cursor.last_message_id.slice(0, 8) + '…' : '—'}</Tag>
@@ -259,38 +195,35 @@ export default function CompanionPane() {
           </Card>
 
           <div className="onto-sec">
-            <span className="onto-sec-title">
-              {view === 'candidates' ? '候选（人工确认 = 入图门控，REQ-82 草稿必审）' : '伴生图成长可视化（REQ-154，3d-force 只读视图）'}
-            </span>
+            <span className="onto-sec-title">候选（人工确认 = 入图门控，REQ-82 草稿必审）</span>
             <span className="hit-spacer" />
             <Segmented
               size="small"
-              value={view}
-              onChange={(v) => setView(v as 'candidates' | 'graph3d')}
+              value={bucket}
+              onChange={(v) => setBucket(v as 'pending' | 'confirmed' | 'rejected')}
               options={[
-                { value: 'candidates', label: '候选确认流' },
-                { value: 'graph3d', label: '成长图 3D' },
+                { value: 'pending', label: '待确认' },
+                { value: 'confirmed', label: '已入图' },
+                { value: 'rejected', label: '已拒绝' },
               ]}
             />
-            {view === 'candidates' && (
-              <Segmented
-                size="small"
-                value={bucket}
-                onChange={(v) => setBucket(v as 'pending' | 'confirmed' | 'rejected')}
-                options={[
-                  { value: 'pending', label: '待确认' },
-                  { value: 'confirmed', label: '已入图' },
-                  { value: 'rejected', label: '已拒绝' },
-                ]}
-              />
-            )}
+            <Popconfirm
+              title={`摘除该会话伴生图？`}
+              description="DROP 会话图 + 清空候选与游标（产物整体摘除，低侵入三原则③）；对话本身不受影响。"
+              okText="摘除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={doReset}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} loading={resetting}>
+                整体摘除
+              </Button>
+            </Popconfirm>
           </div>
 
-          {view === 'graph3d' ? (
-            convId ? (
-              <CompanionGraph3D convId={convId} />
-            ) : null
-          ) : candsErr ? (
+          {actionErr && <LoadErrorAlert title="伴生操作失败" message={actionErr} onRetry={() => setActionErr(null)} style={{ marginBottom: 12 }} />}
+
+          {candsErr ? (
             <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={() => convId && loadAll(convId)} />
           ) : candsLoading ? (
             <div style={{ padding: '16px 0' }}>

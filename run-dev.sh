@@ -24,6 +24,9 @@ fi
 # oxigraph 引擎（0.5+ 二进制改名 oxigraph；engine 适配器用 load/serve 子命令）
 if command -v oxigraph >/dev/null 2>&1; then
   OXIGRAPH_BIN_CMD="oxigraph"
+elif [ -x data/bin/oxigraph ]; then
+  OXIGRAPH_BIN_CMD="$PWD/data/bin/oxigraph"   # 0.4+ 新版二进制名（REQ-146 一键安装落点；REQ-195 补检——此前漏检致误报「未找到引擎」且不导出 env）
+  echo "[run-dev] 使用本地引擎二进制: $OXIGRAPH_BIN_CMD"
 elif [ -x tools/bin/oxigraph ]; then
   OXIGRAPH_BIN_CMD="$PWD/tools/bin/oxigraph"
   echo "[run-dev] 使用本地引擎二进制: $OXIGRAPH_BIN_CMD"
@@ -52,6 +55,7 @@ else
 fi
 if [ -n "${OXIGRAPH_BIN_CMD:-}" ]; then
   export OXIGRAPH_BIN="$OXIGRAPH_BIN_CMD"
+  export COMPANION_OXIGRAPH_BIN="$OXIGRAPH_BIN_CMD"   # REQ-195：伴生图引擎与运行平面共用同一二进制（backend 侧 env 名）
 fi
 
 # 前端构建：dist 缺失、源码比 dist 新（如 git pull 之后）、或 FORCE_BUILD=1 时执行

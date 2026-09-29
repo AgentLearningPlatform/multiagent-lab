@@ -62,7 +62,8 @@ type extractOut struct {
 }
 
 // companionPrompt 抽取提示词（教学口径：只抽确证的领域事实，宁缺毋滥）。
-func companionPrompt(corpus, hint string) string {
+// alignment REQ-194①：已有实体清单约束节（空串=无清单走原行为）。
+func companionPrompt(corpus, hint, alignment string) string {
 	var b strings.Builder
 	b.WriteString("你是本体候选抽取助手。阅读以下对话片段，抽取其中值得沉淀为知识的领域概念、概念间关系与事件。\n")
 	b.WriteString("要求：\n")
@@ -74,9 +75,62 @@ func companionPrompt(corpus, hint string) string {
 		// REQ-187：领域聚焦提示（agent 级配置）——追加领域抽取标准
 		b.WriteString("5. 领域聚焦要求（优先级最高）：" + strings.TrimSpace(hint) + "\n")
 	}
+	if alignment != "" {
+		b.WriteString(alignment)
+	}
 	b.WriteString("只输出 JSON，不要输出其他内容。对话片段：\n")
 	b.WriteString(corpus)
 	return b.String()
+}
+
+// ---------------------------------------------------------------------------
+// REQ-194/M34 批次一③：分窗抽取（治 G4 增量一次性拼接无分窗——与 KB kg.go 24k 硬截断同型）。
+// 每窗 ≤16 条消息且 ≤8k 字符（先到为准）；单次触发最多 3 窗，超出部分游标停在第 3 窗末，
+// 超长积压由后续 Run 收尾自然续抽（游标语义不变）；失败停在上一成功窗末（可重试）。
+// ---------------------------------------------------------------------------
+
+const (
+	windowMaxMsgs    = 16
+	windowMaxChars   = 8000
+	maxWindowsPerRun = 3
+)
+
+// extractWindow 一个抽取窗：消息切片 + 窗末消息 id（游标推进锚点）。
+type extractWindow struct {
+	msgs   []*store.Message
+	lastID string
+}
+
+// splitWindows 增量消息分窗（纯函数；窗尺寸按渲染后语料字符计，与实际送 LLM 的文本同源）。
+func splitWindows(msgs []*store.Message) []extractWindow {
+	var wins []extractWindow
+	var cur []*store.Message
+	size := 0
+	flush := func() {
+		if len(cur) > 0 {
+			wins = append(wins, extractWindow{msgs: cur, lastID: cur[len(cur)-1].ID})
+			cur, size = nil, 0
+		}
+	}
+	for _, m := range msgs {
+		w := len([]rune(renderCorpus([]*store.Message{m})))
+		if len(cur) > 0 && (len(cur)+1 > windowMaxMsgs || size+w > windowMaxChars) {
+			flush()
+		}
+		cur = append(cur, m)
+		size += w
+	}
+	flush()
+	return wins
+}
+
+// renderCorpus 语料拼接（含消息 id 锚点，供溯源字段落候选）。
+func renderCorpus(msgs []*store.Message) string {
+	var corpus strings.Builder
+	for _, m := range msgs {
+		fmt.Fprintf(&corpus, "[%s] %s：%s\n", m.ID, roleLabel(m.Role), truncate(m.Content, 600))
+	}
+	return corpus.String()
 }
 
 // remainingAfter 游标增量定位：lastID 之后的未处理消息（lastID 不在列表 = 历史已清理，保守返回空防重抽）。
@@ -108,6 +162,10 @@ type Service struct {
 
 	mu      sync.Mutex // 串行化同会话抽取（收尾事件可能并发到达）
 	running map[string]bool
+
+	// REQ-194②召回增强：进程内标签向量缓存（convID → label → vector；会话图写入时失效）
+	vecMu    sync.Mutex
+	vecCache map[string]map[string][]float32
 }
 
 // NewService 构造（engine 为空则用默认目录/端口）。
@@ -115,7 +173,17 @@ func NewService(st *store.Store, box *secrets.Box, engine *Engine) *Service {
 	if engine == nil {
 		engine = NewEngine(osBinary(), "", 0)
 	}
-	return &Service{Store: st, Box: box, Engine: engine, running: map[string]bool{}}
+	return &Service{Store: st, Box: box, Engine: engine, running: map[string]bool{}, vecCache: map[string]map[string][]float32{}}
+}
+
+// invalidateLabelCache 会话图写入后失效标签向量缓存（图标签稳态缓存——避免每轮全量重算）。
+func (s *Service) invalidateLabelCache(convID string) {
+	if s == nil {
+		return
+	}
+	s.vecMu.Lock()
+	delete(s.vecCache, convID)
+	s.vecMu.Unlock()
 }
 
 // OnRunComplete Run/Resume 收尾触发点（API 层调用；非阻塞、零错误上抛）。
@@ -188,7 +256,41 @@ func (s *Service) OnRunComplete(conv *store.Conversation, agent *store.Agent) {
 	}()
 }
 
-// ExtractNew 游标续抽：读新消息 → LLM 结构化抽取 → 候选落库 → 游标推进。返回新增候选数。
+// extractConnID 抽取/判定模型连接（REQ-187：companion 覆盖优先，空=跟随 agent 模型连接）。
+func extractConnID(agent *store.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	if agent.CompanionExtractConnID != "" {
+		return agent.CompanionExtractConnID
+	}
+	if agent.ModelConnID != nil {
+		return *agent.ModelConnID
+	}
+	return ""
+}
+
+// knownEntityLabels 会话伴生图已有实体标签（REQ-194①对齐清单数据源）。
+// 引擎不在位（未启动且无存活实例）→ 空（新会话/读侧不拉起，走原行为）；
+// 查询失败 → 空+日志（低侵入三原则：失败仅日志，不阻断抽取）。
+func (s *Service) knownEntityLabels(ctx context.Context, convID string) []string {
+	if s == nil || s.Engine == nil {
+		return nil
+	}
+	if s.Engine.Endpoint() == "" && !s.Engine.AdoptRunning(ctx) {
+		return nil
+	}
+	raw, err := s.Engine.Query(ctx, SelectLabels(convID))
+	if err != nil {
+		log.Printf("[companion] 已有实体清单查询失败（按空清单抽取）: %v", err)
+		return nil
+	}
+	return parseLabelValues(raw)
+}
+
+// ExtractNew 游标续抽（REQ-194③分窗）：读新消息 → 分窗 → 逐窗 LLM 结构化抽取 → 候选落库 →
+// 游标逐窗推进。返回新增候选数。窗口语义：每窗 ≤16 条且 ≤8k 字符、单次最多 3 窗；
+// 上一窗实体进下窗对齐清单（跨窗归并）；某窗失败 → 游标停在上一成功窗末（可重试）。
 func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, error) {
 	agent, err := s.Store.GetAgent(agentID)
 	if err != nil {
@@ -208,50 +310,56 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 		return 0, nil
 	}
 
-	// 语料拼接（含消息 id 锚点，供溯源字段落候选）
-	var corpus strings.Builder
-	for _, m := range fresh {
-		fmt.Fprintf(&corpus, "[%s] %s：%s\n", m.ID, roleLabel(m.Role), truncate(m.Content, 600))
-	}
+	connID := extractConnID(agent)
+	// REQ-194①：已有实体清单（引擎不在位/查询失败=空清单，走原行为）
+	known := s.knownEntityLabels(ctx, convID)
 
-	// REQ-187：抽取模型连接覆盖（空=跟随 agent 模型连接）
-	connID := agent.CompanionExtractConnID
-	if connID == "" && agent.ModelConnID != nil {
-		connID = *agent.ModelConnID
+	windows := splitWindows(fresh)
+	if len(windows) > maxWindowsPerRun {
+		// 超长积压：本轮只处理前 3 窗，游标停在第 3 窗末，后续 Run 自然续抽
+		windows = windows[:maxWindowsPerRun]
 	}
-	res, err := chat.GenerateStructured(ctx, s.Store, s.Box, connID, companionPrompt(corpus.String(), agent.CompanionExtractHint), companionSchema)
-	if err != nil {
-		return 0, fmt.Errorf("LLM 抽取失败: %w", err)
-	}
-	var out extractOut
-	if err := json.Unmarshal(res.DraftJSON, &out); err != nil {
-		return 0, fmt.Errorf("抽取输出解析失败: %w", err)
-	}
+	total := 0
+	for i, win := range windows {
+		res, err := chat.GenerateStructured(ctx, s.Store, s.Box, connID,
+			companionPrompt(renderCorpus(win.msgs), agent.CompanionExtractHint, buildAlignmentSection(known)), companionSchema)
+		if err != nil {
+			return total, fmt.Errorf("LLM 抽取失败（第 %d/%d 窗，游标停在上一成功窗末可重试）: %w", i+1, len(windows), err)
+		}
+		var out extractOut
+		if err := json.Unmarshal(res.DraftJSON, &out); err != nil {
+			return total, fmt.Errorf("抽取输出解析失败（第 %d/%d 窗）: %w", i+1, len(windows), err)
+		}
 
-	cands := toCandidates(convID, agentID, fresh, &out)
-	if err := s.Store.CreateCompanionCandidates(cands); err != nil {
-		return 0, err
-	}
-	// REQ-187：置信度阈值自动入图（0=全人工审；≥阈值自动 confirmCandidate——含矛盾旧边失效化；
-	// 自动入图走与人工确认完全相同的链路，区别仅在来源标记 bot:autoConfirmed）
-	if agent.CompanionAutoThreshold > 0 {
-		for _, c := range cands {
-			if c.Confidence >= agent.CompanionAutoThreshold {
-				if _, err := s.ConfirmCandidate(ctx, c.ID); err != nil {
-					log.Printf("[companion] 自动入图失败（候选 %s，不影响其余候选）: %v", c.ID, err)
-					continue
+		cands := toCandidates(convID, agentID, win.msgs, &out)
+		markAligned(cands, known) // REQ-194①：对齐标记落库
+		if err := s.Store.CreateCompanionCandidates(cands); err != nil {
+			return total, err
+		}
+		// REQ-187：置信度阈值自动入图（0=全人工审；≥阈值自动 confirmCandidate——含矛盾旧边失效化
+		// 与 REQ-194⑤语义矛盾检测；自动入图走与人工确认完全相同的链路，区别仅在来源标记 bot:autoConfirmed）
+		if agent.CompanionAutoThreshold > 0 {
+			for _, c := range cands {
+				if c.Confidence >= agent.CompanionAutoThreshold {
+					if _, err := s.ConfirmCandidate(ctx, c.ID); err != nil {
+						log.Printf("[companion] 自动入图失败（候选 %s，不影响其余候选）: %v", c.ID, err)
+						continue
+					}
+					// bot:autoConfirmed 溯源标记（区分自动入图与人工确认）
+					_ = s.Engine.Update(ctx, MarkAutoConfirmed(convID, c.ID))
+					log.Printf("[companion] 候选 %s 置信 %.2f ≥ 阈值 %.2f，已自动入图", c.Name, c.Confidence, agent.CompanionAutoThreshold)
 				}
-				// bot:autoConfirmed 溯源标记（区分自动入图与人工确认）
-				_ = s.Engine.Update(ctx, MarkAutoConfirmed(convID, c.ID))
-				log.Printf("[companion] 候选 %s 置信 %.2f ≥ 阈值 %.2f，已自动入图", c.Name, c.Confidence, agent.CompanionAutoThreshold)
 			}
 		}
+		// 跨窗对齐：本窗产物实体并入下窗清单（REQ-194③）
+		known = appendWindowEntities(known, cands)
+		total += len(cands)
+		// 游标推进到本窗末（逐窗推进：失败停在上一成功窗末）
+		if err := s.Store.AdvanceCompanionCursor(convID, win.lastID); err != nil {
+			return total, err
+		}
 	}
-	// 游标推进到最后一条已读消息（无论是否有产出）
-	if err := s.Store.AdvanceCompanionCursor(convID, msgs[len(msgs)-1].ID); err != nil {
-		return 0, err
-	}
-	return len(cands), nil
+	return total, nil
 }
 
 // toCandidates LLM 输出 → 候选记录（evidence/name 回链最近包含该文本的消息 id）。
@@ -303,6 +411,8 @@ func toCandidates(convID, agentID string, msgs []*store.Message, out *extractOut
 }
 
 // ConfirmCandidate 候选确认 → 入会话图（种子 schema 幂等预置 + INSERT + 矛盾旧边失效化）。
+// REQ-194⑤：同主体+同关系名走确定性失效化（既有路径）；不同关系名的语义冲突交 LLM 二分类
+// （冲突才 invalidAt；不确定双保留 + 候选 note「疑似矛盾待人工」；失败仅日志不阻断入图）。
 func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.CompanionCandidate, error) {
 	c, err := s.Store.GetCompanionCandidate(candID)
 	if err != nil {
@@ -313,7 +423,7 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 		return nil, fmt.Errorf("种子 schema 预置失败: %w", err)
 	}
 	if c.Kind == "relation" {
-		// 矛盾检测：同主体+同关系名+未失效旧边 → invalidAt 标记（失效化而非删除）
+		// 确定性矛盾：同主体+同关系名+未失效旧边 → invalidAt 标记（失效化而非删除）
 		raw, err := s.Engine.Query(ctx, FindActiveEdge(c.ConversationID, c.Name, c.RelName))
 		if err != nil {
 			return nil, fmt.Errorf("矛盾检测查询失败: %w", err)
@@ -323,6 +433,8 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 				return nil, fmt.Errorf("旧边失效化失败: %w", err)
 			}
 		}
+		// REQ-194⑤：语义矛盾二分类（LLM 增强路径，失败/无连接静默跳过）
+		s.semanticConflictCheck(ctx, c, now)
 		if err := s.Engine.Update(ctx, InsertRelationTriples(c.ConversationID, c.ID, c.RelName, c.Name, c.RelTarget, c.Definition, c.Confidence, c.SourceMessageID, now)); err != nil {
 			return nil, fmt.Errorf("关系入图失败: %w", err)
 		}
@@ -331,7 +443,77 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 			return nil, fmt.Errorf("入图失败: %w", err)
 		}
 	}
+	s.invalidateLabelCache(c.ConversationID) // REQ-194②：图写入失效标签向量缓存
 	return s.Store.DecideCompanionCandidate(candID, "confirmed")
+}
+
+// semanticConflictCheck REQ-194⑤语义矛盾检测：同主体活跃断言与新断言拼 prompt 交 LLM 二分类。
+// yes → 被冲突旧边 invalidAt；unsure → 双保留 + 候选 note「疑似矛盾待人工」（审计可查）。
+// 引擎/LLM 失败仅日志（矛盾检测是增强不是门禁，不阻断入图）。
+func (s *Service) semanticConflictCheck(ctx context.Context, c *store.CompanionCandidate, at time.Time) {
+	raw, err := s.Engine.Query(ctx, SelectSubjectActiveEdges(c.ConversationID, c.Name))
+	if err != nil {
+		log.Printf("[companion] 同主体活跃边查询失败（跳过语义矛盾检测，候选 %s）: %v", c.ID, err)
+		return
+	}
+	existing := parseSubjectEdges(raw)
+	if len(existing) == 0 {
+		return
+	}
+	agent, err := s.Store.GetAgent(c.AgentID)
+	if err != nil {
+		return
+	}
+	connID := extractConnID(agent)
+	if connID == "" {
+		return // 无模型连接无法判定，保留现状（确定性路径仍在）
+	}
+	res, err := chat.GenerateStructured(ctx, s.Store, s.Box, connID, conflictPrompt(c.Name, existing, c.RelName, c.RelTarget), conflictSchema)
+	if err != nil {
+		log.Printf("[companion] 语义矛盾判定失败（保留双方，候选 %s）: %v", c.ID, err)
+		return
+	}
+	var out conflictOut
+	if err := json.Unmarshal(res.DraftJSON, &out); err != nil {
+		log.Printf("[companion] 语义矛盾判定解析失败（保留双方，候选 %s）: %v", c.ID, err)
+		return
+	}
+	switch out.Conflict {
+	case "yes":
+		edge := matchConflictEdge(existing, out.ConflictRelName, out.ConflictObject)
+		if edge == "" {
+			return
+		}
+		if err := s.Engine.Update(ctx, InvalidateEdge(c.ConversationID, edge, at)); err != nil {
+			log.Printf("[companion] 冲突旧边失效化失败（候选 %s）: %v", c.ID, err)
+			return
+		}
+		log.Printf("[companion] 语义矛盾：候选 %s（%s —%s→ %s）与既有断言冲突，旧边已失效化", c.ID, c.Name, c.RelName, c.RelTarget)
+	case "unsure":
+		note := "疑似矛盾待人工：" + truncate(out.Reason, 160)
+		if err := s.Store.SetCompanionCandidateNote(c.ID, note); err != nil {
+			log.Printf("[companion] 矛盾注记回写失败（候选 %s）: %v", c.ID, err)
+		}
+	}
+}
+
+// parseSubjectEdges SelectSubjectActiveEdges 结果 → 断言行。
+func parseSubjectEdges(raw []byte) []edgeAssertion {
+	var res struct {
+		Results struct {
+			Bindings []map[string]struct {
+				Value string `json:"value"`
+			} `json:"bindings"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil
+	}
+	out := make([]edgeAssertion, 0, len(res.Results.Bindings))
+	for _, b := range res.Results.Bindings {
+		out = append(out, edgeAssertion{Edge: b["edge"].Value, RelName: b["relName"].Value, ObjLabel: b["objLabel"].Value})
+	}
+	return out
 }
 
 // RejectCandidate 候选拒绝（不触达伴生图）。
@@ -407,6 +589,7 @@ func (s *Service) ResetConversation(ctx context.Context, convID string) error {
 	if err := s.Engine.Update(ctx, DropGraph(convID)); err != nil {
 		return err
 	}
+	s.invalidateLabelCache(convID)
 	return s.Store.DeleteConversationCompanionData(convID)
 }
 
@@ -421,6 +604,14 @@ func (s *Service) Status(ctx context.Context, convID string) (map[string]any, er
 		"graph":           GraphURI(convID),
 		"engine_running":  s.Engine.Endpoint() != "",
 		"engine_endpoint": s.Engine.Endpoint(),
+	}
+	// REQ-195：引擎加载路径可观测——实际二进制/数据目录/端点透出（加载路径 vs 实际路径页面上可见）
+	if ep := s.Engine.Endpoint(); ep != "" {
+		st["engine_detail"] = map[string]any{
+			"binary":   s.Engine.ResolvedBinary(),
+			"data_dir": s.Engine.DataDir,
+			"endpoint": ep,
+		}
 	}
 	if s.Engine.Endpoint() != "" {
 		if raw, err := s.Engine.Query(ctx, SelectLabels(convID)); err == nil {

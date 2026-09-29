@@ -211,13 +211,21 @@ func strPtr(s string) *string { return &s }
 
 // REQ-187 配置增强单测：prompt hint 拼接 / 阈值分级语义。
 func TestCompanionPromptHint(t *testing.T) {
-	base := companionPrompt("语料", "")
-	if strings.Contains(base, "领域聚焦要求") {
-		t.Fatal("空 hint 不应含聚焦行")
+	base := companionPrompt("语料", "", "")
+	if strings.Contains(base, "领域聚焦要求") || strings.Contains(base, "已有实体清单") {
+		t.Fatal("空 hint/空清单不应含聚焦行与对齐节")
 	}
-	withHint := companionPrompt("语料", "重点关注 Kubernetes 部署术语")
+	withHint := companionPrompt("语料", "重点关注 Kubernetes 部署术语", "")
 	if !strings.Contains(withHint, "5. 领域聚焦要求（优先级最高）：重点关注 Kubernetes 部署术语") {
 		t.Fatalf("hint 应追加为第 5 条: %s", withHint)
+	}
+	// REQ-194①：对齐节注入位于语料之前
+	withAlign := companionPrompt("语料", "", buildAlignmentSection([]string{"Pod 扩容", "HPA"}))
+	if !strings.Contains(withAlign, "已有实体清单") || !strings.Contains(withAlign, "Pod 扩容、HPA") {
+		t.Fatalf("对齐节应含清单: %s", withAlign)
+	}
+	if strings.Index(withAlign, "已有实体清单") > strings.Index(withAlign, "只输出 JSON") {
+		t.Fatal("对齐节应在输出约束之前")
 	}
 }
 
@@ -236,5 +244,31 @@ func TestAutoThresholdGrading(t *testing.T) {
 	// 默认 0 = 全人工审（不自动入图）
 	if auto := 0.9 >= 0.0; auto {
 		_ = auto // 语义上 0 表示关闭自动入图——ExtractNew 以 `threshold > 0` 为门卫（service.go 已实现）
+	}
+}
+
+// TestOSBinaryEnvFallback REQ-195：伴生引擎二进制 env 口径与运行平面统一——
+// COMPANION_OXIGRAPH_BIN 优先，回退 OXIGRAPH_BIN（run-dev.sh 只导出后者时伴生侧同源命中）。
+func TestOSBinaryEnvFallback(t *testing.T) {
+	t.Setenv("COMPANION_OXIGRAPH_BIN", "")
+	t.Setenv("OXIGRAPH_BIN", "")
+	if got := osBinary(); got != "" {
+		t.Fatalf("双 env 均空应返回空，got %q", got)
+	}
+	t.Setenv("OXIGRAPH_BIN", "/opt/oxigraph")
+	if got := osBinary(); got != "/opt/oxigraph" {
+		t.Fatalf("应回退 OXIGRAPH_BIN，got %q", got)
+	}
+	t.Setenv("COMPANION_OXIGRAPH_BIN", "/explicit/oxigraph")
+	if got := osBinary(); got != "/explicit/oxigraph" {
+		t.Fatalf("COMPANION_OXIGRAPH_BIN 应优先，got %q", got)
+	}
+}
+
+// TestEngineResolvedBinary REQ-195：resolvedBinary 仅在写侧拉起后登记（领养/未启动为空，可观测口径）。
+func TestEngineResolvedBinary(t *testing.T) {
+	e := NewEngine("", t.TempDir(), 0)
+	if got := e.ResolvedBinary(); got != "" {
+		t.Fatalf("未启动应返回空，got %q", got)
 	}
 }

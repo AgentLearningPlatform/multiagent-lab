@@ -91,6 +91,25 @@ func TestGraphEngineSmoke(t *testing.T) {
 		}
 	}
 
+	// ④b REQ-195：引擎加载路径可观测——ResolvedBinary 登记 + Service.Status 透出 engine_detail
+	if e.ResolvedBinary() == "" {
+		t.Fatalf("写侧拉起后应登记实际二进制路径（REQ-195）")
+	}
+	stStore, err := openTestStore(t)
+	if err != nil {
+		t.Fatalf("建临时库失败: %v", err)
+	}
+	svc := NewService(stStore, nil, e)
+	stMap, err := svc.Status(ctx, "smoke1")
+	if err != nil {
+		t.Fatalf("Status 失败: %v", err)
+	}
+	ed, ok := stMap["engine_detail"].(map[string]any)
+	if !ok || ed["binary"] == "" || ed["data_dir"] == "" || ed["endpoint"] == "" {
+		t.Fatalf("Status 应透出 engine_detail(binary/data_dir/endpoint): %v", stMap["engine_detail"])
+	}
+	t.Logf("伴生引擎可观测: binary=%s data_dir=%s endpoint=%s", ed["binary"], ed["data_dir"], ed["endpoint"])
+
 	// ⑤ 矛盾失效化：同主体+同关系名新边出现 → 旧边 invalidAt
 	findRaw, err := e.Query(ctx, FindActiveEdge("smoke1", "Pod 扩容", "引发"))
 	if err != nil {
@@ -131,6 +150,57 @@ func TestGraphEngineSmoke(t *testing.T) {
 	if len(res.Results.Bindings) != 0 {
 		t.Fatalf("摘除后应无三元组: %d", len(res.Results.Bindings))
 	}
+	e.Stop()
+}
+
+// TestRetrievalVectorFallbackSmoke REQ-194②降级链真机冒烟：无 embedding 连接（Box=nil、
+// 临时库无 embedding 默认连接）时向量路静默失败 → 词法兜底生效，match=lexical 如实标注；
+// 2 跳邻域边（hop=2 链式文本）随命中实体注入上下文。
+func TestRetrievalVectorFallbackSmoke(t *testing.T) {
+	e := smokeEngine(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := e.Update(ctx, SeedSchema()); err != nil {
+		t.Fatalf("种子 schema 失败: %v", err)
+	}
+	if err := e.Update(ctx, InsertNodeTriples("s1", "k1", "concept", "阿司匹林", "非甾体抗炎药", 0.9, "m1", testTime())); err != nil {
+		t.Fatalf("概念入图失败: %v", err)
+	}
+	if err := e.Update(ctx, InsertRelationTriples("s1", "k2", "抑制", "阿司匹林", "前列腺素", "", 0.85, "m1", testTime())); err != nil {
+		t.Fatalf("关系入图失败: %v", err)
+	}
+	if err := e.Update(ctx, InsertRelationTriples("s1", "k3", "预防", "前列腺素", "血栓形成", "", 0.8, "m2", testTime())); err != nil {
+		t.Fatalf("二级关系入图失败: %v", err)
+	}
+	st, err := openTestStore(t)
+	if err != nil {
+		t.Fatalf("建临时库失败: %v", err)
+	}
+	svc := NewService(st, nil, e) // Box=nil → embedding 必失败 → 降级链
+	conv := &store.Conversation{ID: "s1", Scope: "agent"}
+	text, entities, err := svc.RetrievalContext(ctx, conv, "阿司匹林有什么作用？")
+	if err != nil {
+		t.Fatalf("检索失败: %v", err)
+	}
+	if text == "" || len(entities) == 0 {
+		t.Fatalf("词法兜底应命中阿司匹林: %q %v", text, entities)
+	}
+	if entities[0]["label"] != "阿司匹林" {
+		t.Fatalf("命中实体不符: %v", entities[0])
+	}
+	if m, _ := entities[0]["match"].(string); m != "lexical" {
+		t.Fatalf("降级链 match 应=lexical，got %v", entities[0]["match"])
+	}
+	// 2 跳链式边：阿司匹林 —抑制→ 前列腺素 —预防→ 血栓形成
+	if !strings.Contains(text, "血栓形成") || !strings.Contains(text, "（2跳）") {
+		t.Fatalf("2 跳邻域应注入链式边（血栓形成/2跳标注）: %s", text)
+	}
+	// 邻域限流 ≤8 边
+	if rels, _ := entities[0]["relations"].([]map[string]any); len(rels) > 8 {
+		t.Fatalf("邻域边应限流 ≤8，got %d", len(rels))
+	}
+	// 缓存失效防御：confirm 路径调 invalidateLabelCache 不 panic（图写入钩子）
+	svc.invalidateLabelCache("s1")
 	e.Stop()
 }
 

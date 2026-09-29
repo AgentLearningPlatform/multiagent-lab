@@ -31,38 +31,16 @@ function loadScript(src: string): Promise<void> {
 
 const KIND_COLOR: Record<string, string> = { Concept: '#4f46e5', Event: '#d97706' }
 
-export default function CompanionGraph3D({ convId }: { convId: string }) {
+// REQ-195：数据由页级（CompanionPage）统一获取下发——组件只画图，不再自带取数。
+// 此前「页首图 + 面板内成长图视图」各取一份数据且各挂一套会话状态，是上下重复与
+// 「显示对象不可切换/入图后图不刷新」的根因；重构后成长图唯一化于页首。
+export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<any>(null)
-  const [graph, setGraph] = useState<CompanionGraph | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const graph = data
   const [initErr, setInitErr] = useState<string | null>(null)
   const [selected, setSelected] = useState<CompanionGraphNode | null>(null)
   const [query, setQuery] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    setGraph(null)
-    setErr(null)
-    setLoading(true)
-    fetch(`/api/companion/graph?conversation_id=${encodeURIComponent(convId)}`)
-      .then(async (res) => {
-        const text = await res.text()
-        const data = text ? JSON.parse(text) : null
-        if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`)
-        if (!cancelled) setGraph(data)
-      })
-      .catch((e) => {
-        if (!cancelled) setErr(e?.message ?? '伴生图加载失败')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [convId])
 
   const nodes = useMemo(
     () =>
@@ -204,10 +182,8 @@ export default function CompanionGraph3D({ convId }: { convId: string }) {
     }
   }
 
-  if (loading) return <div style={{ padding: '24px 0', textAlign: 'center' }}>伴生图加载中…</div>
   if (initErr) return <Alert type="warning" showIcon message="三维视图初始化失败" description={initErr} />
-  if (err) return <Alert type="warning" showIcon message="伴生图加载失败" description={err} />
-  if (!graph || nodes.length === 0) {
+  if (nodes.length === 0) {
     return (
       <div className="work-empty" style={{ minHeight: 200 }}>
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该会话伴生图暂无内容——确认候选入图后，此处呈现其成长形态" />

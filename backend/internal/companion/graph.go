@@ -23,12 +23,13 @@ import (
 
 // Engine 伴生图 Oxigraph 单例引擎。
 type Engine struct {
-	Binary   string // 显式指定（COMPANION_OXIGRAPH_BIN）；空 = 自动探测
+	Binary   string // 显式指定（COMPANION_OXIGRAPH_BIN，回退 OXIGRAPH_BIN）；空 = 自动探测
 	DataDir  string // 默认 data/companion-graph
 	Port     int    // 默认 9199（运行方案动态端口从 9201 起，不冲突）
-	mu       sync.Mutex
-	cmd      *exec.Cmd
-	endpoint string
+	mu             sync.Mutex
+	cmd            *exec.Cmd
+	endpoint       string
+	resolvedBinary string // 实际加载的二进制绝对/相对路径（REQ-195 可观测；领养场景为空）
 }
 
 // NewEngine 构造伴生图引擎（目录不存在则创建）。
@@ -75,7 +76,14 @@ func (e *Engine) resolveBinary() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("未找到 oxigraph 可执行文件（已探测 %s）: 请在本体运行页一键安装或放置 data/bin/oxigraph 后重试", strings.Join(e.candidatePaths(), " → "))
+	return "", fmt.Errorf("未找到 oxigraph 可执行文件（已探测 %s）: 请在本体运行页一键安装（写入 data/bin）或放置 data/bin/oxigraph；也可设 COMPANION_OXIGRAPH_BIN / OXIGRAPH_BIN 指向引擎二进制后重试", strings.Join(e.candidatePaths(), " → "))
+}
+
+// ResolvedBinary 实际加载的引擎二进制路径（REQ-195：加载路径可观测；未启动或读侧领养场景为空）。
+func (e *Engine) ResolvedBinary() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.resolvedBinary
 }
 
 // Endpoint 当前端点（未启动返回空）。
@@ -107,6 +115,7 @@ func (e *Engine) ensureStarted(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("伴生图 oxigraph 启动失败: %w", err)
 	}
 	e.cmd = cmd
+	e.resolvedBinary = bin
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/query", e.Port)
 	// 健康等待（最多 10s；失败即终止进程报错，不留半启动状态）
 	deadline := time.Now().Add(10 * time.Second)
@@ -163,6 +172,7 @@ func (e *Engine) stopLocked() {
 	}
 	e.cmd = nil
 	e.endpoint = ""
+	e.resolvedBinary = ""
 }
 
 // ping 健康检查（对当前端点）。
