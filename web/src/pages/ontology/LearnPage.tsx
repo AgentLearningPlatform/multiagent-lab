@@ -223,8 +223,11 @@ function writeChecklist(c: Record<string, string>) {
   localStorage.setItem(CHECKLIST_KEY, JSON.stringify(c))
 }
 
+// bugfix（开发者报障「图标淡几乎看不到」）：值必须是 **CSS 颜色**——原 s3: 'geekblue' 是 AntD
+// 预设色名而非 CSS 颜色，inline background 无效 → S3 色块透明、白字落白底（不可见）。
+// 统一改 hex（与 AntD preset 视觉近似），不再依赖「恰好是 CSS 关键字」的偶然。
 const STAGE_COLORS: Record<string, string> = {
-  s1: 'purple', s2: 'blue', s3: 'geekblue', s4: 'cyan', s5: 'green', s6: 'orange', s7: 'magenta',
+  s1: '#722ed1', s2: '#1677ff', s3: '#2f54eb', s4: '#08979c', s5: '#389e0d', s6: '#d48806', s7: '#c41d7f',
 }
 
 // ---------------------------------------------------------------------------
