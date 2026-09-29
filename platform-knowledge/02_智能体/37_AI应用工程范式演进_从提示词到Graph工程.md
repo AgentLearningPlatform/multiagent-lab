@@ -9,7 +9,7 @@ synced: 2026-09-29
 # AI 应用工程范式演进：从提示词工程到 Graph 工程
 
 > 任务来源：开发者指示「总结分析 AI 应用从提示词工程、上下文工程、Harness 工程、Loop 工程、Graph 工程的发展过程，梳理各阶段主要理论与代表性开源项目；提示词与上下文工程简单些，深入分析后三个」。
-> 性质：**方法论综述 + 开源项目全景**（纯资料类）。与本篇互补的既有档位：`36_智能体开发架构深度对比`（本地实现 vs DeepSeek Harness 的十层架构对照）——那一份是**单一项目的纵向剖析**，本档是**五阶段的横向坐标系**。第二份落点文档见 `08_调研预研/38_智能体演进路线建议_HarnessLoopGraph.md`。
+> 性质：**方法论综述 + 开源项目全景**（纯资料类）。与本篇互补的既有档位：`36_智能体开发架构深度对比`（本地实现 vs DeepSeek Harness 的十层架构对照）——那一份是**单一项目的纵向剖析**，本档是**五阶段的横向坐标系**。第二份落点文档见 `38_智能体演进路线建议_HarnessLoopGraph.md`（2026-09-29 已拍板采纳并迁入本目录）。
 > 证据来源标注：Anthropic 官方工程博客（2025-09《Effective context engineering for AI agents》、2025-11《Effective harnesses for long-running agents》、2026-01《Demystifying evals for AI agents》、2026-03《Harness design for long-running application development》、2026-04《Scaling Managed Agents》）与各开源项目仓库/文档为一手；业界转述与二手综述在文中以「据业界转述」标注，请自行核验后再作决策依据。
 
 ---
@@ -471,7 +471,7 @@ Loop 工程解决了「持续推进」，但没有解决**结构性问题**：�
 - LangChain / LangGraph 文档：durable execution、time-travel、Deep Agents
 - CloudWeGo Eino 文档：`compose` 编排原语与 Eino ADK
 - 本仓库 `36_智能体开发架构深度对比_本地实现与DeepSeekHarness.md` —— 十层架构纵向剖析
-- 本仓库 `08_调研预研/38_智能体演进路线建议_HarnessLoopGraph.md` —— 本档在 multiagent-lab 上的落点建议
+- 本仓库 [`38_智能体演进路线建议_HarnessLoopGraph.md`](38_智能体演进路线建议_HarnessLoopGraph.md) —— 本档在 multiagent-lab 上的落点建议（已拍板采纳，REQ-201~206/M37~M41）
 
 ## 9. 迭代记录
 
