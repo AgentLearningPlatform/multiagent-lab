@@ -258,8 +258,11 @@ export interface KnowledgeBase {
   id: string
   name: string
   description?: string
-  /** M14 D-KB4 双子模块：rag | graphrag（老数据缺省 = rag） */
+  /** M14 D-KB4 双子模块：rag | graphrag（KB-11 起为展示页签默认；老数据缺省 = rag） */
   mode?: 'rag' | 'graphrag'
+  /** KB-11（M35/D2）：检索能力开关（解除 mode 互斥；两者皆空由后端按 mode 派生） */
+  kb_vector?: boolean
+  kb_graph?: boolean
   /** @deprecated 后端已移除该字段，仅新建表单兼容保留 */
   store_backend?: 'qdrant' | 'sqlite'
   top_k: number

@@ -5,6 +5,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Empty,
   Form,
   Input,
@@ -86,6 +87,8 @@ export default function KnowledgePage() {
   const [savingCfg, setSavingCfg] = useState(false)
   const [kgConnID, setKgConnID] = useState<string | null>(null)
   const [kgPrompt, setKgPrompt] = useState<string | null>(null)
+  const [kbVec, setKbVec] = useState(true)
+  const [kbGraphOn, setKbGraphOn] = useState(false)
   const [conns, setConns] = useState<{ id: string; name: string; model_name: string }[]>([])
 
   const active = useMemo(() => kbs.find((k) => k.id === activeId) ?? null, [kbs, activeId])
@@ -143,6 +146,9 @@ export default function KnowledgePage() {
     setMinScore(kb?.min_score ?? 0)
     setKgConnID(kb?.kg_conn_id ?? '')
     setKgPrompt(kb?.kg_prompt ?? '')
+    // KB-11：能力开关随选中库回显（缺省按 mode 派生口径）
+    setKbVec(kb ? kb.kb_vector ?? kb.mode !== 'graphrag' : true)
+    setKbGraphOn(kb ? kb.kb_graph ?? kb.mode === 'graphrag' : false)
     reloadDocs(activeId)
     // 仅在选中库变化时执行；kbs 仅用于取当前库参数
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,6 +164,8 @@ export default function KnowledgePage() {
         min_score: minScore ?? active.min_score,
         kg_conn_id: kgConnID ?? active.kg_conn_id ?? '',
         kg_prompt: kgPrompt ?? active.kg_prompt ?? '',
+        kb_vector: kbVec, // KB-11：能力开关（全关由后端按 mode 派生兜底）
+        kb_graph: kbGraphOn,
       })
       showToast('配置已保存')
       bumpData()
@@ -352,6 +360,11 @@ export default function KnowledgePage() {
                   <Tag color={MODE_TAG[modeOf(k)].color} style={{ margin: 0, fontSize: 11, lineHeight: '16px' }}>
                     {MODE_TAG[modeOf(k)].text}
                   </Tag>
+                  {k.kb_vector && k.kb_graph && (
+                    <Tag color="geekblue" style={{ margin: 0, fontSize: 11, lineHeight: '16px' }}>
+                      双路
+                    </Tag>
+                  )}
                   <span>文档 {k.doc_count ?? '—'}</span>
                   <span className="dot">·</span>
                   <span>chunks {k.chunk_count ?? '—'}</span>
@@ -407,6 +420,11 @@ export default function KnowledgePage() {
                       <Tag color={MODE_TAG[modeOf(active)].color} style={{ marginInlineStart: 8, verticalAlign: 'middle' }}>
                         {MODE_TAG[modeOf(active)].text}
                       </Tag>
+                      {active.kb_vector && active.kb_graph && (
+                        <Tag color="geekblue" style={{ marginInlineStart: 4, verticalAlign: 'middle' }}>
+                          双路
+                        </Tag>
+                      )}
                     </Typography.Title>
                   </div>
                   <p className="work-head-desc">{active.description || '未填写描述'}</p>
@@ -470,6 +488,17 @@ export default function KnowledgePage() {
                       onChange={(v) => setMinScore(typeof v === 'number' ? v : null)}
                       style={{ width: 160 }}
                     />
+                  </label>
+                  <label className="cfg-field">
+                    <span className="cfg-label">检索能力（KB-11 可多选）</span>
+                    <Space size={12}>
+                      <Checkbox checked={kbVec} onChange={(e) => setKbVec(e.target.checked)}>
+                        向量
+                      </Checkbox>
+                      <Checkbox checked={kbGraphOn} onChange={(e) => setKbGraphOn(e.target.checked)}>
+                        图谱
+                      </Checkbox>
+                    </Space>
                   </label>
                   <Button type="primary" loading={savingCfg} onClick={saveConfig}>
                     保存
@@ -659,7 +688,10 @@ function CreateKBModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     }
     setBusy(true)
     try {
-      const kb = await api.createKB({ name: v.name, description: v.description ?? '', mode: v.mode, store_backend: v.store_backend })
+      const kb = await api.createKB({
+        name: v.name, description: v.description ?? '', mode: v.mode, store_backend: v.store_backend,
+        kb_vector: v.kb_vector ?? false, kb_graph: v.kb_graph ?? false, // KB-11：能力开关（全关由后端按 mode 派生）
+      })
       showToast('知识库已创建')
       onCreated(kb)
     } catch (e: any) {
@@ -685,16 +717,21 @@ function CreateKBModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         </Space>
       }
     >
-      <Form form={form} layout="vertical" requiredMark={false} initialValues={{ store_backend: 'qdrant', description: '', mode: 'rag' }}>
+      <Form
+        form={form}
+        layout="vertical"
+        requiredMark={false}
+        initialValues={{ store_backend: 'qdrant', description: '', mode: 'rag', kb_vector: true, kb_graph: false }}
+      >
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]}>
           <Input placeholder="如：K8s 运维手册" maxLength={60} />
         </Form.Item>
         <Form.Item
           name="mode"
-          label="子模块模式（M14 D-KB4）"
+          label="子模块模式（M14 D-KB4；KB-11 起为页签默认）"
           extra={
             mode === 'graphrag'
-              ? 'GraphRAG：chunks 额外抽取为自存 KG（D-O15 自研，零外部进程）；KG 抽取与 embedding 是两套独立模型，切分质量影响抽取输入；KG 无命中自动回退向量检索。'
+              ? 'GraphRAG：chunks 额外抽取为自存 KG（D-O15 自研，零外部进程）；KG 无命中自动回退向量检索。'
               : 'RAG：向量检索（默认）。GraphRAG 模式额外构建 KG，适合关系型问答。'
           }
         >
@@ -703,7 +740,18 @@ function CreateKBModal({ onClose, onCreated }: { onClose: () => void; onCreated:
               { value: 'rag', label: 'RAG（向量检索）' },
               { value: 'graphrag', label: 'GraphRAG（KG + 向量混合检索）' },
             ]}
+            onChange={(val) => form.setFieldsValue({ kb_vector: val !== 'graphrag', kb_graph: val === 'graphrag' })}
           />
+        </Form.Item>
+        <Form.Item label="检索能力（KB-11：可多选，同库双路自动融合路由）">
+          <Space>
+            <Form.Item name="kb_vector" valuePropName="checked" noStyle>
+              <Checkbox>向量检索（含 BM25 混合）</Checkbox>
+            </Form.Item>
+            <Form.Item name="kb_graph" valuePropName="checked" noStyle>
+              <Checkbox>图谱检索（多跳 + 社区全局）</Checkbox>
+            </Form.Item>
+          </Space>
         </Form.Item>
         <Form.Item name="description" label="描述">
           <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="用途说明（可选）" />
