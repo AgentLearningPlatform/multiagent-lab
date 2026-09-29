@@ -276,6 +276,53 @@ func (s *Store) KGNeighbors(kbID string, subjects []string) ([]*KGRelationship, 
 	return out, rows.Err()
 }
 
+// KGNeighborsMultiHop 多跳邻域（KB-4①/M35：SQLite 递归 CTE，12 号 v0.9 原设计兑现）。
+// 语义：从 seeds 出发沿 approved 关系无向行走 hops 步（1~3），返回**遍历途中触达的边**
+// （与逐跳 BFS 前沿扩展同口径，而非可达节点集上的全部边）；UNION 去重 + depth 上限保证终止。
+// 类型过滤由调用方做（过滤影响遍历前沿时应走逐跳路径，见 kb.GraphragQueryDetail）。
+func (s *Store) KGNeighborsMultiHop(kbID string, seeds []string, hops int) ([]*KGRelationship, error) {
+	if len(seeds) == 0 {
+		return nil, nil
+	}
+	if hops < 1 {
+		hops = 1
+	}
+	if hops > 3 {
+		hops = 3
+	}
+	seedSrc := `SELECT ? AS name` + strings.Repeat(` UNION ALL SELECT ?`, len(seeds)-1)
+	q := `WITH RECURSIVE walk(node, depth, edge_id) AS (
+		SELECT name, 0, NULL FROM (` + seedSrc + `)
+		UNION
+		SELECT CASE WHEN r.source = w.node THEN r.target ELSE r.source END, w.depth + 1, r.id
+		FROM walk w JOIN kg_relationship r
+			ON r.kb_id = ? AND r.status = 'approved' AND (r.source = w.node OR r.target = w.node)
+		WHERE w.depth < ?
+	)
+	SELECT ` + kgRelCols + ` FROM kg_relationship
+	WHERE id IN (SELECT DISTINCT edge_id FROM walk WHERE edge_id IS NOT NULL)
+	ORDER BY source, target`
+	args := make([]any, 0, len(seeds)+2)
+	for _, n := range seeds {
+		args = append(args, n)
+	}
+	args = append(args, kbID, hops)
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*KGRelationship{}
+	for rows.Next() {
+		r, err := scanKGRel(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // KGClaimsForSubjects 实体的 claims（一跳上下文材料；限 limit 防 prompt 失控）。
 func (s *Store) KGClaimsForSubjects(kbID string, subjects []string, limit int) ([]*KGClaim, error) {
 	if len(subjects) == 0 {

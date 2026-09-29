@@ -70,7 +70,7 @@ var errKGEmpty = fmt.Errorf("KG 无命中")
 // GraphragOpts 增强检索参数。
 type GraphragOpts struct {
 	Entity     string   `json:"entity,omitempty"`         // 实体聚焦：以该实体为种子跳过向量命中（空 = 原三步管线）
-	Hops       int      `json:"hops,omitempty"`           // 关系扩展跳数：1（默认）~2
+	Hops       int      `json:"hops,omitempty"`           // 关系扩展跳数：1（默认）~3（KB-4① 递归 CTE）
 	RelTypes   []string `json:"relation_types,omitempty"` // 关系类型过滤（空 = 不过滤）
 	MaxResults int      `json:"max_results,omitempty"`
 }
@@ -96,7 +96,7 @@ type GraphragDetail struct {
 
 // GraphragQueryDetail 增强版三步管线：
 //   - Entity 聚焦：种子实体直接指定（跳过向量命中），claims 分数仍沿用出处 chunk 命中分；
-//   - Hops：关系扩展跳数（1~2；2 跳 = 对一跳新实体再扩一轮，两轮 IN 查询近似递归 CTE）；
+//   - Hops：关系扩展跳数 1~3（KB-4① 递归 CTE；类型过滤路径为逐跳遍历）；
 //   - RelTypes：关系类型白名单过滤（空 = 全部）；
 //   - 返回值附命中路径上的实体/关系/claims 明细（溯源：claim.chunk_id → doc/seq）。
 func (s *Service) GraphragQueryDetail(ctx context.Context, k *store.KnowledgeBase, query string, opts GraphragOpts) (*GraphragDetail, error) {
@@ -108,8 +108,11 @@ func (s *Service) GraphragQueryDetail(ctx context.Context, k *store.KnowledgeBas
 		maxResults = 4
 	}
 	hops := opts.Hops
-	if hops != 2 {
+	if hops < 1 {
 		hops = 1
+	}
+	if hops > 3 {
+		hops = 3 // KB-4①：递归 CTE 放开 1~3 跳（原「非 2 钳 1」退役，12 号 v0.9 原设计兑现）
 	}
 	filterRel := func(rels []*store.KGRelationship) []*store.KGRelationship {
 		if len(opts.RelTypes) == 0 {
@@ -176,37 +179,50 @@ func (s *Service) GraphragQueryDetail(ctx context.Context, k *store.KnowledgeBas
 		}
 	}
 
-	// ③ 关系扩展（1~2 跳；每轮以新实体为前沿，类型过滤后进入下一轮）
+	// ③ 关系扩展：无类型过滤走递归 CTE 快路径（KB-4①，1~3 跳一次取全程）；
+	// 有类型过滤保留逐跳遍历（过滤影响前沿，与 CTE 全程可达语义不同）。
 	allRels := []*store.KGRelationship{}
-	seenRel := map[string]bool{}
-	frontier := subjects
 	entitySet := map[string]bool{}
-	for _, n := range frontier {
+	for _, n := range subjects {
 		entitySet[n] = true
 	}
-	for hop := 0; hop < hops; hop++ {
-		rels, rerr := s.Store.KGNeighbors(k.ID, frontier)
+	if len(opts.RelTypes) == 0 {
+		rels, rerr := s.Store.KGNeighborsMultiHop(k.ID, subjects, hops)
 		if rerr != nil {
 			return nil, rerr
 		}
-		rels = filterRel(rels)
-		next := []string{}
+		allRels = rels
 		for _, r := range rels {
-			if !seenRel[r.ID] {
-				seenRel[r.ID] = true
-				allRels = append(allRels, r)
+			entitySet[r.Source] = true
+			entitySet[r.Target] = true
+		}
+	} else {
+		seenRel := map[string]bool{}
+		frontier := subjects
+		for hop := 0; hop < hops; hop++ {
+			rels, rerr := s.Store.KGNeighbors(k.ID, frontier)
+			if rerr != nil {
+				return nil, rerr
 			}
-			for _, n := range []string{r.Source, r.Target} {
-				if !entitySet[n] {
-					entitySet[n] = true
-					next = append(next, n)
+			rels = filterRel(rels)
+			next := []string{}
+			for _, r := range rels {
+				if !seenRel[r.ID] {
+					seenRel[r.ID] = true
+					allRels = append(allRels, r)
+				}
+				for _, n := range []string{r.Source, r.Target} {
+					if !entitySet[n] {
+						entitySet[n] = true
+						next = append(next, n)
+					}
 				}
 			}
+			if len(next) == 0 {
+				break
+			}
+			frontier = next
 		}
-		if len(next) == 0 {
-			break
-		}
-		frontier = next
 	}
 
 	names := make([]string, 0, len(entitySet))

@@ -64,8 +64,8 @@ func (s *Server) kgNeighborhood(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hops := atoiDefault(r.URL.Query().Get("hops"), 1)
-	if hops > 2 {
-		hops = 2
+	if hops > 3 {
+		hops = 3 // KB-4①：邻域浏览同步放开 1~3 跳
 	}
 	var allowTypes map[string]bool
 	if tv := strings.TrimSpace(r.URL.Query().Get("types")); tv != "" {
