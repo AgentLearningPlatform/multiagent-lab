@@ -41,6 +41,11 @@ func (s *Server) listCompanionCandidates(w http.ResponseWriter, r *http.Request)
 		writeErr(w, err)
 		return
 	}
+	// REQ-194⑥确认桶聚类：group_by=entity 按实体 slug 归组（代表候选=组内置信最高+组内计数）
+	if r.URL.Query().Get("group_by") == "entity" {
+		writeJSON(w, http.StatusOK, map[string]any{"groups": companion.GroupCandidatesByEntity(list)})
+		return
+	}
 	if list == nil {
 		list = []*store.CompanionCandidate{}
 	}

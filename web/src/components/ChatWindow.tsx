@@ -104,8 +104,12 @@ export function describeEvent(type: string, d: any): { text: string; err?: boole
       const n = subagentName(d)
       return { text: n ? `↳ 子智能体 ${n} 完成` : '↳ 子智能体已完成' }
     }
-    // M6：知识召回（引用块展开由 renderEventCard 处理）
+    // M6：知识召回（引用块展开由 renderEventCard 处理）；REQ-194②：伴生图来源单列
     case 'retrieval': {
+      if (d?.source === 'companion') {
+        const n = Array.isArray(d?.entities) ? d.entities.length : 0
+        return { text: `🧩 伴生图召回 · ${n} 实体` }
+      }
       const n = Array.isArray(d?.hits) ? d.hits.length : 0
       return { text: `📚 知识召回 · ${n} 条` }
     }
@@ -899,6 +903,60 @@ export default function ChatWindow({
 
     // M6：知识召回引用块（可展开命中片段，绿族强调）
     if (it.evType === 'retrieval') {
+      // REQ-194②：伴生图召回卡——实体明细带 match（vector/lexical）与 2 跳标注（诚实呈现召回来源）
+      if (it.evData?.source === 'companion') {
+        const ents: Array<{ label?: string; definition?: string; match?: string; relations?: Array<{ rel?: string; other?: string; dir?: string; hop?: number }> }> =
+          Array.isArray(it.evData?.entities) ? it.evData.entities : []
+        const matchText: Record<string, string> = { vector: '向量', lexical: '词法', 'vector+lexical': '向量+词法' }
+        return (
+          <div key={i} className="event-card src-retrieval retrieval-card">
+            <span>{it.eventText}</span>
+            {ents.length > 0 && (
+              <Collapse
+                ghost
+                size="small"
+                items={[
+                  {
+                    key: 'entities',
+                    label: <span className="event-link">展开命中实体（{ents.length}）</span>,
+                    children: (
+                      <ul className="retrieval-hits">
+                        {ents.map((e, ei) => (
+                          <li key={ei} className="retrieval-hit">
+                            <div className="retrieval-meta">
+                              <span className="retrieval-doc" title={e.definition}>{e.label}</span>
+                              {e.match && <span className="retrieval-seq">{matchText[e.match] ?? e.match}召回</span>}
+                            </div>
+                            {(e.relations ?? []).length > 0 && (
+                              <div className="retrieval-excerpt">
+                                {(e.relations ?? []).map((r, ri) => (
+                                  <span key={ri} style={{ marginRight: 10 }}>
+                                    {r.dir === 'out' ? (
+                                      <>
+                                        「{r.rel}」→ {r.other}
+                                      </>
+                                    ) : (
+                                      <>
+                                        {r.other} →「{r.rel}」
+                                      </>
+                                    )}
+                                    {r.hop === 2 ? '（2跳）' : ''}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ),
+                  },
+                ]}
+              />
+            )}
+            {showRaw && it.evData && <pre className="raw-json">{JSON.stringify(it.evData, null, 2)}</pre>}
+          </div>
+        )
+      }
       const hits: KBHit[] = Array.isArray(it.evData?.hits) ? it.evData.hits : []
       return (
         <div key={i} className="event-card src-retrieval retrieval-card">

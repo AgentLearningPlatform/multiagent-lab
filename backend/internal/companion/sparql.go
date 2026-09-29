@@ -250,3 +250,64 @@ SELECT ?relName ?otherLabel ?dir WHERE {
   }
 } ORDER BY ?relName LIMIT 20`, BotNS, GraphURI(convID), EntityURI(label), EntityURI(label))
 }
+
+// SelectEntityNeighborhood 实体 2 跳邻域（REQ-194②召回增强）：
+//
+//	hop=1 直接边（双向，与 SelectEntityEdges 同语义）；
+//	hop=2 经中间实体的链式边（E —rel1→ m —rel2→ o2 出向链 / o2 —rel2→ m —rel1→ E 入向链），
+//	relName 以 CONCAT 拼链式可读文本（如「引发→HPA 调整·依赖」），dir 取首边方向。
+//
+// 失效边两跳均过滤；自环（m=E / 终点=E）排除；每实体边总量由调用方限流（≤8）。
+func SelectEntityNeighborhood(convID, label string) string {
+	e := EntityURI(label)
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT DISTINCT ?relName ?otherLabel ?dir ?hop WHERE {
+  GRAPH <%s> {
+    {
+      ?e1 bot:subject <%s> ; bot:relName ?r1 ; bot:object ?o1 .
+      ?o1 rdfs:label ?otherLabel .
+      FILTER NOT EXISTS { ?e1 bot:invalidAt ?ix1 }
+      BIND(?r1 AS ?relName) BIND("out" AS ?dir) BIND(1 AS ?hop)
+    } UNION {
+      ?e1 bot:object <%s> ; bot:relName ?r1 ; bot:subject ?s1 .
+      ?s1 rdfs:label ?otherLabel .
+      FILTER NOT EXISTS { ?e1 bot:invalidAt ?ix2 }
+      BIND(?r1 AS ?relName) BIND("in" AS ?dir) BIND(1 AS ?hop)
+    } UNION {
+      ?e1 bot:subject <%s> ; bot:relName ?r1 ; bot:object ?m .
+      ?m rdfs:label ?mLabel .
+      ?e2 bot:subject ?m ; bot:relName ?r2 ; bot:object ?o2 .
+      ?o2 rdfs:label ?otherLabel .
+      FILTER NOT EXISTS { ?e1 bot:invalidAt ?ix3 } FILTER NOT EXISTS { ?e2 bot:invalidAt ?iy1 }
+      FILTER(?m != <%s>) FILTER(?o2 != <%s>)
+      BIND(CONCAT(?r1, "→", ?mLabel, "·", ?r2) AS ?relName)
+      BIND("out" AS ?dir) BIND(2 AS ?hop)
+    } UNION {
+      ?e2 bot:subject ?x2 ; bot:relName ?r2 ; bot:object ?m .
+      ?m rdfs:label ?mLabel .
+      ?e1 bot:subject ?m ; bot:relName ?r1 ; bot:object <%s> .
+      ?x2 rdfs:label ?otherLabel .
+      FILTER NOT EXISTS { ?e1 bot:invalidAt ?ix4 } FILTER NOT EXISTS { ?e2 bot:invalidAt ?iy2 }
+      FILTER(?m != <%s>) FILTER(?x2 != <%s>)
+      BIND(CONCAT(?r2, "→", ?mLabel, "·", ?r1) AS ?relName)
+      BIND("in" AS ?dir) BIND(2 AS ?hop)
+    }
+  }
+} ORDER BY ?hop LIMIT 20`,
+		BotNS, GraphURI(convID), e, e, e, e, e, e, e, e)
+}
+
+// SelectSubjectActiveEdges 实体作为主体的全部活跃边（REQ-194⑤语义矛盾检测数据面：
+// 新断言与同主体既有断言拼 prompt 交 LLM 二分类；含边 URI 供冲突失效化定位）。
+func SelectSubjectActiveEdges(convID, subjectLabel string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?edge ?relName ?objLabel WHERE {
+  GRAPH <%s> {
+    ?edge a bot:Relation ; bot:subject <%s> ; bot:relName ?relName ; bot:object ?o .
+    ?o rdfs:label ?objLabel .
+    FILTER NOT EXISTS { ?edge bot:invalidAt ?any }
+  }
+} ORDER BY ?relName LIMIT 30`, BotNS, GraphURI(convID), EntityURI(subjectLabel))
+}

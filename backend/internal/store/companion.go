@@ -26,6 +26,10 @@ type CompanionCandidate struct {
 	Status          string  `json:"status"` // pending | confirmed | rejected
 	CreatedAt       string  `json:"created_at"`
 	DecidedAt       string  `json:"decided_at,omitempty"`
+	// REQ-194/M34：抽取时实体对齐标记（aligned=对齐已有实体沿用原名 / new=新造；空=存量未标）
+	Aligned string `json:"aligned,omitempty"`
+	// REQ-194/M34：审计注记（语义矛盾检测「疑似矛盾待人工」等）
+	Note string `json:"note,omitempty"`
 }
 
 // CompanionCursor 会话抽取游标：已处理到的最后一条 message id（只读续抽）。
@@ -35,17 +39,18 @@ type CompanionCursor struct {
 	UpdatedAt      string `json:"updated_at"`
 }
 
-const companionCandidateCols = `id,conversation_id,agent_id,kind,name,rel_name,rel_target,definition,confidence,source_message_id,source_excerpt,status,created_at,decided_at`
+const companionCandidateCols = `id,conversation_id,agent_id,kind,name,rel_name,rel_target,definition,confidence,source_message_id,source_excerpt,status,created_at,decided_at,aligned,note`
 
 func scanCandidate(row interface{ Scan(...any) error }) (*CompanionCandidate, error) {
 	var c CompanionCandidate
-	var relName, relTarget, def, excerpt, decided sql.NullString
+	var relName, relTarget, def, excerpt, decided, aligned, note sql.NullString
 	var conf sql.NullFloat64
-	err := row.Scan(&c.ID, &c.ConversationID, &c.AgentID, &c.Kind, &c.Name, &relName, &relTarget, &def, &conf, &c.SourceMessageID, &excerpt, &c.Status, &c.CreatedAt, &decided)
+	err := row.Scan(&c.ID, &c.ConversationID, &c.AgentID, &c.Kind, &c.Name, &relName, &relTarget, &def, &conf, &c.SourceMessageID, &excerpt, &c.Status, &c.CreatedAt, &decided, &aligned, &note)
 	if err != nil {
 		return nil, err
 	}
 	c.RelName, c.RelTarget, c.Definition, c.SourceExcerpt = relName.String, relTarget.String, def.String, excerpt.String
+	c.Aligned, c.Note = aligned.String, note.String
 	if conf.Valid {
 		c.Confidence = conf.Float64
 	}
@@ -72,8 +77,8 @@ func (s *Store) CreateCompanionCandidates(cands []*CompanionCandidate) error {
 		if c.Status == "" {
 			c.Status = "pending"
 		}
-		if _, err := tx.Exec(`INSERT INTO companion_candidate (`+companionCandidateCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			c.ID, c.ConversationID, c.AgentID, c.Kind, c.Name, c.RelName, c.RelTarget, c.Definition, c.Confidence, c.SourceMessageID, c.SourceExcerpt, c.Status, now(), nil); err != nil {
+		if _, err := tx.Exec(`INSERT INTO companion_candidate (`+companionCandidateCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			c.ID, c.ConversationID, c.AgentID, c.Kind, c.Name, c.RelName, c.RelTarget, c.Definition, c.Confidence, c.SourceMessageID, c.SourceExcerpt, c.Status, now(), nil, c.Aligned, c.Note); err != nil {
 			return err
 		}
 	}
@@ -138,6 +143,27 @@ func (s *Store) DecideCompanionCandidate(id, status string) (*CompanionCandidate
 		return nil, ErrNotFound
 	}
 	return s.GetCompanionCandidate(id)
+}
+
+// SetCompanionCandidateNote 审计注记回写（REQ-194⑤语义矛盾检测：疑似矛盾待人工等；仅 pending）。
+func (s *Store) SetCompanionCandidateNote(id, note string) error {
+	res, err := s.DB.Exec(`UPDATE companion_candidate SET note=? WHERE id=? AND status='pending'`, truncateNote(note), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// truncateNote note 落库截断（审计摘要非全文，500 字符足够）。
+func truncateNote(s string) string {
+	r := []rune(s)
+	if len(r) > 500 {
+		return string(r[:500])
+	}
+	return s
 }
 
 // DeleteConversationCompanionData 会话级整体摘除（低侵入三原则③：清候选 + 清游标；图面 DROP 由伴生模块执行）。

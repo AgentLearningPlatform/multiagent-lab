@@ -4,7 +4,7 @@ import { CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { Agent, Conversation } from '../api/types'
 import { companionApi } from '../api/companion'
-import type { CompanionCandidate, CompanionStatus } from '../api/companion'
+import type { CandidateGroup, CompanionCandidate, CompanionStatus } from '../api/companion'
 import LoadErrorAlert from './LoadErrorAlert'
 
 // ---------------------------------------------------------------------------
@@ -14,9 +14,46 @@ import LoadErrorAlert from './LoadErrorAlert'
 // 待确认总数）。会话隔离全在存储/召回层（confirm 入图写候选来源会话 named graph），
 // 管理浏览维度与其正交。边界：整体摘除与成长图 3D 留本体模块伴生子模块全量管理面
 // （D-O19/D-O21 展示位不动）；会话级筛选后续有清查诉求再加。
+//
+// REQ-194/M34 增量：①抽取对齐徽标（对齐已有实体/新造）+⑤矛盾审计注记（疑似矛盾待人工）
+// 呈现；⑥确认桶聚类——「时间倒序 / 按实体」双视图，按实体视图组卡（代表候选=组内置信
+// 最高 + 组内计数）+ 按组批量入图/拒绝（循环单候选端点，结果如实计数，不做硬事务）。
 // ---------------------------------------------------------------------------
 
 const KIND_TEXT: Record<CompanionCandidate['kind'], string> = { concept: '概念', relation: '关系', event: '事件' }
+
+/** REQ-194①：对齐徽标（绿=沿用已有实体，default=新造；空=存量未标不呈现） */
+function AlignedBadge({ aligned }: { aligned?: CompanionCandidate['aligned'] }) {
+  if (aligned === 'aligned') {
+    return (
+      <Tooltip title="抽取时已对齐会话伴生图已有实体（沿用原名）">
+        <Tag color="cyan" style={{ margin: 0 }}>
+          对齐
+        </Tag>
+      </Tooltip>
+    )
+  }
+  if (aligned === 'new') {
+    return (
+      <Tooltip title="新造实体（不与既有清单重合）">
+        <Tag style={{ margin: 0 }}>新造</Tag>
+      </Tooltip>
+    )
+  }
+  return null
+}
+
+/** REQ-194⑤：矛盾审计注记（疑似矛盾待人工等，橙徽标 + 悬浮全文） */
+function NoteBadge({ note }: { note?: string }) {
+  if (!note) return null
+  return (
+    <Tooltip title={note}>
+      <Tag color="orange" style={{ margin: 0 }}>
+        {note.includes('疑似矛盾') ? '疑似矛盾待人工' : '注记'}
+      </Tag>
+    </Tooltip>
+  )
+}
 
 export default function AgentCompanionManage({ agent }: { agent: Agent }) {
   const [convs, setConvs] = useState<Conversation[]>([])
@@ -31,6 +68,11 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
   const [bucket, setBucket] = useState<'pending' | 'confirmed' | 'rejected'>('pending')
   const [deciding, setDeciding] = useState<string | null>(null)
   const [actionErr, setActionErr] = useState<string | null>(null)
+  // REQ-194⑥：时间倒序 / 按实体双视图
+  const [view, setView] = useState<'time' | 'entity'>('time')
+  const [groups, setGroups] = useState<CandidateGroup[] | null>(null)
+  const [batchBusy, setBatchBusy] = useState<string | null>(null)
+  const [batchResult, setBatchResult] = useState<string | null>(null)
 
   // 会话清单仅用于「来源会话标注」（id → 标题），不再作筛选
   const loadConvs = useCallback(() => {
@@ -67,6 +109,24 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
       .finally(() => setCandsLoading(false))
   }, [agent.id])
 
+  // REQ-194⑥：按实体视图数据（后端 group_by=entity 归组，桶过滤照常）；桶/视图切换即清批量结果消息
+  useEffect(() => {
+    setBatchResult(null)
+    if (view !== 'entity') return
+    setCandsLoading(true)
+    companionApi
+      .listCandidatesGrouped('', bucket, agent.id)
+      .then((r) => {
+        setGroups(r.groups ?? [])
+        setCandsErr(null)
+      })
+      .catch((e: any) => {
+        setGroups(null)
+        setCandsErr(e?.message ?? '候选加载失败')
+      })
+      .finally(() => setCandsLoading(false))
+  }, [view, bucket, agent.id])
+
   useEffect(() => {
     loadConvs()
     loadAll()
@@ -83,6 +143,29 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
     } finally {
       setDeciding(null)
     }
+  }
+
+  // REQ-194⑥：按组批量裁决——循环既有单候选端点，结果如实计数（不做硬事务，诚实原则）
+  const decideGroup = async (g: CandidateGroup, action: 'confirm' | 'reject') => {
+    setBatchBusy(g.key)
+    setActionErr(null)
+    setBatchResult(null)
+    let ok = 0
+    let fail = 0
+    const lastErr: string[] = []
+    for (const m of g.members.filter((x) => x.status === 'pending')) {
+      try {
+        await (action === 'confirm' ? companionApi.confirmCandidate(m.id) : companionApi.rejectCandidate(m.id))
+        ok++
+      } catch (e: any) {
+        fail++
+        if (lastErr.length < 2) lastErr.push(e?.message ?? '失败')
+      }
+    }
+    setBatchBusy(null)
+    if (fail > 0) setActionErr(`批量${action === 'confirm' ? '入图' : '拒绝'}部分失败：成功 ${ok} · 失败 ${fail}${lastErr[0] ? `（${lastErr[0]}）` : ''}`)
+    else setBatchResult(`已${action === 'confirm' ? '入图' : '拒绝'} ${ok} 条（${g.entity}）`)
+    if (ok + fail > 0) loadAll()
   }
 
   const convTitle = useMemo(() => {
@@ -103,6 +186,53 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
   const pendingTotal = useMemo(() => (cands ?? []).filter((c) => c.status === 'pending').length, [cands])
 
   if (convsErr) return <LoadErrorAlert title="会话列表加载失败" message={convsErr} onRetry={loadConvs} style={{ marginBottom: 8 }} />
+
+  const renderCandRow = (c: CompanionCandidate) => (
+    <div key={c.id} className="agent-companion-cand">
+      <div className="agent-companion-cand-head">
+        <Tag color={c.kind === 'concept' ? 'blue' : c.kind === 'relation' ? 'purple' : 'geekblue'} style={{ margin: 0 }}>
+          {KIND_TEXT[c.kind]}
+        </Tag>
+        <span className="agent-companion-cand-name" title={c.kind === 'relation' ? `${c.name} →${c.rel_target}` : c.name}>
+          {c.kind === 'relation' ? (
+            <>
+              {c.name} <Tag style={{ margin: 0 }}>{c.rel_name}</Tag> {c.rel_target}
+            </>
+          ) : (
+            c.name
+          )}
+        </span>
+        <AlignedBadge aligned={c.aligned} />
+        <NoteBadge note={c.note} />
+        <Tag color={c.confidence >= 0.7 ? 'green' : c.confidence >= 0.4 ? 'orange' : 'default'} style={{ margin: 0 }}>
+          {(c.confidence ?? 0).toFixed(2)}
+        </Tag>
+        {c.status === 'pending' ? (
+          <Space size={4} className="agent-companion-cand-actions">
+            <Button size="small" type="primary" ghost icon={<CheckOutlined />} loading={deciding === c.id || batchBusy !== null} onClick={() => decide(c.id, 'confirm')} aria-label={`确认入图 ${c.name}`}>
+              入图
+            </Button>
+            <Button size="small" danger icon={<CloseOutlined />} loading={deciding === c.id || batchBusy !== null} onClick={() => decide(c.id, 'reject')} aria-label={`拒绝 ${c.name}`}>
+              拒绝
+            </Button>
+          </Space>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            {c.status === 'confirmed' ? '已入图' : '已拒绝'}
+          </Typography.Text>
+        )}
+      </div>
+      {/* REQ-193：行内来源会话标注（候选自带 conversation_id 归属） */}
+      <div style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary, #999)', marginBottom: 2 }}>
+        来源会话：{convTitle.get(c.conversation_id) ?? c.conversation_id} · {c.created_at?.slice(5, 16).replace('T', ' ')}
+      </div>
+      {c.definition && (
+        <Tooltip title={c.definition}>
+          <div className="agent-companion-cand-def">{c.definition}</div>
+        </Tooltip>
+      )}
+    </div>
+  )
 
   return (
     <div className="agent-companion-manage">
@@ -139,64 +269,68 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
             { value: 'rejected', label: '已拒绝' },
           ]}
         />
+        {/* REQ-194⑥：确认桶聚类——时间倒序 / 按实体 */}
+        <Segmented
+          size="small"
+          value={view}
+          onChange={(v) => setView(v as typeof view)}
+          options={[
+            { value: 'time', label: '时间倒序' },
+            { value: 'entity', label: '按实体' },
+          ]}
+        />
         <Button size="small" icon={<ReloadOutlined />} onClick={loadAll} aria-label="刷新伴生数据" />
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-          跨会话 · 时间倒序
-        </Typography.Text>
       </Space>
 
       {actionErr && <LoadErrorAlert title="伴生操作失败" message={actionErr} onRetry={() => setActionErr(null)} style={{ marginBottom: 8 }} />}
+      {batchResult && (
+        <div style={{ fontSize: 12, color: 'var(--ant-color-success, #389e0d)', marginBottom: 8 }} role="status">
+          {batchResult}
+        </div>
+      )}
 
       {candsErr ? (
-        <LoadErrorAlert title="候选加载失败" message={candsErr} onRetry={loadAll} />
+        <LoadErrorAlert
+          title="候选加载失败"
+          message={candsErr}
+          onRetry={() => {
+            setView('time')
+            loadAll()
+          }}
+        />
       ) : candsLoading ? (
         <Spin size="small" />
-      ) : rows.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>{bucket === 'pending' ? '暂无待确认候选——与该智能体对话一轮后收尾自动抽取' : '该分组暂无候选'}</span>} />
+      ) : view === 'time' ? (
+        rows.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>{bucket === 'pending' ? '暂无待确认候选——与该智能体对话一轮后收尾自动抽取' : '该分组暂无候选'}</span>} />
+        ) : (
+          <div className="agent-companion-cands">{rows.map(renderCandRow)}</div>
+        )
+      ) : (groups ?? []).length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>该分组暂无候选</span>} />
       ) : (
         <div className="agent-companion-cands">
-          {rows.map((c) => (
-            <div key={c.id} className="agent-companion-cand">
+          {(groups ?? []).map((g) => (
+            <div key={g.key} className="agent-companion-cand" data-entity-group={g.key}>
               <div className="agent-companion-cand-head">
-                <Tag color={c.kind === 'concept' ? 'blue' : c.kind === 'relation' ? 'purple' : 'geekblue'} style={{ margin: 0 }}>
-                  {KIND_TEXT[c.kind]}
-                </Tag>
-                <span className="agent-companion-cand-name" title={c.kind === 'relation' ? `${c.name} →${c.rel_target}` : c.name}>
-                  {c.kind === 'relation' ? (
-                    <>
-                      {c.name} <Tag style={{ margin: 0 }}>{c.rel_name}</Tag> {c.rel_target}
-                    </>
-                  ) : (
-                    c.name
-                  )}
+                <span className="agent-companion-cand-name" title={g.entity}>
+                  {g.entity}
                 </span>
-                <Tag color={c.confidence >= 0.7 ? 'green' : c.confidence >= 0.4 ? 'orange' : 'default'} style={{ margin: 0 }}>
-                  {(c.confidence ?? 0).toFixed(2)}
+                <Tag color={g.pending_count > 0 ? 'blue' : 'default'} style={{ margin: 0 }}>
+                  {g.count} 条{g.pending_count > 0 ? ` · 待确认 ${g.pending_count}` : ''}
                 </Tag>
-                {c.status === 'pending' ? (
+                {bucket === 'pending' && g.pending_count > 0 && (
                   <Space size={4} className="agent-companion-cand-actions">
-                    <Button size="small" type="primary" ghost icon={<CheckOutlined />} loading={deciding === c.id} onClick={() => decide(c.id, 'confirm')} aria-label={`确认入图 ${c.name}`}>
-                      入图
+                    <Button size="small" type="primary" ghost icon={<CheckOutlined />} loading={batchBusy === g.key} onClick={() => decideGroup(g, 'confirm')} aria-label={`批量入图 ${g.entity}`}>
+                      全部入图
                     </Button>
-                    <Button size="small" danger icon={<CloseOutlined />} loading={deciding === c.id} onClick={() => decide(c.id, 'reject')} aria-label={`拒绝 ${c.name}`}>
-                      拒绝
+                    <Button size="small" danger icon={<CloseOutlined />} loading={batchBusy === g.key} onClick={() => decideGroup(g, 'reject')} aria-label={`批量拒绝 ${g.entity}`}>
+                      全部拒绝
                     </Button>
                   </Space>
-                ) : (
-                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                    {c.status === 'confirmed' ? '已入图' : '已拒绝'}
-                  </Typography.Text>
                 )}
               </div>
-              {/* REQ-193：行内来源会话标注（候选自带 conversation_id 归属） */}
-              <div style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary, #999)', marginBottom: 2 }}>
-                来源会话：{convTitle.get(c.conversation_id) ?? c.conversation_id} · {c.created_at?.slice(5, 16).replace('T', ' ')}
-              </div>
-              {c.definition && (
-                <Tooltip title={c.definition}>
-                  <div className="agent-companion-cand-def">{c.definition}</div>
-                </Tooltip>
-              )}
+              {g.members.map(renderCandRow)}
             </div>
           ))}
         </div>
