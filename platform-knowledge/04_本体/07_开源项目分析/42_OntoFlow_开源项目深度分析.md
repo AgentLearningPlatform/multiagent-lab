@@ -1,8 +1,8 @@
 ---
 module: 本体
 topic: OntoFlow 开源项目深度分析
-desc: OntoFlow 架构与能力深度分析（20260928 调研并入）
-synced: 2026-09-28
+desc: OntoFlow 架构与底座深度分析（原 43 号续篇并入，借鉴参考）
+synced: 2026-09-29
 ---
 
 # OntoFlow 开源项目深度分析

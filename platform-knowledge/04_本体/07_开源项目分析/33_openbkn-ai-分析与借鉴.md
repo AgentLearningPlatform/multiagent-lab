@@ -1,8 +1,8 @@
 ---
 module: 本体
-topic: openbkn-ai 分析与借鉴
-desc: OpenBKN 四仓精读：分级清单与治理借鉴（D-O12 对照参考）
-synced: 2026-09-28
+topic: OpenBKN 分析与借鉴
+desc: OpenBKN 四仓精读 + 借鉴落点映射（D-O12 对照参考，32 号映射已并入）
+synced: 2026-09-29
 ---
 
 # OpenBKN（github.com/openbkn-ai）实现分析与借鉴价值评估

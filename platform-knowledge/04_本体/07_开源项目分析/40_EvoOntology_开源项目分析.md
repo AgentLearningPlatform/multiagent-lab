@@ -1,8 +1,8 @@
 ---
 module: 本体
 topic: EvoOntology 开源项目分析
-desc: 自进化本体项目分析（20260928 调研并入）
-synced: 2026-09-28
+desc: 自进化本体 EvoOntology 项目分析与深度研究（原 41 号并入，借鉴参考）
+synced: 2026-09-29
 ---
 
 # 开源项目 EvoOntology 分析：场景与实现方案
