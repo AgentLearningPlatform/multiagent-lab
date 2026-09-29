@@ -2,6 +2,7 @@ import { useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { Card, Menu, Space, Splitter, Tag, Typography } from 'antd'
 import {
   ApartmentOutlined,
+  FileTextOutlined,
   CompassOutlined,
   DatabaseOutlined,
   LinkOutlined,
@@ -24,10 +25,35 @@ const KB_RAW = import.meta.glob('../../../platform-knowledge/**/*.md', {
   eager: true,
 }) as Record<string, string>
 
+// REQ-184：docs/ 十编号文档挂载为 L1「需求与进度」组（需求/方案/治理/冒烟事实源直达）
+const DOCS_RAW = import.meta.glob('../../../docs/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
 // 「外部资源」主题页（REQ-109/162）：内容单源仍在 seeds/learning/external-resources.md，构建期内联挂载
 import EXTERNAL_RESOURCES_MD from '../../../seeds/learning/external-resources.md?raw'
 
 /** 图标表（可选定制，键 = 去前缀目录名；未登记目录用默认图标，补一行即生效） */
+/** REQ-184：docs 组显示名（目录驱动保持，仅展示层覆盖） */
+const GROUP_LABELS: Record<string, string> = { docs: '需求与进度' }
+/** REQ-184：docs 组图标 */
+const GROUP_ICONS_EXT: Record<string, ReactNode> = { docs: <FileTextOutlined /> }
+/** REQ-184：docs 文件友好标题（编号文档名 → 页面标题） */
+const DOCS_TITLES: Record<string, string> = {
+  '01_智能体_需求文档_PRD': '智能体需求文档（PRD）',
+  '02_智能体_技术方案设计': '智能体技术方案设计',
+  '03_本体_需求文档': '本体需求文档',
+  '04_本体_方案设计': '本体方案设计',
+  '11_知识库_需求文档': '知识库需求文档',
+  '12_知识库_方案设计': '知识库方案设计',
+  '14_本体_前端改造方案': '本体前端改造方案',
+  '15_开源项目及论文登记簿': '开源项目及论文登记簿',
+  '18_REQ编号注册表': 'REQ 编号注册表',
+  '20_回归冒烟清单': '回归冒烟清单',
+}
+
 const GROUP_ICONS: Record<string, ReactNode> = {
   整体设计: <CompassOutlined />,
   智能体: <RobotOutlined />,
@@ -80,11 +106,15 @@ function topicTitle(file: string, groupLabel: string): string {
 
 const TOPICS: Topic[] = (() => {
   const out: Topic[] = []
-  for (const [path, raw] of Object.entries(KB_RAW)) {
+  for (const [path, raw] of Object.entries({ ...KB_RAW, ...DOCS_RAW })) {
     const marker = 'platform-knowledge/'
+    const docsMarker = '/docs/'
+    const di = path.indexOf(docsMarker)
     const idx = path.indexOf(marker)
-    if (idx < 0) continue
-    const rel = path.slice(idx + marker.length)
+    if (idx < 0 && di < 0) continue
+    const rel = idx >= 0
+      ? path.slice(idx + marker.length)
+      : 'docs/' + path.slice(di + docsMarker.length)
     const slash = rel.indexOf('/')
     if (slash < 0) continue // 根级 README.md 等不进页面
     const dir = rel.slice(0, slash)
@@ -94,15 +124,16 @@ const TOPICS: Topic[] = (() => {
     // 跨目录挂载（TOPIC_MOUNT）：归属组/展示名/图标随目标组，base 保持真实存放目录
     const mount = TOPIC_MOUNT[key]
     const effGroup = mount?.group ?? label
+    const docTitle = dir === 'docs' ? DOCS_TITLES[file] : undefined
     out.push({
       key,
       file,
-      title: mount?.label ?? topicTitle(file, label),
+      title: mount?.label ?? docTitle ?? topicTitle(file, label),
       md: raw,
       base: `platform-knowledge/${dir}/${file}`.split('/').slice(0, -1).join('/'),
       group: effGroup,
-      groupLabel: mount?.group ?? label,
-      icon: GROUP_ICONS[mount?.group ?? label] ?? DEFAULT_ICON,
+      groupLabel: GROUP_LABELS[mount?.group ?? label] ?? mount?.group ?? label,
+      icon: GROUP_ICONS[mount?.group ?? label] ?? GROUP_ICONS_EXT[mount?.group ?? label] ?? DEFAULT_ICON,
       isHome: /^00[_-]/.test(file) || file === `${label}模块`,
       groupOrder: parsePrefix(dir).order,
     })
@@ -227,8 +258,8 @@ const GROUPS = (() => {
   return [...m.entries()]
     .map(([g, topics]) => ({
       group: g,
-      label: g,
-      icon: GROUP_ICONS[g] ?? DEFAULT_ICON,
+      label: GROUP_LABELS[g] ?? g,
+      icon: GROUP_ICONS[g] ?? GROUP_ICONS_EXT[g] ?? DEFAULT_ICON,
       order: Math.min(...topics.map((t) => t.groupOrder)),
       topics: topics.sort(compareTopics),
     }))

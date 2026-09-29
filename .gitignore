@@ -13,3 +13,4 @@ runtime-manager/run/
 web/public/vendor/
 backend/internal/companion/data/
 smoke
+exe/
