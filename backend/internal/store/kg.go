@@ -26,12 +26,12 @@ type KGEntity struct {
 
 // KGRelationship KG 关系（source/target 引用实体 name；type 教学口径用大写短语，如 IS_A/具有/引发）。
 type KGRelationship struct {
-	ID        string `json:"id"`
-	KBID      string `json:"kb_id"`
-	DocID     string `json:"doc_id,omitempty"`
-	Source    string `json:"source"`
-	Target    string `json:"target"`
-	Type      string `json:"type,omitempty"`
+	ID     string `json:"id"`
+	KBID   string `json:"kb_id"`
+	DocID  string `json:"doc_id,omitempty"`
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Type   string `json:"type,omitempty"`
 	// Status 审核状态（M16/REQ-129：approved|rejected；rejected 不参与检索）
 	Status    string `json:"status,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
@@ -39,12 +39,12 @@ type KGRelationship struct {
 
 // KGClaim claim：实体的一条可溯源陈述（原文句），chunk_id 指向出处片段。
 type KGClaim struct {
-	ID        string `json:"id"`
-	KBID      string `json:"kb_id"`
-	DocID     string `json:"doc_id,omitempty"`
-	ChunkID   string `json:"chunk_id,omitempty"`
-	Subject   string `json:"subject"`
-	Text      string `json:"text"`
+	ID      string `json:"id"`
+	KBID    string `json:"kb_id"`
+	DocID   string `json:"doc_id,omitempty"`
+	ChunkID string `json:"chunk_id,omitempty"`
+	Subject string `json:"subject"`
+	Text    string `json:"text"`
 	// Status 审核状态（M16/REQ-129：approved|rejected；rejected 不参与检索）
 	Status    string `json:"status,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
@@ -670,13 +670,13 @@ func toAny(ss []string) []any {
 // KGQuality 质量面板数据（REQ-129④）：method 分布（审计决策 meta_json）、孤儿实体数、
 // 高频关系类型 TopN、rejected 计数（关系/claims）。
 type KGQuality struct {
-	MethodDist   map[string]int   `json:"method_dist"`
-	OrphanEntity int              `json:"orphan_entity"`
-	TopRelTypes  []RelTypeCount   `json:"top_rel_types"`
-	RejectedRels int              `json:"rejected_rels"`
-	RejectedClms int              `json:"rejected_claims"`
-	Entities     int              `json:"entities"`
-	Relationships int             `json:"relationships"`
+	MethodDist    map[string]int `json:"method_dist"`
+	OrphanEntity  int            `json:"orphan_entity"`
+	TopRelTypes   []RelTypeCount `json:"top_rel_types"`
+	RejectedRels  int            `json:"rejected_rels"`
+	RejectedClms  int            `json:"rejected_claims"`
+	Entities      int            `json:"entities"`
+	Relationships int            `json:"relationships"`
 }
 
 type RelTypeCount struct {

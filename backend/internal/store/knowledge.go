@@ -20,10 +20,10 @@ type KnowledgeBase struct {
 	TopK        int     `json:"top_k"`
 	MinScore    float64 `json:"min_score"`
 	// KG 抽取治理配置（M16/REQ-129①）：库级抽取模型连接与提示词覆写（空 = 默认）
-	KGConnID    string  `json:"kg_conn_id,omitempty"`
-	KGPrompt    string  `json:"kg_prompt,omitempty"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	KGConnID  string `json:"kg_conn_id,omitempty"`
+	KGPrompt  string `json:"kg_prompt,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // KnowledgeDoc 知识文档（索引状态机：pending→indexing→success|failed）。

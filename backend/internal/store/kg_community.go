@@ -5,14 +5,14 @@ import "strings"
 
 // KGCommunity 一个社区：label 为代表实体名，members 为成员实体名（含 label）。
 type KGCommunity struct {
-	ID          string   `json:"id"`
-	KBID        string   `json:"kb_id"`
-	Label       string   `json:"label"`
-	Summary     string   `json:"summary"`
-	Method      string   `json:"method,omitempty"` // llm | skeleton（摘要生成方式）
-	Members     []string `json:"members"`
-	CreatedAt   string   `json:"created_at,omitempty"`
-	UpdatedAt   string   `json:"updated_at,omitempty"`
+	ID        string   `json:"id"`
+	KBID      string   `json:"kb_id"`
+	Label     string   `json:"label"`
+	Summary   string   `json:"summary"`
+	Method    string   `json:"method,omitempty"` // llm | skeleton（摘要生成方式）
+	Members   []string `json:"members"`
+	CreatedAt string   `json:"created_at,omitempty"`
+	UpdatedAt string   `json:"updated_at,omitempty"`
 }
 
 const kgCommunityCols = `id,kb_id,label,summary,method,members_json,created_at,updated_at`
@@ -72,7 +72,7 @@ func (s *Store) ReplaceKGCommunities(kbID string, communities []*KGCommunity) er
 
 // ListKGCommunities 某 KB 的社区列表（按成员数降序，label 升序稳定排序）。
 func (s *Store) ListKGCommunities(kbID string) ([]*KGCommunity, error) {
-	rows, err := s.DB.Query(`SELECT ` + kgCommunityCols + ` FROM kg_community WHERE kb_id=?`, kbID)
+	rows, err := s.DB.Query(`SELECT `+kgCommunityCols+` FROM kg_community WHERE kb_id=?`, kbID)
 	if err != nil {
 		return nil, err
 	}
