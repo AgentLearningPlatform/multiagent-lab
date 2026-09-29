@@ -558,6 +558,8 @@ iter2, err := runner.ResumeWithParams(ctx, "id", &adk.ResumeParams{
 | `workflow.NewSequential/Parallel/LoopAgent` | `adk/workflow.go:630-632` | compose Workflow / Graph |
 | `prebuilt/supervisor` | `adk/prebuilt/supervisor` | DeepAgent |
 | `AgentMiddleware` struct | `adk/chatmodel.go:235-257`（Deprecated） | `TypedChatModelAgentMiddleware` 接口 |
+
+> **⚠️ 本地对照风险标注（2026-09-30 补）**：本地 `collab_mode=transfer`（`adk.SetSubAgents` LLM 驱动移交）正是 `transfer_to_agent` 这条官方 NOT RECOMMENDED 路线——REQ-205 立项文本已收编 Workflow Agent 复核口径，transfer 模式同属 D 档：现网作为对照能力保留可以，但**新增多智能体场景应优先 AgentTool 组合**（可控、可中断、可观测），勿默认 LLM transfer。
 | `WithHistoryModifier` | `adk/chatmodel.go:119`（Deprecated） | `ResumeWithData` + `ChatModelAgentResumeData` |
 
 ---

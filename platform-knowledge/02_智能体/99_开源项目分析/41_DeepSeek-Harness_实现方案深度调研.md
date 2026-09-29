@@ -2,11 +2,13 @@
 module: 智能体
 topic: DeepSeek Harness 实现方案深度调研
 desc: 从源码与包级文档拆解 dsh 的循环/会话/上下文/工具/多智能体/沙箱实现，以及它的工程质量体系（100% 覆盖率门禁、快照回放、防御式模式）
-synced: 2026-09-29
+synced: 2026-09-30
 ---
 
 # DeepSeek Harness（dsh）实现方案深度调研
 
+> **✅ 立项注记（2026-09-30）**：本档唯一独立残留建议已立项——**REQ-210 中断恢复失败步骤合成工具结果**（§4.8/§14 TOOL_OUTCOME_UNKNOWN 实践，挂 M42，优先随 REQ-201/M37 同轮领取）；§11/§12/§14 工程质量三条流程性建议归 20 号冒烟清单迭代吸收，不占 REQ。
+>
 > **调研对象**：`deepseek-ai/deepseek-harness@master`（MIT，TypeScript，Cordis 插件内核）。
 > **方法**：逐篇读官方 `docs/` 子系统与 `packages/*/README.zh.md`（包级实现文档含"源码地图"章节），而非只读 README 概述。
 > **与邻档分工**：

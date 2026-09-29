@@ -2,11 +2,13 @@
 module: 本体
 topic: 自进化本体深度研究
 desc: EvoOntology（人大，arXiv:2609.15779）与 BI-Agent / BI-Bench（微软研究院 + UIUC，arXiv:2609.20886）双论文实现拆解与对本项目借鉴点；与 40 号 EvoOntology 分析互补（本篇含 BI-Agent）
-synced: 2026-09-29
+synced: 2026-09-30
 ---
 
 # 自进化本体（Self-Evolving Ontology）深度研究：EvoOntology 与 BI-Agent
 
+> **✅ 立项注记（2026-09-30）**：本档 §5.1 可采用设计与 46 号 §四 OaK 质量闭环已合并立项 **REQ-207 本体自进化受控生长闭环**（03 号 §2.15，挂 M43 待排期）——一期人触发最小闭环（诊断→归因→补丁→配对门控 + Evidence 锚定 + 候选版本状态机），无人值守自动循环不做；门控机制与伴生本体（REQ-194）的共享边界待两线一期落地后评估。
+>
 > **研究目的**：为「智能体 Agent + 本体 Ontology 平台」项目提供设计借鉴。
 >
 > **研究对象**：微信文章《Graph的尽头是自进化Ontology~》（PaperAgent，2026-09-26）及文中两篇论文的完整实现——**EvoOntology**（人大，arXiv:2609.15779）与 **BI-Agent / BI-Bench**（微软研究院 + UIUC，arXiv:2609.20886）。

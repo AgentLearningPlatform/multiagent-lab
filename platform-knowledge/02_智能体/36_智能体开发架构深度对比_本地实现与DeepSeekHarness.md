@@ -3,11 +3,13 @@ module: 智能体
 topic: 智能体开发架构深度对比——multiagent-lab 本地实现 vs DeepSeek Harness（dsh）
 desc: 十层架构逐层对照（装配/循环/上下文/工具/会话/子智能体/工程质量等）——回答「它的架构长什么样、我们差在哪、能借鉴什么」；纯资料类，与 31 号（对接可行性）、41 号（dsh 源码拆解）分工不重复
 docs: ["docs/02_智能体_技术方案设计.md §6.16"]
-synced: 2026-09-29
+synced: 2026-09-30
 ---
 
 # 智能体开发架构深度对比：multiagent-lab 本地实现 vs DeepSeek Harness
 
+> **✅ 立项注记（2026-09-30）**：§5 差距清单 13 条中 11 条已经 38 号路线转译立项 **REQ-201~206/M37~M41**；残留两条亦已立项——**REQ-208 可继续子 Agent continuation**（§3.5，挂 M42 触发驱动）与运行时不变量检查（§3.9，入 01 §9 需求池随 REQ-201 同轮评估）。本档建议面至此全部有归属。
+>
 > 任务来源：开发者指示「分析本地 multiagent-lab 中智能体实现，对比 deepseek harness 的实现，深入研究智能体的开发架构」。
 > 性质：**架构研究报告**（纯资料类，开源实现剖析）。与既有 `31_智能体对接DeepSeek-Harness_可行性及方案分析.md`（dsh 的**对接/嵌入可行性**）互补——那一份回答"能不能接进来、接多深"，本档回答"它的架构长什么样、我们的差在哪、能借鉴什么"。
 > 一手证据：本地实现全部来自 `backend/` 源码实读；dsh 侧来自官方仓库 `deepseek-ai/deepseek-harness`（master，0.2.0-rc.1）`docs/architecture.zh.md`、`docs/capability-seams.zh.md`、`docs/subsystems/core.zh.md`、`docs/subsystems/session.zh.md`、`docs/subsystems/compaction.zh.md`、`docs/subsystems/subagent.zh.md`、`docs/tool-catalog.zh.md`。
