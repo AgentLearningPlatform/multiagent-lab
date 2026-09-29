@@ -298,22 +298,9 @@ func (s *Service) GraphragQueryDetail(ctx context.Context, k *store.KnowledgeBas
 }
 
 // GraphragQueryWithFallbackDetail 带 KG 明细的降级封装（recallKB / graphrag-search 直查共用）。
+// KB-11 起委托统一出口 SearchUnified（按能力开关路由；本函数为历史签名兼容层）。
 func (s *Service) GraphragQueryWithFallbackDetail(ctx context.Context, k *store.KnowledgeBase, query string, maxResults int, minScore float64, opts GraphragOpts) (*GraphragDetail, string, bool, error) {
-	if k.Mode != "graphrag" {
-		hits, err := s.Search(ctx, k, query, maxResults, minScore)
-		return &GraphragDetail{Hits: hits}, "rag", false, err
-	}
-	detail, err := s.GraphragQueryDetail(ctx, k, query, opts)
-	if err == nil && detail != nil && len(detail.Hits) > 0 {
-		return detail, "graphrag", false, nil
-	}
-	if err != nil {
-		log.Printf("[kb] graphrag query degraded (kb=%s): %v → 回退向量检索", k.ID, err)
-	} else {
-		log.Printf("[kb] graphrag query 无命中 (kb=%s) → 回退向量检索", k.ID)
-	}
-	fb, ferr := s.Search(ctx, k, query, maxResults, minScore)
-	return &GraphragDetail{Hits: fb}, "rag", true, ferr
+	return s.SearchUnified(ctx, k, query, maxResults, minScore, opts)
 }
 
 // GraphragQuery 自研 GraphRAG 检索（D-O15 三步：向量命中 → KG 一跳扩展 → 拼上下文）。
@@ -478,8 +465,17 @@ func (s *Service) GraphragKG(ctx context.Context, kbID string) (*KGData, error) 
 	return out, nil
 }
 
-// GraphragQueryWithFallback M14 ⑥：graphrag 检索失败/无命中 → 回退向量检索，返回 (hits, mode, degraded, err)。
+// GraphragQueryWithFallback M14 ⑥ 降级封装（KB-11 起委托统一出口，历史签名兼容层）。
 func (s *Service) GraphragQueryWithFallback(ctx context.Context, k *store.KnowledgeBase, query string, maxResults int, minScore float64) ([]RetrievalHit, string, bool, error) {
+	detail, mode, degraded, err := s.SearchUnified(ctx, k, query, maxResults, minScore, GraphragOpts{})
+	if detail == nil {
+		detail = &GraphragDetail{Hits: []RetrievalHit{}}
+	}
+	return detail.Hits, mode, degraded, err
+}
+
+// legacyGraphragQueryWithFallback M14 ⑥ 原实现保留（教学对照：mode 二选一路由，KB-11 前的历史行为）。
+func (s *Service) legacyGraphragQueryWithFallback(ctx context.Context, k *store.KnowledgeBase, query string, maxResults int, minScore float64) ([]RetrievalHit, string, bool, error) {
 	if k.Mode != "graphrag" {
 		hits, err := s.Search(ctx, k, query, maxResults, minScore)
 		return hits, "rag", false, err
