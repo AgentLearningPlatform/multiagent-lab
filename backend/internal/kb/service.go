@@ -39,7 +39,7 @@ func (s *Service) Import(ctx context.Context, kbID, title, content string) (*sto
 	if err != nil {
 		return nil, err
 	}
-	pieces := SplitText(content)
+	pieces := SplitPieces(content)
 	if len(pieces) == 0 {
 		return nil, fmt.Errorf("内容为空，无法索引")
 	}
@@ -97,7 +97,7 @@ func (s *Service) Reindex(ctx context.Context, kbID, docID string) (*store.Knowl
 		return nil, err
 	}
 	s.Store.UpdateKnowledgeDocStatus(docID, "indexing", 0, "")
-	chunks, err := s.indexDoc(ctx, kbID, doc, SplitText(sb.String()))
+	chunks, err := s.indexDoc(ctx, kbID, doc, SplitPieces(sb.String()))
 	if err != nil {
 		s.Store.UpdateKnowledgeDocStatus(docID, "failed", 0, err.Error())
 		return nil, fmt.Errorf("索引失败: %w", err)
@@ -112,10 +112,14 @@ func (s *Service) Reindex(ctx context.Context, kbID, docID string) (*store.Knowl
 	return out, nil
 }
 
-// indexDoc 切分→embed→写入向量库与 chunks→状态回写（返回落库 chunks 供 graphrag 联动）。
-func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.KnowledgeDoc, pieces []string) ([]*store.KnowledgeChunk, error) {
+// indexDoc 切分（KB-10② 父子块）→embed→写入向量库与 chunks→状态回写（返回落库 chunks 供 graphrag 联动）。
+func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.KnowledgeDoc, pieces []Piece) ([]*store.KnowledgeChunk, error) {
 	start := time.Now()
-	vecs, err := s.embedder().EmbedTexts(ctx, pieces)
+	contents := make([]string, len(pieces))
+	for i, p := range pieces {
+		contents[i] = p.Content
+	}
+	vecs, err := s.embedder().EmbedTexts(ctx, contents)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +130,6 @@ func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.Knowledg
 	if dim == 0 {
 		return nil, fmt.Errorf("embedding 维度为 0")
 	}
-	// Qdrant 路径：确保集合（以首个向量维度建）+ Upsert 向量 + chunks 存正文/vector_ref
-	// SQLite 路径：向量 BLOB 随 chunk 落库
 	backend := s.backendName()
 	if backend == "qdrant" {
 		if err := s.Vector.EnsureCollection(ctx, kbID, dim); err != nil {
@@ -138,12 +140,13 @@ func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.Knowledg
 	pts := make([]Chunk, 0, len(pieces))
 	for i, piece := range pieces {
 		c := &store.KnowledgeChunk{
-			ID:           store.NewID(), // 先生成：Qdrant point id 与 chunk id 一一对应
-			KBID:         kbID,
-			DocID:        doc.ID,
-			Seq:          i,
-			Content:      piece,
-			StoreBackend: backend,
+			ID:            store.NewID(), // 先生成：Qdrant point id 与 chunk id 一一对应
+			KBID:          kbID,
+			DocID:         doc.ID,
+			Seq:           i,
+			Content:       piece.Content,
+			ParentContent: piece.Parent, // KB-10②：子块检索、父块召回上下文（冗余存，检索/索引只见子块）
+			StoreBackend:  backend,
 		}
 		if backend == "qdrant" {
 			c.VectorRef = pointUUIDOf(c.ID)
@@ -151,7 +154,7 @@ func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.Knowledg
 			c.Vector = EncodeVector(vecs[i])
 		}
 		chunks = append(chunks, c)
-		pts = append(pts, Chunk{ID: c.ID, DocID: doc.ID, Seq: i, Content: piece, Vector: vecs[i]})
+		pts = append(pts, Chunk{ID: c.ID, DocID: doc.ID, Seq: i, Content: piece.Content, Vector: vecs[i]})
 	}
 	if backend == "qdrant" {
 		if err := s.Vector.Upsert(ctx, kbID, pts); err != nil {
@@ -164,7 +167,13 @@ func (s *Service) indexDoc(ctx context.Context, kbID string, doc *store.Knowledg
 	if err := s.Store.UpdateKnowledgeDocStatus(doc.ID, "success", len(pieces), ""); err != nil {
 		return nil, err
 	}
-	log.Printf("[kb] doc %q indexed: %d chunks, dim=%d, %s", doc.Title, len(pieces), dim, time.Since(start).Round(time.Millisecond))
+	withParent := 0
+	for _, p := range pieces {
+		if p.Parent != "" {
+			withParent++
+		}
+	}
+	log.Printf("[kb] doc %q indexed: %d chunks（父子块 %d）, dim=%d, %s", doc.Title, len(pieces), withParent, dim, time.Since(start).Round(time.Millisecond))
 	return chunks, nil
 }
 
@@ -195,8 +204,13 @@ func (s *Service) DeleteKB(ctx context.Context, kbID string) error {
 	return s.Store.DeleteKnowledgeBase(kbID)
 }
 
-// Search 对话召回 / 试运行：问题 Embedding → TopK + 阈值 → hits（doc 标题已解析）。
+// Search 向量臂检索（KB-11 起为统一出口的向量臂实现，亦可独立调用）：混合检索 + 父块上下文回溯。
 func (s *Service) Search(ctx context.Context, kb *store.KnowledgeBase, query string, topK int, minScore float64) ([]RetrievalHit, error) {
+	return s.vectorArm(ctx, kb, query, topK, minScore)
+}
+
+// vectorArm 向量臂：问题 Embedding → 混合检索（KB-10① 词法+向量 RRF）→ 父块上下文（KB-10②）→ hits。
+func (s *Service) vectorArm(ctx context.Context, kb *store.KnowledgeBase, query string, topK int, minScore float64) ([]RetrievalHit, error) {
 	if query == "" {
 		return nil, nil
 	}
@@ -213,7 +227,7 @@ func (s *Service) Search(ctx context.Context, kb *store.KnowledgeBase, query str
 	if err != nil {
 		return nil, err
 	}
-	hits, err := s.hybridSearch(ctx, kb.ID, query, vec, topK, minScore) // KB-10①：混合检索（词法臂失败自动降级纯向量）
+	hits, err := s.hybridSearch(ctx, kb.ID, query, vec, topK, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +246,11 @@ func (s *Service) Search(ctx context.Context, kb *store.KnowledgeBase, query str
 		if name == "" {
 			name = h.DocID
 		}
-		out = append(out, RetrievalHit{Doc: name, Seq: h.Seq, Score: h.Score, Excerpt: truncateRunes(h.Content, 200), Strategy: h.Strategy})
+		content := h.Content
+		if h.ParentContent != "" { // KB-10②：命中子块，召回父块上下文
+			content = h.ParentContent
+		}
+		out = append(out, RetrievalHit{Doc: name, Seq: h.Seq, Score: h.Score, Excerpt: truncateRunes(content, 200), Strategy: h.Strategy})
 	}
 	return out, nil
 }

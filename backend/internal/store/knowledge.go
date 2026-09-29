@@ -16,9 +16,13 @@ type KnowledgeBase struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
-	Mode        string  `json:"mode"` // rag | graphrag（M14 D-KB4 双子模块；老数据 = 'rag'）
+	Mode        string  `json:"mode"` // rag | graphrag（KB-11 起为展示页签默认与存量兼容口径；路由按能力开关）
 	TopK        int     `json:"top_k"`
 	MinScore    float64 `json:"min_score"`
+	// KB-11（M35/D2）：检索能力开关（解除 mode 库级二选一互斥；tab 对照展示保留）。
+	// 归一规则：两者皆 false 时按 mode 派生（无能力的库无意义）。
+	KBVector bool `json:"kb_vector"`
+	KBGraph  bool `json:"kb_graph"`
 	// KG 抽取治理配置（M16/REQ-129①）：库级抽取模型连接与提示词覆写（空 = 默认）
 	KGConnID  string `json:"kg_conn_id,omitempty"`
 	KGPrompt  string `json:"kg_prompt,omitempty"`
@@ -61,6 +65,8 @@ type KnowledgeChunk struct {
 	DocID   string `json:"doc_id"`
 	Seq     int    `json:"seq"`
 	Content string `json:"content"`
+	// KB-10②：父块内容冗余（子块检索、父块召回上下文；空=自身即独立块）
+	ParentContent string `json:"-"`
 	// Vector 仅 SQLite fallback 路径有值（float32 小端 BLOB）
 	Vector       []byte `json:"-"`
 	VectorRef    string `json:"vector_ref,omitempty"` // Qdrant point id
@@ -68,15 +74,17 @@ type KnowledgeChunk struct {
 	CreatedAt    string `json:"created_at"`
 }
 
-const kbCols = `id,name,description,mode,top_k,min_score,kg_conn_id,kg_prompt,created_at,updated_at`
+const kbCols = `id,name,description,mode,top_k,min_score,kb_vector,kb_graph,kg_conn_id,kg_prompt,created_at,updated_at`
 const kdocCols = `id,kb_id,title,status,chunk_count,error,source,created_at,updated_at`
-const kchunkCols = `id,kb_id,doc_id,seq,content,vector,vector_ref,store_backend,created_at`
+const kchunkCols = `id,kb_id,doc_id,seq,content,parent_content,vector,vector_ref,store_backend,created_at`
 
 func scanKB(row interface{ Scan(...any) error }) (*KnowledgeBase, error) {
 	var k KnowledgeBase
-	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.Mode, &k.TopK, &k.MinScore, &k.KGConnID, &k.KGPrompt, &k.CreatedAt, &k.UpdatedAt); err != nil {
+	var kv, kg int
+	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.Mode, &k.TopK, &k.MinScore, &kv, &kg, &k.KGConnID, &k.KGPrompt, &k.CreatedAt, &k.UpdatedAt); err != nil {
 		return nil, err
 	}
+	k.KBVector, k.KBGraph = kv != 0, kg != 0
 	if k.Mode == "" {
 		k.Mode = "rag" // 迁移前的老行（008 未跑时列不存在不会走到这；防御默认）
 	}
@@ -93,7 +101,7 @@ func scanKDoc(row interface{ Scan(...any) error }) (*KnowledgeDoc, error) {
 
 func scanKChunk(row interface{ Scan(...any) error }) (*KnowledgeChunk, error) {
 	var c KnowledgeChunk
-	if err := row.Scan(&c.ID, &c.KBID, &c.DocID, &c.Seq, &c.Content, &c.Vector, &c.VectorRef, &c.StoreBackend, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.KBID, &c.DocID, &c.Seq, &c.Content, &c.ParentContent, &c.Vector, &c.VectorRef, &c.StoreBackend, &c.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -126,6 +134,17 @@ func (s *Store) GetKnowledgeBase(id string) (*KnowledgeBase, error) {
 	return k, err
 }
 
+// normalizeKBCapabilities KB-11 能力归一：两者皆 false = 未声明/无意义 → 按 mode 派生（D2 存量口径同式）。
+func normalizeKBCapabilities(k *KnowledgeBase) {
+	if !k.KBVector && !k.KBGraph {
+		if k.Mode == "graphrag" {
+			k.KBGraph = true
+		} else {
+			k.KBVector = true
+		}
+	}
+}
+
 // CreateKnowledgeBase 新建（name 唯一冲突 ErrConflict）。
 func (s *Store) CreateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	if strings.TrimSpace(k.Name) == "" {
@@ -140,8 +159,9 @@ func (s *Store) CreateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	if k.Mode != "graphrag" {
 		k.Mode = "rag"
 	}
-	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		k.ID, k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KGConnID, k.KGPrompt, now(), now())
+	normalizeKBCapabilities(k)
+	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		k.ID, k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KBVector, k.KBGraph, k.KGConnID, k.KGPrompt, now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -156,8 +176,9 @@ func (s *Store) UpdateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	if k.Mode != "graphrag" {
 		k.Mode = "rag"
 	}
-	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,mode=?,top_k=?,min_score=?,kg_conn_id=?,kg_prompt=?,updated_at=? WHERE id=?`,
-		k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KGConnID, k.KGPrompt, now(), k.ID)
+	normalizeKBCapabilities(k)
+	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,mode=?,top_k=?,min_score=?,kb_vector=?,kb_graph=?,kg_conn_id=?,kg_prompt=?,updated_at=? WHERE id=?`,
+		k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KBVector, k.KBGraph, k.KGConnID, k.KGPrompt, now(), k.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -269,7 +290,7 @@ func (s *Store) InsertKnowledgeChunks(chunks []*KnowledgeChunk) error {
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.Prepare(`INSERT INTO knowledge_chunk (` + kchunkCols + `) VALUES (?,?,?,?,?,?,?,?,?)`)
+	stmt, err := tx.Prepare(`INSERT INTO knowledge_chunk (` + kchunkCols + `) VALUES (?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -281,7 +302,7 @@ func (s *Store) InsertKnowledgeChunks(chunks []*KnowledgeChunk) error {
 		if c.CreatedAt == "" {
 			c.CreatedAt = now().UTC().Format(time.RFC3339)
 		}
-		if _, err := stmt.Exec(c.ID, c.KBID, c.DocID, c.Seq, c.Content, c.Vector, c.VectorRef, c.StoreBackend, c.CreatedAt); err != nil {
+		if _, err := stmt.Exec(c.ID, c.KBID, c.DocID, c.Seq, c.Content, c.ParentContent, c.Vector, c.VectorRef, c.StoreBackend, c.CreatedAt); err != nil {
 			return err
 		}
 	}
