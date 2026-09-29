@@ -88,9 +88,28 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = r.PathValue("id")
-	// REQ-186：内置助手行不可编辑（列表可见但配置面锁定）
+	// REQ-186：内置助手行不可删除；REQ-192/M32②：编辑改**字段白名单**——instruction（空=保持，
+	// 默认基座由 assistant/config 面与启动引导维护）/model_conn_id/temperature 放行，
+	// 身份（name/description/logo）与能力字段（tools/skills/mcp/沙箱/伴生）及 is_builtin 锁死。
 	if prev, perr := s.Store.GetAgent(a.ID); perr == nil && prev != nil && prev.IsBuiltin {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "内置助手不可编辑（REQ-186）"})
+		merged := *prev
+		if v := strings.TrimSpace(a.Instruction); v != "" {
+			merged.Instruction = v
+		}
+		merged.ModelConnID = a.ModelConnID
+		if a.Temperature != nil {
+			if *a.Temperature < 0 || *a.Temperature > 2 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "temperature 取值 0~2"})
+				return
+			}
+			merged.Temperature = a.Temperature
+		}
+		updated, err := s.Store.UpdateAgent(&merged)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, updated)
 		return
 	}
 	if err := s.normalizeInferenceBackend(&a); err != nil {

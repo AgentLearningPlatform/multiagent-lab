@@ -68,6 +68,11 @@ func main() {
 	kbSvc.SetKGExtractor((&kg.Extractor{Store: st, Box: box, ConnID: getenv("KG_LLM_CONN_ID", "")}).ExtractForDoc)
 
 	svc := chat.NewService(st, asm, kbSvc)
+	// REQ-192/M32：平台助手配置单源归一引导——builtin 行 instruction 空时写入当前默认基座
+	//（一次性移植 assistant_config 存量微调），此后 agent 内置行即配置单源、assistant_config 退役。
+	if err := st.EnsureBuiltinAssistantInstruction(api.AssistantDefaultPrompt); err != nil {
+		log.Printf("[backend] ensure builtin assistant instruction: %v", err)
+	}
 	svc.Inference = inference.NewRegistry() // M13/D-O13 §6.16：推理后端注册表（eino-adk + 外部 CLI）
 	srv := api.NewServer(st, box, svc, reg, kbSvc, asm.Ontology, dbPath, getenv("DOCS_ROOT", "../docs"), getenv("RESEARCH_ROOT", "../research"), getenv("KNOWLEDGE_ROOT", "../platform-knowledge"))
 	// REQ-186 阶段二：平台助手 L0 只读工具面（doc_read/列表×3/查配置；写类工具不开放）

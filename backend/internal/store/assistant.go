@@ -60,3 +60,45 @@ func (s *Store) SaveAssistantConfig(c *AssistantConfig) error {
 		sp, mc, t, now())
 	return err
 }
+
+// EnsureBuiltinAssistantInstruction REQ-192/M32 配置单源归一引导：builtin 行 instruction 空
+// 时写入 defaultPrompt（一次性移植 assistant_config 表存量微调——「追加到基座后」旧语义物化
+// 为全量文本），此后 agent 内置行即配置单源、assistant_config 退役；幂等（行内非空则不动）。
+func (s *Store) EnsureBuiltinAssistantInstruction(defaultPrompt string) error {
+	var legacy sql.NullString
+	_ = s.DB.QueryRow(`SELECT system_prompt FROM assistant_config WHERE id='default'`).Scan(&legacy)
+	a, err := s.GetAgent("builtin-assistant")
+	if err != nil {
+		return err
+	}
+	if a == nil || strings.TrimSpace(a.Instruction) != "" {
+		return nil
+	}
+	final := defaultPrompt
+	if strings.TrimSpace(legacy.String) != "" {
+		final = defaultPrompt + "\n\n# 用户微调（自 assistant_config 存量移植，REQ-192）\n" + strings.TrimSpace(legacy.String)
+	}
+	a.Instruction = final
+	_, err = s.UpdateAgent(a)
+	return err
+}
+
+// EnsureAssistantContentConv REQ-192⑤ 调用留痕：确保「内容优化」会话存在（builtin-assistant
+// 名下，AI 内容优化统一落此会话，来源标注在消息 meta），返回会话 ID。
+func (s *Store) EnsureAssistantContentConv() (string, error) {
+	list, err := s.ListConversations(ConversationFilter{Scope: "agent", AgentID: "builtin-assistant"})
+	if err != nil {
+		return "", err
+	}
+	for _, c := range list {
+		if c.Title == "内容优化" {
+			return c.ID, nil
+		}
+	}
+	id := "builtin-assistant"
+	c, err := s.CreateConversation(&Conversation{Scope: "agent", AgentID: &id, Title: "内容优化"})
+	if err != nil {
+		return "", err
+	}
+	return c.ID, nil
+}
