@@ -10,7 +10,7 @@ func scanConversation(row interface{ Scan(...any) error }) (*Conversation, error
 	var agentID, projectID, kbID, profileID sql.NullString
 	var enableKB, ontoEnabled, enableSkills int
 	var toolApproval sql.NullString
-	err := row.Scan(&c.ID, &c.Scope, &agentID, &projectID, &c.Title, &kbID, &enableKB, &profileID, &ontoEnabled, &c.TopK, &c.MinScore, &c.CreatedAt, &c.UpdatedAt, &enableSkills, &c.InterruptState, &toolApproval)
+	err := row.Scan(&c.ID, &c.Scope, &agentID, &projectID, &c.Title, &kbID, &enableKB, &profileID, &ontoEnabled, &c.TopK, &c.MinScore, &c.CreatedAt, &c.UpdatedAt, &enableSkills, &c.InterruptState, &toolApproval, &c.ContextState)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func scanConversation(row interface{ Scan(...any) error }) (*Conversation, error
 	return &c, nil
 }
 
-const convCols = `id,scope,agent_id,project_id,title,kb_id,enable_kb,runtime_profile_id,ontology_enabled,top_k,min_score,created_at,updated_at,enable_skills,interrupt_state,tool_approval`
+const convCols = `id,scope,agent_id,project_id,title,kb_id,enable_kb,runtime_profile_id,ontology_enabled,top_k,min_score,created_at,updated_at,enable_skills,interrupt_state,tool_approval,context_state`
 
 // ConversationFilter 会话列表过滤。
 type ConversationFilter struct {
@@ -120,8 +120,8 @@ func (s *Store) CreateConversation(c *Conversation) (*Conversation, error) {
 		empty := ""
 		c.ToolApproval = &empty
 	}
-	_, err := s.DB.Exec(`INSERT INTO conversation (`+convCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		c.ID, c.Scope, c.AgentID, c.ProjectID, c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), now(), boolInt(enableSkills), c.InterruptState, c.ToolApproval)
+	_, err := s.DB.Exec(`INSERT INTO conversation (`+convCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.ID, c.Scope, c.AgentID, c.ProjectID, c.Title, c.KBID, boolInt(c.EnableKB), c.RuntimeProfileID, boolInt(c.OntologyEnabled), c.TopK, c.MinScore, now(), now(), boolInt(enableSkills), c.InterruptState, c.ToolApproval, c.ContextState)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +172,12 @@ func (s *Store) SetConversationInterruptState(id, stateJSON string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SaveContextState 持久化上下文压缩状态（REQ-201/M37：摘要+覆盖消息 ID；消息只追加，前缀状态长期有效）。
+func (s *Store) SaveContextState(convID, stateJSON string) error {
+	_, err := s.DB.Exec(`UPDATE conversation SET context_state=?,updated_at=? WHERE id=?`, stateJSON, now(), convID)
+	return err
 }
 
 func boolInt(b bool) int {

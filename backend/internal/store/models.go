@@ -31,6 +31,8 @@ type Agent struct {
 	CompanionExtractHint   string  `json:"companion_extract_hint"`
 	CompanionExtractConnID string  `json:"companion_extract_conn_id"`
 	CompanionAutoThreshold float64 `json:"companion_auto_threshold"`
+	// REQ-201/M37：上下文预算档位（'' = 标准档；compact 紧凑 / standard 标准 / full 完整不限量=存量行为）
+	ContextMode string `json:"context_mode"`
 	CreatedAt              string  `json:"created_at"`
 	UpdatedAt              string  `json:"updated_at"`
 }
@@ -93,6 +95,8 @@ type Conversation struct {
 	InterruptState string `json:"interrupt_state,omitempty"`
 	// ToolApproval 对话级工具审批覆盖（REQ-135②：nil=不改 | ''=跟随 Agent 级 | on | off）
 	ToolApproval *string `json:"tool_approval,omitempty"`
+	// ContextState 上下文压缩状态（REQ-201/M37：JSON 摘要+覆盖消息 ID；空=未压缩）
+	ContextState string `json:"context_state,omitempty"`
 	TopK         int     `json:"top_k"`
 	MinScore     float64 `json:"min_score"`
 	CreatedAt    string  `json:"created_at"`

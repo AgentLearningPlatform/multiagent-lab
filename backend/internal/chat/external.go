@@ -89,7 +89,7 @@ func (s *Service) runExternal(ctx context.Context, conv *store.Conversation, age
 
 	// 4) 知识库召回（公共段；命中内容以 System 消息挂在 histMsgs 尾部）
 	baseLen := len(histMsgs)
-	histMsgs = s.recallKB(runCtx, conv, runID, input, histMsgs, emit)
+	histMsgs = s.recallKB(runCtx, conv, agent, runID, input, histMsgs, emit)
 	// 伴生图检索源并入（REQ-170 P2：外部推理后端同口径；注入文本并入单条提示上下文）
 	histMsgs = s.recallCompanion(runCtx, conv, agent, runID, input, histMsgs, emit)
 	var kbCtx []string

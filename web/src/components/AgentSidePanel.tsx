@@ -236,6 +236,7 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
         sandbox_cpus: agent.sandbox_cpus ?? 0,
         inference_backend: agent.inference_backend ?? 'eino-adk',
         logo_url: (agent.logo_url ?? '').trim(),
+        context_mode: agent.context_mode ?? '', // REQ-201：full-replace 透传防清零（伴生表单不含此字段）
         tools: agent.tools ?? [],
         skills: agent.skills ?? [],
         mcp_servers: agent.mcp_servers ?? [],
@@ -409,6 +410,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         sandbox_memory: v.sandbox_memory ?? '',
         sandbox_cpus: v.sandbox_cpus ?? 0, // M10/10b：沙箱资源限制
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
+        context_mode: v.context_mode ?? '', // REQ-201/M37：上下文预算档位
         logo_url: (v.logo_url ?? '').trim(), // REQ-137
         tools: v.tools ?? [],
         // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
@@ -567,6 +569,21 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   </Form.Item>
                   <Form.Item name="max_tokens" label="最大回复 tokens">
                     <InputNumber min={1} style={{ width: '100%' }} placeholder="默认" />
+                  </Form.Item>
+                  <Form.Item
+                    name="context_mode"
+                    label="上下文预算"
+                    tooltip="REQ-201：历史 token 预算档位——超限时先压缩（LLM 摘要持久化）再裁剪，压缩/裁剪均以运行警告诚实标注。「完整」不限量（存量行为）；「紧凑」约 6k tokens 适合长对话省成本；默认标准约 24k。"
+                  >
+                    <Select
+                      allowClear
+                      placeholder="标准（约 24k tokens）"
+                      options={[
+                        { value: 'compact', label: '紧凑（约 6k tokens）' },
+                        { value: 'standard', label: '标准（约 24k tokens）' },
+                        { value: 'full', label: '完整（不限量，存量行为）' },
+                      ]}
+                    />
                   </Form.Item>
                 </>
               ),

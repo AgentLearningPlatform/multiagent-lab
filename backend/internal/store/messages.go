@@ -37,6 +37,27 @@ func (s *Store) ListMessages(convID string) ([]*Message, error) {
 	return out, rows.Err()
 }
 
+// ListToolEvents 返回对话的工具调用/结果事件（REQ-201 A1：tool 轮次由 run_event 派生重建，
+// 零 schema 变更——历史重建恢复 assistant ToolCalls 与 tool 结果消息）。
+func (s *Store) ListToolEvents(convID string) ([]*RunEvent, error) {
+	rows, err := s.DB.Query(`SELECT id,conversation_id,run_id,type,data,created_at FROM run_event WHERE conversation_id = ? AND type IN ('tool.call','tool.result') ORDER BY created_at, id`, convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*RunEvent
+	for rows.Next() {
+		var e RunEvent
+		var data sql.NullString
+		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		e.Data = data.String
+		out = append(out, &e)
+	}
+	return out, rows.Err()
+}
+
 // CountMessages 统计对话消息数。
 func (s *Store) CountMessages(convID string) (int, error) {
 	var n int

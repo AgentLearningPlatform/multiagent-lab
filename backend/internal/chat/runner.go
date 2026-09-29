@@ -225,15 +225,25 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 	}
 
 	// 2) 组装输入：历史（含刚落库的用户消息；对比窗格用组级共享快照的按路副本）
+	// REQ-201/M37：tool 轮次保全 + 压缩 + 预算裁剪统一入口（context.go；full 档仅增强不裁剪）
 	var histMsgs []*schema.Message
+	var ctxWarns []string
 	if opts.HistMsgs != nil {
 		histMsgs = append([]*schema.Message(nil), opts.HistMsgs...)
+		if b := ContextBudget(agent.ContextMode); b > 0 {
+			kept, desc := trimMessagesToBudget(histMsgs, b)
+			histMsgs = kept
+			if desc != "" {
+				ctxWarns = append(ctxWarns, desc)
+			}
+		}
 	} else {
-		history, err := s.Store.ListMessages(conv.ID)
+		cr, err := s.buildRunContext(ctx, conv, agent)
 		if err != nil {
 			return nil, err
 		}
-		histMsgs = BuildHistoryMessages(history)
+		histMsgs = cr.Messages
+		ctxWarns = cr.Warnings
 	}
 
 	runCtx := ctx
@@ -259,6 +269,11 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 	}
 	s.emitAndRecord(runCtx, conv, runID, newEvent("run.started", runID, startData), emit)
 
+	// REQ-201/M37：上下文工程诚实标注（压缩/裁剪不静默）
+	for _, w := range ctxWarns {
+		s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": w}), emit)
+	}
+
 	// skill.loaded（§6.12：本次运行实际生效的技能，M9 挂载生效）
 	if len(rt.LoadedSkills) > 0 {
 		skills := make([]map[string]string, 0, len(rt.LoadedSkills))
@@ -278,10 +293,10 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 	}
 
 	// 知识库召回（M6，§11/§6.9：提问先检索 → retrieval 事件 → 上下文注入；失败降级不阻断）
-	histMsgs = s.recallKB(runCtx, conv, runID, input, histMsgs, emit)
-
-	// 伴生图检索源并入（REQ-170 P2，agent.companion_ontology 开且注入器在位时生效；低侵入，失败降级不阻断）
-	histMsgs = s.recallCompanion(runCtx, conv, agent, runID, input, histMsgs, emit)
+	// REQ-201 A4：上下文准入 Provider 链（recallChain，未来第三方来源注册于此）
+	for _, rp := range s.recallChain() {
+		histMsgs = rp(runCtx, conv, agent, runID, input, histMsgs, emit)
+	}
 
 	// 中断恢复（M11 收尾）：新消息运行会放弃既有挂起中断（checkpoint 清理 + 状态清除）
 	if conv.InterruptState != "" {
@@ -334,6 +349,15 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("interrupted")), emit)
 	default:
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
+		// REQ-210/M37 随轮兑现：运行时不变量检查（01 §9 搭车件）——completed 收尾时工具调用/结果计数
+		// 必须配对（"模型可见即已记录"），不一致以 run.warning 诚实透出（dangling 调用已被历史重建
+		// 补「结果未知」合成文本，context.go mergeToolTurns；中断/停止收尾的悬空调用属预期不告警）。
+		if rc.toolCalls != rc.toolResults {
+			s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{
+				"message":   fmt.Sprintf("运行时不变量检查：工具调用/结果计数不一致（%d call / %d result），悬空调用已在历史重建中补「结果未知」文本", rc.toolCalls, rc.toolResults),
+				"tool_calls": rc.toolCalls, "tool_results": rc.toolResults,
+			}), emit)
+		}
 	}
 	return res, nil
 }
@@ -412,6 +436,14 @@ func (s *Service) RunCompare(ctx context.Context, conv *store.Conversation, agen
 			hm := histMsgs
 			if pc.NoHistory {
 				hm = noHistMsgs
+			}
+			// REQ-201 A2：对比窗格按本窗格 Agent 的预算档纯裁剪（不触发压缩摘要，保持窗格对照纯净）
+			if b := ContextBudget(pa.ContextMode); b > 0 {
+				kept, desc := trimMessagesToBudget(hm, b)
+				if desc != "" {
+					emit(newEvent("run.warning", runID, map[string]any{"message": fmt.Sprintf("窗格 %d：%s", i+1, desc)}))
+				}
+				hm = kept
 			}
 			_, _ = s.runOnce(runCtx, paneConversation(conv, pc), paneAgent(pa, pc), runID,
 				in.Input, in.DebugLevel, in.DebugPersist, emit,
@@ -621,6 +653,9 @@ type runConsumer struct {
 
 	buf         []byte
 	stopped     bool
+	// REQ-210：工具调用/结果计数（completed 收尾不变量检查用）
+	toolCalls   int
+	toolResults int
 	runErr      string
 	interrupted bool
 	lastUsage   *schema.TokenUsage
@@ -770,6 +805,9 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 			}
 		case mo.Message != nil && mo.Role == schema.Tool:
 			// 工具执行结果（对应发起见 tool.call 事件）
+			if rc != nil {
+				rc.toolResults++
+			}
 			data := map[string]any{"tool_name": mo.Message.ToolName, "content": mo.Message.Content}
 			if mo.Message.ToolCallID != "" {
 				data["tool_call_id"] = mo.Message.ToolCallID
@@ -957,8 +995,11 @@ func flushToolCalls(s *Service, rc *runConsumer, conv *store.Conversation, runID
 
 // emitToolCall 输出模型发起的工具调用事件（含入参 JSON 字符串与 source 标注）。
 func emitToolCall(s *Service, rc *runConsumer, conv *store.Conversation, runID string, rt *BuildResult, tc schema.ToolCall, emit EmitFn) {
-	if rc != nil && tc.ID != "" && rc.toolCallAt != nil {
-		rc.toolCallAt[tc.ID] = time.Now()
+	if rc != nil {
+		rc.toolCalls++
+		if tc.ID != "" && rc.toolCallAt != nil {
+			rc.toolCallAt[tc.ID] = time.Now()
+		}
 	}
 	data := map[string]any{"tool_name": tc.Function.Name, "arguments": tc.Function.Arguments}
 	if tc.ID != "" {
@@ -1193,9 +1234,18 @@ func (s *Service) AssembleSummary(ctx context.Context, agent *store.Agent) (stri
 	return rt.ModelLabel, nil
 }
 
+// RecallProvider 上下文准入 Provider（REQ-201 A4）：按对话/智能体/本轮输入检索外部知识并注入 System 消息；
+// 实现须「失败降级不阻断」（retrieval / run.warning 事件自透明）。未来第三方来源注册进 recallChain。
+type RecallProvider func(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, input string, histMsgs []*schema.Message, emit EmitFn) []*schema.Message
+
+// recallChain REQ-201 A4：上下文准入链（替代 runOnce 内的硬编码追加顺序）。
+func (s *Service) recallChain() []RecallProvider {
+	return []RecallProvider{s.recallKB, s.recallCompanion}
+}
+
 // recallKB 知识库召回公共段（M13 抽取：inprocess 与外部推理后端两条路径共用）。
 // 检索 → retrieval 事件 → 命中内容作为 System 消息追加到 histMsgs；任何失败降级不阻断。
-func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, runID, input string, histMsgs []*schema.Message, emit EmitFn) []*schema.Message {
+func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, agent *store.Agent, runID, input string, histMsgs []*schema.Message, emit EmitFn) []*schema.Message {
 	if !(conv.EnableKB && conv.KBID != nil && *conv.KBID != "" && s.KB != nil) {
 		return histMsgs
 	}

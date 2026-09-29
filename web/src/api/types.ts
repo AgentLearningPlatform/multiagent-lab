@@ -30,6 +30,8 @@ export interface Agent {
   companion_extract_hint?: string
   companion_extract_conn_id?: string
   companion_auto_threshold?: number
+  /** REQ-201/M37：上下文预算档位（'' = 标准档；compact 紧凑 / standard 标准 / full 完整不限量） */
+  context_mode?: string
   created_at: string
   updated_at: string
 }
