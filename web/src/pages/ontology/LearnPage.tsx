@@ -316,7 +316,12 @@ export default function LearnPage() {
   const [learningExamples, setLearningExamples] = useState<{ key: string; name: string; description: string }[] | null>(null)
   const [activeStage, setActiveStage] = useState<string>('s1') // REQ-162①：方块步骤条选中阶段
   // REQ-182：左导航子模块选中（学习路径默认首屏主轴；localStorage 记忆）
-  const [section, setSection] = useState<string>(() => localStorage.getItem('eino.onto.learn.section') ?? 'path')
+  // 开发者拍板合并（2026-09-29）：methods 页签删除——旧记忆 key=methods 兼容重定向到 path
+  const [section, setSection] = useState<string>(() => {
+    const saved = localStorage.getItem('eino.onto.learn.section') ?? 'path'
+    const valid = ['path', 'build-paths', 'runtime-paths', 'examples', 'pipeline']
+    return valid.includes(saved) ? saved : 'path'
+  })
   useEffect(() => {
     localStorage.setItem('eino.onto.learn.section', section)
   }, [section])
@@ -454,10 +459,11 @@ export default function LearnPage() {
   }
 
 
-  // REQ-182：左导航子模块定义（徽标带进度）
+  // REQ-182：左导航子模块定义（徽标带进度）。
+  // 开发者拍板（2026-09-29）：「学习路径/方法论与任务卡两重复，保留一个」——methods 视图删除，
+  // 全阶段方法论总览并入 path 视图（单阶段聚焦卡片下方，默认收起）
   const menuItems = [
     { key: 'path', label: <Space size={6}>学习路径<Tag style={{ margin: 0 }} color="geekblue">{totalDone}/{TASKS.length}</Tag></Space> },
-    { key: 'methods', label: <Space size={6}>方法论与任务卡<Tag style={{ margin: 0 }}>{STAGE_DEFS.find((x) => x.key === activeStage)?.short}</Tag></Space> },
     { key: 'build-paths', label: '构建方式对照' },
     { key: 'runtime-paths', label: '运行方式对照' },
     { key: 'examples', label: '示例本体库' },
@@ -521,33 +527,32 @@ export default function LearnPage() {
               <div className="onto-learn-stage-detail" role="tabpanel">
                 {stageDetail(activeStage)}
               </div>
-            </Card>
-          )}
-
-          {section === 'methods' && (
-            /* bugfix（开发者报障「学习路径与方法论与任务卡模块重复」）：原视图与学习路径同构
-            （同一步骤条+同一 stageDetail）——改为全阶段方法论总览平铺（每阶段一组、默认全部展开），
-            与「学习路径」的单阶段聚焦视图职责区分 */
-            <Card className="work-card" size="small" title="方法论与任务卡（全阶段总览）">
-              <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 10 }}>
-                七阶段方法论卡片（REQ-90）与任务卡（REQ-91）全量平铺——单阶段聚焦请切「学习路径」点击对应阶段。
-              </Typography.Paragraph>
-              {STAGE_DEFS.map((st) => {
-                const prog = stageProgress.get(st.key) ?? { total: 0, done: 0 }
-                return (
-                  <div key={st.key} className="onto-learn-methods-group" style={{ marginBottom: 14 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key], display: 'inline-flex', width: 34, height: 22, borderRadius: 5, alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 600 }}>{st.key.toUpperCase()}</span>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{st.short}</span>
-                      {prog.total > 0 && <Tag style={{ margin: 0 }}>任务 {prog.done}/{prog.total}</Tag>}
-                      <Button size="small" type="link" style={{ padding: 0 }} onClick={() => { setActiveStage(st.key); setSection('path') }}>
-                        聚焦此阶段 →
-                      </Button>
-                    </div>
-                    {stageDetail(st.key)}
-                  </div>
-                )
-              })}
+              {/* 开发者拍板合并：全阶段方法论总览收起区（原独立「方法论与任务卡」页内容并入，去重复页签） */}
+              <Collapse
+                size="small"
+                ghost
+                style={{ marginTop: 12 }}
+                items={[{
+                  key: 'all-methods',
+                  label: <span style={{ fontSize: 13, fontWeight: 600 }}>全部阶段的方法论与任务卡（{STAGE_DEFS.length} 阶段总览）</span>,
+                  children: STAGE_DEFS.map((st) => {
+                    const prog = stageProgress.get(st.key) ?? { total: 0, done: 0 }
+                    return (
+                      <div key={st.key} className="onto-learn-methods-group" style={{ marginBottom: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span className="onto-learn-step-key" style={{ background: STAGE_COLORS[st.key], display: 'inline-flex', width: 34, height: 22, borderRadius: 5, alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', fontWeight: 600 }}>{st.key.toUpperCase()}</span>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>{st.short}</span>
+                          {prog.total > 0 && <Tag style={{ margin: 0 }}>任务 {prog.done}/{prog.total}</Tag>}
+                          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => { setActiveStage(st.key); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+                            聚焦此阶段 ↑
+                          </Button>
+                        </div>
+                        {stageDetail(st.key)}
+                      </div>
+                    )
+                  }),
+                }]}
+              />
             </Card>
           )}
 
