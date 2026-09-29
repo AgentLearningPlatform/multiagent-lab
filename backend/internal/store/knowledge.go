@@ -180,6 +180,7 @@ func (s *Store) DeleteKnowledgeBase(id string) error {
 		return ErrNotFound
 	}
 	s.DB.Exec(`DELETE FROM knowledge_chunk WHERE kb_id = ?`, id)
+	s.DeleteChunkFTSByKB(id) // KB-10①：词法索引级联清理
 	s.DB.Exec(`DELETE FROM knowledge_doc WHERE kb_id = ?`, id)
 	s.deleteKG(id, "") // D-O15：KG 自存行级联清理
 	return nil
@@ -284,7 +285,11 @@ func (s *Store) InsertKnowledgeChunks(chunks []*KnowledgeChunk) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.UpsertChunkFTS(chunks) // KB-10①：词法索引同步（辅助索引，失败仅告警）
+	return nil
 }
 
 // ListKnowledgeChunksByDoc 按 doc 取 chunks（重索引前清理/调试用）。
@@ -325,6 +330,7 @@ func (s *Store) ListKnowledgeChunksByKB(kbID string) ([]*KnowledgeChunk, error) 
 
 // DeleteKnowledgeChunksByDoc 删除文档全部 chunks。
 func (s *Store) DeleteKnowledgeChunksByDoc(docID string) error {
+	s.DeleteChunkFTSByDoc(docID) // KB-10①：词法索引级联清理
 	_, err := s.DB.Exec(`DELETE FROM knowledge_chunk WHERE doc_id = ?`, docID)
 	return err
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -22,6 +23,9 @@ var migrationsFS embed.FS
 // Store 封装主平台 SQLite。
 type Store struct {
 	DB *sql.DB
+	// KB-10①：FTS5 词法索引可用性（惰性探测一次；false = 环境不支持，词法臂退役）
+	ftsOnce sync.Once
+	ftsOK   bool
 }
 
 // Open 打开（必要时创建）SQLite 数据库并执行迁移。

@@ -27,6 +27,7 @@ type Hit struct {
 	Seq     int
 	Content string
 	Score   float64
+	Strategy string // KB-10①：vector|lexical|hybrid（空 = 未走融合口径的历史路径）
 }
 
 // VectorStore 检索后端抽象（方案 §6.9）。

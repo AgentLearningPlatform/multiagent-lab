@@ -213,7 +213,7 @@ func (s *Service) Search(ctx context.Context, kb *store.KnowledgeBase, query str
 	if err != nil {
 		return nil, err
 	}
-	hits, err := s.Vector.Search(ctx, kb.ID, vec, topK, minScore)
+	hits, err := s.hybridSearch(ctx, kb.ID, query, vec, topK, minScore) // KB-10①：混合检索（词法臂失败自动降级纯向量）
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +232,7 @@ func (s *Service) Search(ctx context.Context, kb *store.KnowledgeBase, query str
 		if name == "" {
 			name = h.DocID
 		}
-		out = append(out, RetrievalHit{Doc: name, Seq: h.Seq, Score: h.Score, Excerpt: truncateRunes(h.Content, 200)})
+		out = append(out, RetrievalHit{Doc: name, Seq: h.Seq, Score: h.Score, Excerpt: truncateRunes(h.Content, 200), Strategy: h.Strategy})
 	}
 	return out, nil
 }
@@ -243,6 +243,7 @@ type RetrievalHit struct {
 	Seq     int     `json:"seq"`
 	Score   float64 `json:"score"`
 	Excerpt string  `json:"excerpt"`
+	Strategy string `json:"strategy,omitempty"` // KB-10①：vector|lexical|hybrid（只增不改，空 = 历史口径）
 }
 
 // RenderContext 检索结果注入文本（§341：[片段 doc:seq score] 格式）。
