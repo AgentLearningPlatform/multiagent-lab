@@ -16,6 +16,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/companion"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kg"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontobuild"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
@@ -76,6 +77,7 @@ func (s *Server) ooProxy() http.Handler {
 func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service, dbPath, docsRoot, researchRoot, knowledgeRoot string) *Server {
 	comp := companion.NewService(st, box, nil)
 	chatSvc.Companion = comp // REQ-170 P2「KG 检索源并入」：伴生图检索源经接口反转注入 chat（companion→chat 包环约束）
+	chatSvc.Community = &kg.Summarizer{Store: st, Box: box} // KB-5③：全局问答社区摘要源（connID 按库经接口参数传入）
 	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, KnowledgeRoot: knowledgeRoot, Companion: comp, Mux: http.NewServeMux()}
 	s.routes()
 	return s

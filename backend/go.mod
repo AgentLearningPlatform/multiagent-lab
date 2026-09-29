@@ -91,6 +91,7 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
+	gonum.org/v1/gonum v0.17.0
 	google.golang.org/api v0.189.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240827150818-7e3bb234dfed // indirect
 	google.golang.org/grpc v1.66.0 // indirect

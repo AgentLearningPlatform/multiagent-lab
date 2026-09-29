@@ -1,13 +1,20 @@
-// M16 阶段二（REQ-130）：社区检测（轻量 label propagation）+ 社区摘要（LLM 主路径 / 骨架回退）
-// + 全局问答检索（社区摘要关键词评分）。学习口径：确定性、可单测、零外部依赖。
+// M16 阶段二（REQ-130）：社区检测（label propagation 对照）+ 社区摘要（LLM 主路径 / 骨架回退）
+// + 全局问答检索（社区摘要关键词评分）。学习口径：确定性、可单测。
+// KB-5（M35/37 号）：检测主路径升级 gonum Louvain（层次社区，解除 12 社区上限；lp 保留为回退对照），
+// 摘要改按需生成+缓存（D5，>12 社区大库不即时生成）。
 package kg
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
+
+	"gonum.org/v1/gonum/graph"
+	"gonum.org/v1/gonum/graph/community"
+	"gonum.org/v1/gonum/graph/simple"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
@@ -78,12 +85,112 @@ func DetectCommunities(entities []string, rels [][2]string) []Community {
 		sort.Strings(members)
 		out = append(out, Community{Label: members[0], Members: members})
 	}
+	sortCommsBySize(out)
+	return out
+}
+
+// DetectCommunitiesLouvain gonum Louvain 层次社区（KB-5/M35；算法借 gonum community.Modularize，
+// 方法论沿微软 GraphRAG 的 Leiden/Louvain 路线）。resolution=1.0 + 固定随机种子——同图同划分可复现
+// （成对边先排序后建图，降低实现层迭代序影响）。返回成员数 ≥2 的社区（成员数降序、label 升序稳定）；
+// 单例实体并入 __tail__ 长尾社区；空图返回 nil（调用方回退 label propagation）。
+func DetectCommunitiesLouvain(entities []string, rels [][2]string) []Community {
+	names := append([]string{}, entities...)
+	sort.Strings(names)
+	g := simple.NewWeightedUndirectedGraph(0, 0)
+	nameBy := map[int64]string{}
+	nodeBy := map[string]graph.Node{}
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		if _, dup := nodeBy[n]; dup {
+			continue
+		}
+		nd := g.NewNode()
+		g.AddNode(nd)
+		nodeBy[n] = nd
+		nameBy[nd.ID()] = n
+	}
+	if len(nodeBy) == 0 {
+		return nil
+	}
+	pairCount := map[[2]string]float64{}
+	for _, r := range rels {
+		a, b := r[0], r[1]
+		if a == b || nodeBy[a] == nil || nodeBy[b] == nil {
+			continue
+		}
+		lo, hi := a, b
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		pairCount[[2]string{lo, hi}]++
+	}
+	pairs := make([][2]string, 0, len(pairCount))
+	for p := range pairCount {
+		pairs = append(pairs, p)
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i][0] != pairs[j][0] {
+			return pairs[i][0] < pairs[j][0]
+		}
+		return pairs[i][1] < pairs[j][1]
+	})
+	for _, p := range pairs {
+		g.SetWeightedEdge(simple.WeightedEdge{F: nodeBy[p[0]], T: nodeBy[p[1]], W: pairCount[p]})
+	}
+	rg := community.Modularize(g, 1.0, rand.NewPCG(42, 1024)) // 固定种子（math/rand/v2 PCG）保证同图同划分
+	out := []Community{}
+	tail := []string{}
+	for _, nodes := range rg.Communities() {
+		members := make([]string, 0, len(nodes))
+		for _, nd := range nodes {
+			if name := nameBy[nd.ID()]; name != "" {
+				members = append(members, name)
+			}
+		}
+		if len(members) == 0 {
+			continue
+		}
+		sort.Strings(members)
+		if len(members) < 2 {
+			tail = append(tail, members...)
+			continue
+		}
+		out = append(out, Community{Label: members[0], Members: members})
+	}
+	sortCommsBySize(out)
+	if len(tail) > 0 {
+		sort.Strings(tail)
+		out = append(out, Community{Label: "__tail__", Members: tail})
+	}
+	return out
+}
+
+// sortCommsBySize 社区稳定排序：成员数降序，label 升序（检测输出的确定性保障之一）。
+func sortCommsBySize(out []Community) {
 	sort.Slice(out, func(i, j int) bool {
 		if len(out[i].Members) != len(out[j].Members) {
 			return len(out[i].Members) > len(out[j].Members)
 		}
 		return out[i].Label < out[j].Label
 	})
+}
+
+// internalRelTypes 社区内部关系类型（两端均在社区内；去重保序）。
+func internalRelTypes(rels []*store.KGRelationship, members []string) []string {
+	in := map[string]bool{}
+	for _, m := range members {
+		in[m] = true
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, r := range rels {
+		if in[r.Source] && in[r.Target] && !seen[r.Type] {
+			seen[r.Type] = true
+			out = append(out, r.Type)
+		}
+	}
 	return out
 }
 
@@ -117,61 +224,59 @@ func (x *Summarizer) SummarizeCommunity(ctx context.Context, label string, membe
 	return strings.TrimSpace(out.Summary), "llm"
 }
 
-// BuildKGCommunities 检测 + 摘要 + 持久化（重建全量替换；社区数上限 12 防摘要 token 失控，
-// 超出按成员数取前 12，其余实体并入「长尾」单社区骨架摘要）。
-func (x *Summarizer) BuildKGCommunities(ctx context.Context, kbID string) (int, error) {
+// eagerSummaryLimit 社区数 ≤ 该值时重建即全量生成摘要（小库 UI 即时可见，历史行为保留）；
+// 超出按需生成（D5 采纳：首次 global-search/对话兜底触发，生成后持久缓存到 kg_community）。
+const eagerSummaryLimit = 12
+
+// BuildKGCommunities 社区检测 + 摘要 + 持久化（重建全量替换 = 摘要缓存失效语义不变）。
+// KB-5：检测主路径 gonum Louvain（层次社区，解除 12 上限），空结果回退 label propagation
+//（该路径保留 12 长尾合并）；大库（社区数 > eagerSummaryLimit）摘要不即时生成（method=pending），
+// 由 global-search / 对话兜底按需生成+缓存。返回（社区数, 检测方法, error）。
+func (x *Summarizer) BuildKGCommunities(ctx context.Context, kbID string) (int, string, error) {
 	entities, rels, err := x.Store.KGByKB(kbID)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	names := make([]string, 0, len(entities))
 	for _, e := range entities {
 		names = append(names, e.Name)
 	}
 	pairs := make([][2]string, 0, len(rels))
-	relTypesByPair := map[string][]string{}
 	for _, r := range rels {
 		pairs = append(pairs, [2]string{r.Source, r.Target})
-		relTypesByPair[r.Source+"|"+r.Target] = append(relTypesByPair[r.Source+"|"+r.Target], r.Type)
 	}
-	comms := DetectCommunities(names, pairs)
-	if len(comms) > 12 { // 长尾合并（按成员数保留前 11，其余并入尾部社区）
-		keep, rest := comms[:11], comms[11:]
-		members := []string{}
-		for _, c := range rest {
-			members = append(members, c.Members...)
+	comms := DetectCommunitiesLouvain(names, pairs)
+	detectMethod := "louvain"
+	if len(comms) == 0 {
+		comms = DetectCommunities(names, pairs)
+		detectMethod = "label-propagation"
+		if len(comms) > 12 { // 长尾合并（按成员数保留前 11，其余并入尾部社区）
+			keep, rest := comms[:11], comms[11:]
+			members := []string{}
+			for _, c := range rest {
+				members = append(members, c.Members...)
+			}
+			sort.Strings(members)
+			comms = append(keep, Community{Label: "__tail__", Members: members})
 		}
-		sort.Strings(members)
-		comms = append(keep, Community{Label: "__tail__", Members: members})
 	}
+	eager := len(comms) <= eagerSummaryLimit
 	out := make([]*store.KGCommunity, 0, len(comms))
 	for _, c := range comms {
-		set := map[string]bool{}
-		for _, m := range c.Members {
-			set[m] = true
-		}
-		// 社区内部关系类型（两端均在社区内）
-		typeCount := map[string]int{}
-		seenType := []string{}
-		for _, r := range rels {
-			if set[r.Source] && set[r.Target] {
-				if typeCount[r.Type] == 0 {
-					seenType = append(seenType, r.Type)
-				}
-				typeCount[r.Type]++
+		summary, method := "", "pending"
+		if eager {
+			summary, method = x.SummarizeCommunity(ctx, c.Label, c.Members, internalRelTypes(rels, c.Members))
+			if c.Label == "__tail__" {
+				summary = "其他长尾社区：" + summary
+				method += "+tail"
 			}
-		}
-		summary, method := x.SummarizeCommunity(ctx, c.Label, c.Members, seenType)
-		if c.Label == "__tail__" {
-			summary = "其他长尾社区：" + summary
-			method += "+tail"
 		}
 		out = append(out, &store.KGCommunity{KBID: kbID, Label: c.Label, Summary: summary, Method: method, Members: c.Members})
 	}
 	if err := x.Store.ReplaceKGCommunities(kbID, out); err != nil {
-		return 0, err
+		return 0, detectMethod, err
 	}
-	return len(out), nil
+	return len(out), detectMethod, nil
 }
 
 // GlobalSearchHit 全局问答命中（社区摘要检索）。
@@ -180,6 +285,7 @@ type GlobalSearchHit struct {
 	Summary  string   `json:"summary"`
 	Members  []string `json:"members"`
 	Score    int      `json:"score"`
+	Used     bool     `json:"used,omitempty"` // KB-5②：该社区参与本次 map-reduce 生成（只增不改）
 }
 
 // GlobalSearch 全局问答（REQ-130）：查询词与社区摘要/成员做中文 2-gram 覆盖评分（零 embedding 依赖，

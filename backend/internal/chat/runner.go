@@ -34,6 +34,9 @@ type Service struct {
 	// Companion REQ-170 P2「KG 检索源并入」：伴生图检索源（nil=未接入）。
 	// companion 包已依赖 chat，经接口反转注入避免包环（api 装配层接线）。
 	Companion CompanionSource
+	// Community KB-5③（M35）：全局问答社区摘要上下文源（kg.Summarizer 实现；kg 已依赖 chat，接口反转）。
+	// graphrag 库本地检索全空时兜底注入社区摘要上下文（nil=未接入，行为与历史一致）。
+	Community CommunitySource
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // conversationID -> cancel
@@ -44,6 +47,13 @@ type Service struct {
 // 引擎通信失败返回错误（chat 层降级为 run.warning，不阻断）。
 type CompanionSource interface {
 	RetrievalContext(ctx context.Context, conv *store.Conversation, input string) (text string, entities []map[string]any, err error)
+}
+
+// CommunitySource 全局问答社区摘要上下文源接口（KB-5③，M35）。
+// 实现方按 query 匹配社区摘要（缺失则按需生成+缓存，D5），返回注入文本与 retrieval 事件明细；
+// ok=false = 无可用社区或无命中（chat 层静默跳过，行为与无社区时一致）。
+type CommunitySource interface {
+	CommunityContext(ctx context.Context, kbID, connID, query string) (context string, hits []map[string]any, ok bool)
 }
 
 // NewService 构造。
@@ -1221,6 +1231,15 @@ func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, runID,
 		s.emitAndRecord(ctx, conv, runID, newEvent("retrieval", runID, data), emit)
 		if ctxText := kb.RenderContext(kbcfg.Name, hits); ctxText != "" {
 			histMsgs = append(histMsgs, schema.SystemMessage(ctxText))
+		}
+	case len(hits) == 0 && kbcfg.Mode == "graphrag" && s.Community != nil:
+		// KB-5③（M35）：graphrag 库本地检索（KG 扩展 + 向量）全空 → 社区摘要兜底上下文
+		//（SC-K7：对话内全局问答；摘要按需生成+缓存 D5；source=community 过程可观测）。
+		if cctx, chits, ok := s.Community.CommunityContext(ctx, kbcfg.ID, kbcfg.KGConnID, input); ok {
+			s.emitAndRecord(ctx, conv, runID, newEvent("retrieval", runID, map[string]any{
+				"kb_id": kbcfg.ID, "mode": "community", "source": "community", "hits": chits,
+			}), emit)
+			histMsgs = append(histMsgs, schema.SystemMessage(cctx))
 		}
 	}
 	return histMsgs

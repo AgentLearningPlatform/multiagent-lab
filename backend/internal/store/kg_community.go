@@ -95,6 +95,14 @@ func (s *Store) DeleteKGCommunities(kbID string) error {
 	return err
 }
 
+// UpdateKGCommunitySummary 摘要按需生成后的持久化（KB-5/D5：首次 global-search 或对话兜底触发，
+// 生成一次永久缓存；重建仍全量失效）。
+func (s *Store) UpdateKGCommunitySummary(kbID, label, summary, method string) error {
+	_, err := s.DB.Exec(`UPDATE kg_community SET summary=?, method=?, updated_at=? WHERE kb_id=? AND label=?`,
+		summary, method, now(), kbID, label)
+	return err
+}
+
 func sortCommunities(cs []*KGCommunity) {
 	// 简单插入排序（学习尺度条目少，避免引入 sort 依赖 churn）
 	for i := 1; i < len(cs); i++ {

@@ -56,9 +56,12 @@ func TestBuildCommunitiesSkeletonAndSearch(t *testing.T) {
 	}
 	// 空库（无模型连接）→ LLM 失败回退骨架摘要
 	sum := &Summarizer{Store: st}
-	n, err := sum.BuildKGCommunities(context.Background(), kb)
+	n, method, err := sum.BuildKGCommunities(context.Background(), kb)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if method != "louvain" {
+		t.Fatalf("detect method = %q, want louvain", method)
 	}
 	if n != 1 {
 		t.Fatalf("communities = %d, want 1", n)
@@ -97,5 +100,83 @@ func TestGlobalSearchGramTerms(t *testing.T) {
 		if !found {
 			t.Fatalf("gram terms missing %s: %v", want, terms)
 		}
+	}
+}
+
+// KB-5：Louvain 社区检测——簇划分、单例归尾、确定性。
+func TestDetectCommunitiesLouvain(t *testing.T) {
+	entities := []string{"编排引擎", "智能体", "大模型", "Tom", "Jerry", "Monolithic"}
+	rels := [][2]string{
+		{"编排引擎", "智能体"}, {"智能体", "大模型"},
+		{"Tom", "Jerry"},
+	}
+	comms := DetectCommunitiesLouvain(entities, rels)
+	// 两个 ≥2 成员簇 + Monolithic 归 __tail__
+	if len(comms) != 3 {
+		t.Fatalf("communities = %d, want 3（两簇 + __tail__）", len(comms))
+	}
+	if comms[len(comms)-1].Label != "__tail__" {
+		t.Fatalf("末位应为 __tail__: %v", comms[len(comms)-1].Label)
+	}
+	joined := strings.Join(comms[0].Members, ",")
+	for _, want := range []string{"编排引擎", "智能体", "大模型"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("top community missing %s: %v", want, comms[0].Members)
+		}
+	}
+	// 确定性：同图两次划分一致
+	if again := DetectCommunitiesLouvain(entities, rels); len(again) != len(comms) || again[0].Label != comms[0].Label {
+		t.Fatal("louvain not deterministic")
+	}
+	// 空图 → nil（调用方回退 lp）
+	if got := DetectCommunitiesLouvain(nil, nil); got != nil {
+		t.Fatalf("empty graph should return nil, got %v", got)
+	}
+}
+
+// KB-5/D5：摘要按需生成+缓存——pending 社区经 GlobalAnswer 触发生成（无 LLM 回退骨架）并持久化；
+// 生成失败（无 LLM）时 ok=false 诚实降级。
+func TestGlobalAnswerLazySummaryCache(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const kb = "kb1"
+	// 直接落两个 pending 社区（模拟大库 >12 场景）
+	comms := []*store.KGCommunity{
+		{KBID: kb, Label: "编排引擎", Summary: "", Method: "pending", Members: []string{"编排引擎", "智能体", "大模型"}},
+		{KBID: kb, Label: "Tom", Summary: "", Method: "pending", Members: []string{"Tom", "Jerry"}},
+	}
+	if err := st.ReplaceKGCommunities(kb, comms); err != nil {
+		t.Fatal(err)
+	}
+	sum := &Summarizer{Store: st}
+	answer, hits, ok := sum.GlobalAnswer(context.Background(), kb, "", "编排引擎如何调度大模型", []*store.KGCommunity{}) // 空社区列表 → false
+	if ok || answer != "" || len(hits) != 0 {
+		t.Fatalf("空社区列表应 ok=false, got ok=%v", ok)
+	}
+	list, err := st.ListKGCommunities(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, hits, ok = sum.GlobalAnswer(context.Background(), kb, "", "编排引擎如何调度大模型", list)
+	if ok {
+		t.Fatalf("无 LLM 环境应生成失败 ok=false")
+	}
+	if len(hits) == 0 || !hits[0].Used {
+		t.Fatalf("命中社区应带 used 标注: %+v", hits)
+	}
+	// 按需生成已持久化（骨架回退）
+	list, err = st.ListKGCommunities(kb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]*store.KGCommunity{}
+	for _, c := range list {
+		byLabel[c.Label] = c
+	}
+	if byLabel["编排引擎"].Method != "skeleton" || byLabel["编排引擎"].Summary == "" {
+		t.Fatalf("摘要应按需生成并缓存（skeleton）: %+v", byLabel["编排引擎"])
 	}
 }
