@@ -1,11 +1,11 @@
 ---
 module: 智能体
 topic: 平台 Agent 对接 DeepSeek Harness 可行性
-desc: 回答「能不能接、以什么形态接、每种形态代价、推荐哪条」——平台侧对接面 × dsh 侧可对接面 × 五条路径的成本/风险/能力得失（REQ-160 立项依据；与 36 号架构对比、41 号源码拆解三档分工不重复）
-req: [REQ-160]
-docs: ["02 §6.16", "01 REQ-160"]
+desc: 回答「能不能接、以什么形态接、每种形态代价、推荐哪条」——平台侧对接面 × dsh 侧可对接面 × 五条路径的成本/风险/能力得失（REQ-160 立项依据；REQ-206 S0 协议 PoC GO 记录见 §12；与 36 号架构对比、41 号源码拆解三档分工不重复）
+req: [REQ-160, REQ-206]
+docs: ["02 §6.16", "01 REQ-160", "02 §12 M41"]
 decisions: [D-O13, D-O15, D-O5]
-synced: 2026-09-29
+synced: 2026-09-30
 ---
 
 # 平台 Agent 对接 / 嵌入 DeepSeek Harness（dsh）——可行性及方案分析
@@ -353,6 +353,45 @@ type cliAdapter struct {
 | 基础组合包 `dsh-base` | `packages/bundle/base/README.zh.md` |
 
 > **复核方法注记**：本机直连 `raw.githubusercontent.com` 会 SSL 握手失败（exit 35）；`api.github.com/.../contents/<path>` 可用但未认证限 60 次/小时且会被限流；**WebFetch 通道不受限流影响**，后续取一手文档优先用它。递归 tree API 在 master 上会被截断，需逐目录 `contents` 查询。
+
+---
+
+## 12. S0 协议 PoC 记录（2026-09-30，REQ-206/M41 首步，go/no-go 门）
+
+> 结论先行：**GO**——ACP 与 SDK 两通道握手、会话、事件面全部实证可用，`--profile acp` / `--profile sdk` 为 **0.1.5-rc.3 发行模板自动引导**（§7.2 设想的「手工建 profile」门槛不存在），S1（streamingStdioAdapter 基座）→ S2（ACP 主通道四项翻正）→ S3（SDK 事件审计，可选）可推进。本节为 §7.2 S0 行的产出物（协议帧样例+事件分布），驱动脚本留本地 `smoke/dsh-s0/`（一次性脚手架，S1 起以 Go 正式实现替代）。
+
+### 12.1 方法与环境
+
+- 本机 dsh **0.1.5-rc.3**（~/.nvm node 24 全局装，`data/bin` 无涉）；ACP/SDK bundle（`@deepseek-ai/dsh-acp`、`dsh-acp-app`、`dsh-sdk-app`、`dsh-sdk-jsonrpc-server`、`dsh-sdk-protocol`）均在 `~/.dsh/profiles/node_modules` 中央仓库在位，`dsh --profile acp` 直接起服务（自动从发行模板引导 profile）。
+- 零依赖 Node 驱动脚本裸 stdio 收发 newline-delimited JSON-RPC：`acp-drive.mjs`（probe/resume 两模式）与 `sdk-drive.mjs`；服务器→客户端请求（`session/request_permission`）自动应答 reject 选项（默认 deny 语义）。
+- **真实模型轮经本地桩产生**：本机无 DEEPSEEK_API_KEY（与 M24 同边界），但 `dsh-llm-deepseek` 尊重 `DEEPSEEK_BASE_URL` env——起 OpenAI 兼容桩（`llm-stub.mjs`：/chat/completions 流式+非流式、首轮按请求 tools 数组返回 tool_calls、次轮收 tool 结果给终文）+ `DEEPSEEK_API_KEY=stub`，即可驱动真实 agent 循环（工具真实执行）。协议事件与模型无关，结论不受桩影响。
+
+### 12.2 ACP 通道（agent 侧协议，`deepseek-harness-acp`）
+
+| 验证项 | 结果 | 证据 |
+| --- | --- | --- |
+| 握手 `initialize` | ✅ | `protocolVersion:1` + `agentCapabilities{sessionCapabilities:{close,list,resume}, mcpCapabilities:{http:true}, promptCapabilities:{image:false}}`；`authenticate` 立即成功（无鉴权——§9 风险台账项实证：仅本机 stdio 红线必须守住） |
+| `session/new` | ✅ | 返回 `sessionId`(UUID) + `configOptions`（model=select：deepseek-official 路由族 V41-Flash/V4-Flash/V4-Pro；含 reasoning effort 选择） |
+| **`session/resume`** | ✅ | 对 **M24 时代存量会话**跨进程恢复成功，`configOptions` 还原该会话原模型选择；`session/load` 明确不支持（README 契约+实测一致）；`session/list` newest-first 持久化分页可见（headless 时代会话同列） |
+| `session/update` 粒度 | ✅ **语义级**（非原始 LLM delta） | 一轮「文本+bash 工具执行」= 3 条通知：`agent_message_chunk`（全文块）/ `tool_call{toolCallId,title:"bash",kind,status:"in_progress",rawInput}` / `tool_call_update{status:"completed",content:[执行输出]}`；`session/prompt` 以 `{stopReason:"end_turn"}` 结算（failed 路径亦实证：参数不合法→`tool_call_update{status:"failed"}` 带错误 content） |
+| 无凭证语义 | ✅ 可操作 | `session/prompt` → `-32603 "no API key for provider route \"deepseek-official\"; store DEEPSEEK_API_KEY …or export…"`——错误信息精准指向修复动作，平台侧可映射 MISSING_CREDENTIAL |
+| 取消/权限面 | 契约在位（未深测） | `session/cancel`+`$/cancel_request` 双路径；`session/request_permission` 选项列表可编程应答（驱动脚本即自动 reject）→ **平台审批「默认 deny」可落** |
+
+### 12.3 SDK 通道（runtime 侧协议，`deepseek-harness-sdk-runtime`）
+
+- 三请求：`initialize{cwd,provider,model,maxTokens?}`（→ serverInfo，等待 plugin tree settle 才应答=MCP 初发现对首个 prompt 可见）、`session/prompt{sessionId,contentBlocks}`（**立即返回 `{messageId}`**，异步流式回事件）、`shutdown`（应答后 dispose 并 exit 0）。sessionId 由**客户端自由命名**（`"s0-poc-session-1"` 直接可用）→ S2 的 dshSessionId↔平台会话映射可由平台生成。
+- 四通知：`session.event`（**不过滤全量 session-log 事件**）、`session.status`（idle|running）、`subagent.started`、`subagent.finished`。
+- **单轮工具对话事件分布实测（19 事件/16 类型）**：`turn/start`、`step/start×2`、`step/end×2`、`turn/end{reason:completed}`、`system/message`（persona+工具面）、`user/message×2`（含 runtime-context 快照注入）、`assistant/message×2`（含 tool-call 内容块）、`tool/call`、`tool/result`（真实 bash 输出）、`request/header`（tools 数组+config+**reasoningEffort 默认 high**）、`request/context{contextWindow:1M}`、`permission/preset{workspace-write}`、`sandbox/mode`、`approval/policy{ask}`、`agent/inbox/spliced`、`session/title{source:fallback}`。
+- **与 ACP 的分工实证**：SDK 事件含 ACP 不暴露的治理/请求面事实（sandbox、approval policy、request header/context）——§7.1「S3 审计/回放无可替代」判断成立。
+
+### 12.4 对 S1~S3 的设计输入（新发现）
+
+1. **权限映射可行**：`approval/policy=ask` + ACP `session/request_permission` 可编程应答 → 平台审批策略（默认 deny 转人工）S2 可落。
+2. **MCP 挂载直通**：ACP `mcpCapabilities.http=true` → 平台 `/mcp`（REQ-131）与 `/api/oo/mcp`（M8.5）Streamable HTTP MCP server 可直接挂进 dsh 会话（`session/new` 的 mcpServers），「平台能力进 dsh 走 MCP 挂载」无协议障碍。
+3. **版本协商缺失实证**：`agentInfo.version`/`serverInfo.version` 恒 `0.0.1` 不校验——Probe 必须同时记录 CLI 版本（`dsh --version`=0.1.5-rc.3），适配器侧自校验（§9 对策成立）。
+4. **锁版本建议维持**：0.1.5-rc.3 的 acp/sdk 为发行模板；升级 1.x 需重跑本节脚本回归。
+
+> 边界：本 PoC 未测长会话/多会话并发/`session/close` 后 resume 语义/权限拒绝全路径——S1/S2 实现期以集成测试覆盖；真实 DeepSeek 凭证端到端留待用户侧配置（与 M24 同注记）。
 
 ---
 
