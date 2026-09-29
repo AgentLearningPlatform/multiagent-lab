@@ -14,3 +14,4 @@ web/public/vendor/
 backend/internal/companion/data/
 smoke
 exe/
+.workbuddy
