@@ -34,8 +34,9 @@ func (s *Server) companionGraph(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listCompanionCandidates(w http.ResponseWriter, r *http.Request) {
 	convID := r.URL.Query().Get("conversation_id")
+	agentID := r.URL.Query().Get("agent_id") // REQ-193/M33：agent 维度铺平过滤
 	status := r.URL.Query().Get("status")
-	list, err := s.Companion.Store.ListCompanionCandidates(convID, status)
+	list, err := s.Companion.Store.ListCompanionCandidates(convID, agentID, status)
 	if err != nil {
 		writeErr(w, err)
 		return

@@ -141,8 +141,9 @@ func TestStoreCompanionRoundTrip(t *testing.T) {
 		t.Fatalf("建临时库失败: %v", err)
 	}
 	cands := []*store.CompanionCandidate{
-		{Kind: "concept", Name: "滚动更新", Definition: "逐批替换实例", Confidence: 0.9, SourceMessageID: "m1"},
-		{Kind: "relation", Name: "部署", RelName: "部署", RelTarget: "Deployment", Confidence: 0.7, SourceMessageID: "m1"},
+		{AgentID: "agt-a", Kind: "concept", Name: "滚动更新", Definition: "逐批替换实例", Confidence: 0.9, SourceMessageID: "m1"},
+		{AgentID: "agt-a", Kind: "relation", Name: "部署", RelName: "部署", RelTarget: "Deployment", Confidence: 0.7, SourceMessageID: "m1"},
+		{AgentID: "agt-b", Kind: "concept", Name: "金丝雀发布", Confidence: 0.6, SourceMessageID: "m2"},
 	}
 	if err := st.CreateCompanionCandidates(cands); err != nil {
 		t.Fatalf("批量落库失败: %v", err)
@@ -150,18 +151,27 @@ func TestStoreCompanionRoundTrip(t *testing.T) {
 	if cands[0].ID == "" || cands[0].Status != "pending" {
 		t.Fatalf("落库应补 ID 与 pending: %+v", cands[0])
 	}
-	list, err := st.ListCompanionCandidates("conv-x", "pending")
+	list, err := st.ListCompanionCandidates("conv-x", "", "pending")
 	if err != nil {
 		t.Fatalf("列表失败: %v", err)
 	}
 	_ = list
 	// 未过滤会话（上例 conv 未传）——直接按全量再查一次
-	all, err := st.ListCompanionCandidates("", "")
+	all, err := st.ListCompanionCandidates("", "", "")
 	if err != nil {
 		t.Fatalf("全量列表失败: %v", err)
 	}
-	if len(all) < 2 {
-		t.Fatalf("应至少 2 条候选，got %d", len(all))
+	if len(all) < 3 {
+		t.Fatalf("应至少 3 条候选，got %d", len(all))
+	}
+	// REQ-193/M33：agent 维度过滤——跨会话铺平视图按 agent 拉取
+	byA, err := st.ListCompanionCandidates("", "agt-a", "")
+	if err != nil || len(byA) != 2 {
+		t.Fatalf("agent 过滤应得 2 条: %v %d", err, len(byA))
+	}
+	byB, err := st.ListCompanionCandidates("", "agt-b", "pending")
+	if err != nil || len(byB) != 1 || byB[0].Name != "金丝雀发布" {
+		t.Fatalf("agent+status 复合过滤不符: %v %+v", err, byB)
 	}
 	got, err := st.DecideCompanionCandidate(cands[0].ID, "confirmed")
 	if err != nil || got.Status != "confirmed" {

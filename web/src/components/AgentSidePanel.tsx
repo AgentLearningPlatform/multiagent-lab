@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Card, Collapse, Divider, Form, FormInstance, Input, InputNumber, Popconfirm, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Button, Card, Collapse, Divider, Form, FormInstance, Input, InputNumber, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   ApiOutlined,
+  ClusterOutlined,
   BranchesOutlined,
   CloseOutlined,
   CopyOutlined,
@@ -76,11 +77,14 @@ function McpServerRow({ name, remove }: { name: number; remove: (i: number) => v
 }
 
 /**
- * 智能体右侧侧边栏（REQ-103 统一范式 + REQ-132 四分类改版 / M18）：
- * activity bar（~44px）不变；配置视图由单视图平铺升级为 **四分类页签**——
- * 基本 / 模型与参数 / 能力 / 对外服务（REQ-131，M18 新增）。
- * 页签面板 forceRender（跨页签字段同表单提交）；字段/校验/提交 API 不变，仅承载重组（REQ-134）。
+ * 智能体右侧侧边栏（REQ-103 统一范式 + REQ-132 四分类改版 / M18；REQ-193/M33 双入口）：
+ * activity bar（~44px）双入口——「配置」（AgentConfigForm 四页签：基本/模型与参数/能力/对外服务）
+ * 与「伴生本体」（AgentCompanionView：伴生配置/伴生管理两页）同级切换（REQ-193 伴生自页签
+ * 上提一级；选中记忆 localStorage eino.agentpanel.view）。
+ * 页签面板 forceRender（跨页签字段同表单提交）；字段/校验/提交 API 不变，仅承载重组。
  */
+const PANEL_VIEW_KEY = 'eino.agentpanel.view'
+
 export default function AgentSidePanel({
   agent,
   open,
@@ -92,6 +96,14 @@ export default function AgentSidePanel({
   onClose: () => void
   onChanged?: () => void
 }) {
+  // REQ-193：侧板一级视图（配置 | 伴生本体）——与「智能体配置」同级双入口，刷新记忆
+  const [view, setView] = useState<'config' | 'companion'>(() =>
+    localStorage.getItem(PANEL_VIEW_KEY) === 'companion' ? 'companion' : 'config',
+  )
+  const switchView = (v: 'config' | 'companion') => {
+    setView(v)
+    localStorage.setItem(PANEL_VIEW_KEY, v)
+  }
   // REQ-189：侧板宽度可调（默认上调 364→560；拖拽 320~720；localStorage 记忆；双击复位）
   const [panelWidth, setPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
@@ -127,9 +139,28 @@ export default function AgentSidePanel({
         onDoubleClick={() => { setPanelWidth(DEFAULT_PANEL_WIDTH); localStorage.setItem(PANEL_WIDTH_KEY, String(DEFAULT_PANEL_WIDTH)) }}
       />
       <div className="proj-panel-bar" role="tablist" aria-label="智能体侧边栏视图">
-        <Tooltip title="配置" placement="left">
-          <button type="button" className="proj-bar-btn active" aria-label="配置" aria-selected role="tab">
+        <Tooltip title="智能体配置" placement="left">
+          <button
+            type="button"
+            className={`proj-bar-btn${view === 'config' ? ' active' : ''}`}
+            aria-label="智能体配置"
+            aria-selected={view === 'config'}
+            role="tab"
+            onClick={() => switchView('config')}
+          >
             <SettingOutlined />
+          </button>
+        </Tooltip>
+        <Tooltip title="伴生本体" placement="left">
+          <button
+            type="button"
+            className={`proj-bar-btn${view === 'companion' ? ' active' : ''}`}
+            aria-label="伴生本体"
+            aria-selected={view === 'companion'}
+            role="tab"
+            onClick={() => switchView('companion')}
+          >
+            <ClusterOutlined />
           </button>
         </Tooltip>
         <Tooltip title="文件视图（后续扩展）" placement="left">
@@ -151,9 +182,134 @@ export default function AgentSidePanel({
       </div>
 
       <div className="proj-panel-view">
-        <AgentConfigForm agent={agent} onChanged={onChanged} />
+        {view === 'companion' ? <AgentCompanionView agent={agent} onChanged={onChanged} /> : <AgentConfigForm agent={agent} onChanged={onChanged} />}
       </div>
     </aside>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 伴生本体视图（REQ-193/M33：伴生自「配置」页签上提一级，与「智能体配置」同级；
+// 视图内两页——「伴生配置」（开关+REQ-187 三字段，独立表单全量保存）与
+// 「伴生管理」（AgentCompanionManage 铺平视图）。「左侧对话、右侧伴生管理」并行
+// 几何已具备（ChatWindow 与本侧板 flex 兄弟节点）。整体摘除/成长图 3D 留本体模块
+// 伴生子模块全量管理面（D-O19/D-O21 展示位不动）。
+// ---------------------------------------------------------------------------
+
+function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
+  const { showToast, bumpData } = useUI()
+  const [page, setPage] = useState<'config' | 'manage'>('config')
+  const [form] = Form.useForm()
+  const [allConns, setAllConns] = useState<ModelConnection[]>([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    form.setFieldsValue({
+      companion_ontology: agent.companion_ontology ?? false,
+      companion_extract_hint: agent.companion_extract_hint ?? '',
+      companion_extract_conn_id: agent.companion_extract_conn_id ?? '',
+      companion_auto_threshold: agent.companion_auto_threshold ?? 0,
+    })
+  }, [agent.id, form])
+  useEffect(() => {
+    api.listConnections().then(setAllConns).catch(() => {})
+  }, [])
+
+  const conns = useMemo(() => allConns.filter((c) => c.conn_type === 'chat' && c.enabled), [allConns])
+
+  // 保存走全量载荷（普通 agent PUT 为 full-replace）：非伴生字段以 props agent 现值透传，
+  // 仅伴生四字段来自本表单——与其他视图保存互不踩踏（REQ-189 全字段替换坑同源规避）。
+  const save = async () => {
+    try {
+      const v = await form.validateFields()
+      setSaving(true)
+      await api.updateAgent(agent.id, {
+        name: agent.name,
+        description: agent.description,
+        instruction: agent.instruction,
+        model_conn_id: agent.model_conn_id || null,
+        temperature: agent.temperature ?? null,
+        max_tokens: agent.max_tokens ?? null,
+        max_iteration: agent.max_iteration ?? 25,
+        runtime_backend: agent.runtime_backend ?? 'inprocess',
+        sandbox_memory: agent.sandbox_memory ?? '',
+        sandbox_cpus: agent.sandbox_cpus ?? 0,
+        inference_backend: agent.inference_backend ?? 'eino-adk',
+        logo_url: (agent.logo_url ?? '').trim(),
+        tools: agent.tools ?? [],
+        skills: agent.skills ?? [],
+        mcp_servers: agent.mcp_servers ?? [],
+        mcp_serve: { enabled: !!agent.mcp_serve?.enabled, tool_name: agent.mcp_serve?.tool_name ?? '', token: agent.mcp_serve?.token ?? '' },
+        companion_ontology: !!v.companion_ontology,
+        companion_extract_hint: v.companion_extract_hint ?? '',
+        companion_extract_conn_id: v.companion_extract_conn_id ?? '',
+        companion_auto_threshold: v.companion_auto_threshold ?? 0,
+      })
+      showToast('伴生配置已保存，下次运行生效')
+      bumpData()
+      onChanged?.()
+    } catch (e: any) {
+      if (e?.errorFields) return
+      showToast(e.message, 'err')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="proj-view-body">
+      <Space size={4} style={{ marginBottom: 10 }}>
+        <Segmented
+          size="small"
+          value={page}
+          onChange={(v) => setPage(v as typeof page)}
+          options={[
+            { value: 'config', label: '伴生配置' },
+            { value: 'manage', label: '伴生管理' },
+          ]}
+        />
+      </Space>
+      {page === 'config' ? (
+        <Form form={form} layout="vertical" requiredMark={false} size="small">
+          <Form.Item
+            name="companion_ontology"
+            label="伴生本体开关"
+            valuePropName="checked"
+            extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；管理页可跨会话确认候选；本体模块「伴生本体」栏为全量管理面；默认关闭"
+          >
+            <Switch checkedChildren="开" unCheckedChildren="关" />
+          </Form.Item>
+          <Form.Item
+            name="companion_extract_hint"
+            label="领域聚焦提示（可选，REQ-187）"
+            extra="追加到抽取提示词：定义本 agent 领域内「什么值得沉淀」（例：重点关注 Kubernetes 部署与回滚术语；忽略寒暄与操作细节）"
+          >
+            <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="留空 = 通用抽取标准" />
+          </Form.Item>
+          <Form.Item
+            name="companion_extract_conn_id"
+            label="抽取模型连接（可选，REQ-187）"
+            extra="留空 = 跟随「智能体配置」的模型连接（外部 CLI 后端 agent 无生效连接时须指定真实 chat 连接）"
+          >
+            <Select allowClear showSearch optionFilterProp="label" placeholder="跟随智能体模型连接" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
+          </Form.Item>
+          <Form.Item
+            name="companion_auto_threshold"
+            label="自动入图置信阈值（REQ-187）"
+            extra="0 = 全部候选人工确认（默认，REQ-82 草稿必审）；>0 时置信 ≥ 阈值的候选自动确认入图（图内带 autoConfirmed 标记），其余仍待人工审"
+          >
+            <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} placeholder="0（全人工确认）" />
+          </Form.Item>
+          <div className="proj-view-actions">
+            <Button type="primary" size="small" loading={saving} onClick={save}>
+              保存伴生配置
+            </Button>
+          </div>
+        </Form>
+      ) : (
+        <AgentCompanionManage agent={agent} />
+      )}
+    </div>
   )
 }
 
@@ -213,7 +369,6 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   // 当前选中连接（含已停用的历史绑定，便于如实展示身份）
   const modelConnId = Form.useWatch('model_conn_id', form)
   const runtimeBackend = (Form.useWatch('runtime_backend', form) as string | undefined) ?? agent.runtime_backend
-  const companionOn = (Form.useWatch('companion_ontology', form) ?? agent.companion_ontology) as boolean
   const selectedConn = modelConnId ? allConns.find((c) => c.id === modelConnId) ?? null : null
 
   const save = async () => {
@@ -243,11 +398,12 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
           tool_name: (v.mcp_serve_tool_name ?? '').trim(),
           token: agent.mcp_serve?.token ?? '',
         },
-        // REQ-170/187：伴生本体（后端 PUT 全字段替换——漏传即被零值覆盖，2026-09-28 修复开关保存失效）
-        companion_ontology: !!v.companion_ontology,
-        companion_extract_hint: v.companion_extract_hint ?? '',
-        companion_extract_conn_id: v.companion_extract_conn_id ?? '',
-        companion_auto_threshold: v.companion_auto_threshold ?? 0,
+        // REQ-170/187 + REQ-193：伴生四字段自「伴生本体」视图维护——配置表单保存按 agent
+        // 现值透传（表单不再承载，避免 full-replace 零值清掉伴生配置）
+        companion_ontology: !!agent.companion_ontology,
+        companion_extract_hint: agent.companion_extract_hint ?? '',
+        companion_extract_conn_id: agent.companion_extract_conn_id ?? '',
+        companion_auto_threshold: agent.companion_auto_threshold ?? 0,
       })
       showToast('已保存，下次运行生效')
       bumpData()
@@ -502,56 +658,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
               ),
             },
             {
-              // REQ-189：伴生本体专有页签——配置（开关+REQ-187 三字段自「能力」页签内聚迁入）
-              // 与管理（AgentCompanionManage 紧凑视图）同页签；整体摘除留本体模块全量管理面
-              key: 'companion',
-              label: '伴生本体',
-              forceRender: true,
-              children: (
-                <>
-                  <Form.Item
-                    name="companion_ontology"
-                    label="伴生本体开关"
-                    valuePropName="checked"
-                    extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；下方为本智能体各会话的候选管理；本体模块「伴生本体」栏为全量管理面；默认关闭"
-                  >
-                    <Switch checkedChildren="开" unCheckedChildren="关" />
-                  </Form.Item>
-
-                  {companionOn && (
-                    <>
-                      <Form.Item
-                        name="companion_extract_hint"
-                        label="领域聚焦提示（可选，REQ-187）"
-                        extra="追加到抽取提示词：定义本 agent 领域内「什么值得沉淀」（例：重点关注 Kubernetes 部署与回滚术语；忽略寒暄与操作细节）"
-                      >
-                        <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="留空 = 通用抽取标准" />
-                      </Form.Item>
-                      <Form.Item
-                        name="companion_extract_conn_id"
-                        label="抽取模型连接（可选，REQ-187）"
-                        extra="留空 = 跟随「模型与参数」页签的模型连接（外部 CLI 后端 agent 无生效连接时须指定真实 chat 连接）"
-                      >
-                        <Select allowClear showSearch optionFilterProp="label" placeholder="跟随智能体模型连接" options={conns.map((c) => ({ value: c.id, label: connLabel(c) }))} />
-                      </Form.Item>
-                      <Form.Item
-                        name="companion_auto_threshold"
-                        label="自动入图置信阈值（REQ-187）"
-                        extra="0 = 全部候选人工确认（默认，REQ-82 草稿必审）；>0 时置信 ≥ 阈值的候选自动确认入图（图内带 autoConfirmed 标记），其余仍待人工审"
-                      >
-                        <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} placeholder="0（全人工确认）" />
-                      </Form.Item>
-                      <Divider titlePlacement="left" plain style={{ margin: '4px 0 12px' }}>
-                        本智能体会话伴生管理
-                      </Divider>
-                    </>
-                  )}
-
-                  <AgentCompanionManage agent={agent} />
-                </>
-              ),
-            },
-            {
+              // REQ-193：伴生本体页签摘除——上提为侧板一级视图（activity bar「伴生本体」按钮），
+              // 开关+REQ-187 三字段迁「伴生配置」页、候选管理迁「伴生管理」页（铺平）
               key: 'serve',
               label: '对外服务',
               forceRender: true,

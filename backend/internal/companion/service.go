@@ -413,7 +413,7 @@ func (s *Service) ResetConversation(ctx context.Context, convID string) error {
 // Status 伴生管线状态（引擎端点/游标/pending 计数/实体标签）。
 func (s *Service) Status(ctx context.Context, convID string) (map[string]any, error) {
 	cursor, _ := s.Store.GetCompanionCursor(convID)
-	pending, _ := s.Store.ListCompanionCandidates(convID, "pending")
+	pending, _ := s.Store.ListCompanionCandidates(convID, "", "pending")
 	st := map[string]any{
 		"conversation_id": convID,
 		"cursor":          cursor,

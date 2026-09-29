@@ -80,13 +80,19 @@ func (s *Store) CreateCompanionCandidates(cands []*CompanionCandidate) error {
 	return tx.Commit()
 }
 
-// ListCompanionCandidates 候选列表（可按会话与状态过滤；时间升序）。
-func (s *Store) ListCompanionCandidates(convID, status string) ([]*CompanionCandidate, error) {
+// ListCompanionCandidates 候选列表（可按会话/智能体/状态过滤；时间升序）。
+// REQ-193/M33：增 agent 维度可选过滤（表已有 agent_id 列）——伴生管理铺平视图跨会话
+// 单列表按 agent 拉取，会话归属在行内标注。
+func (s *Store) ListCompanionCandidates(convID, agentID, status string) ([]*CompanionCandidate, error) {
 	q := `SELECT ` + companionCandidateCols + ` FROM companion_candidate WHERE 1=1`
 	var args []any
 	if convID != "" {
 		q += ` AND conversation_id = ?`
 		args = append(args, convID)
+	}
+	if agentID != "" {
+		q += ` AND agent_id = ?`
+		args = append(args, agentID)
 	}
 	if status != "" {
 		q += ` AND status = ?`

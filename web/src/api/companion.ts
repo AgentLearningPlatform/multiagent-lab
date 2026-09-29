@@ -71,10 +71,12 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const companionApi = {
-  listCandidates: (conversationId = '', status = '') => {
+  // REQ-193/M33：增 agentId 维度（跨会话铺平）；conversationId 与 agentId 可任选/同传
+  listCandidates: (conversationId = '', status = '', agentId = '') => {
     const q = new URLSearchParams()
     if (conversationId) q.set('conversation_id', conversationId)
     if (status) q.set('status', status)
+    if (agentId) q.set('agent_id', agentId)
     const s = q.toString()
     return req<CompanionCandidate[]>(`/api/companion/candidates${s ? '?' + s : ''}`)
   },
