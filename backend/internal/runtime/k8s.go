@@ -31,10 +31,12 @@ type K8sBackend struct {
 	Bin           string // kubectl 路径（空 = PATH）
 	Namespace     string // 缺省 = kubeconfig 当前 namespace
 	Context       string // kubectl --context（空 = 当前 context）
+	Kubeconfig    string // kubeconfig 文件路径（REQ-191：--kubeconfig 透传；空 = 默认 ~/.kube/config，认证跟随 kubeconfig）
 	PlatformURL   string // Pod 内回访主平台地址（集群内为 service DNS 或节点地址）
 	TokenIssue    func(agentID string) (string, error)
 	HealthzWait   time.Duration // 启动后等待 healthz 就绪上限（默认 90s，含拉镜像）
 	EndpointMode  string        // port-forward（默认）| pod-ip
+	Scope         string        // 实例作用域 agent|run（REQ-191：运行环境 DB 配置覆盖 env；空=跟随 env）
 	ContainerPort int           // agentd 容器端口（缺省 8080；测试桩可注入）
 
 	mu       sync.Mutex
@@ -43,6 +45,9 @@ type K8sBackend struct {
 }
 
 func (k *K8sBackend) Name() string { return "k8s" }
+
+// ScopeMode 显式作用域（runtime.Scoper；REQ-191）。
+func (k *K8sBackend) ScopeMode() string { return k.Scope }
 
 // Available 探测集群 API 可达（REQ-190 auto 候选探测；kubectl get --raw=/readyz，
 // 超时由调用方 ctx 控制——5s 硬上限防无集群环境 kubectl 长挂）。
@@ -58,7 +63,7 @@ func (k *K8sBackend) podName(agentID string) string { return "agt-" + agentID }
 // instanceName 实例名（10c 作用域，与 DockerBackend 同规则）：run 域且携带 RunID →
 // agt-{agentID}-r-{run8}；否则 agent 域常驻 Pod。
 func (k *K8sBackend) instanceName(spec StartSpec) string {
-	if Scope() == "run" && spec.RunID != "" {
+	if ScopeEffective(k) == "run" && spec.RunID != "" {
 		run := spec.RunID
 		if len(run) > 8 {
 			run = run[:8]
@@ -83,6 +88,9 @@ func (k *K8sBackend) kubectl(ctx context.Context, args ...string) (string, error
 		} else {
 			bin = "kubectl"
 		}
+	}
+	if k.Kubeconfig != "" {
+		args = append([]string{"--kubeconfig", k.Kubeconfig}, args...)
 	}
 	if k.Context != "" {
 		args = append([]string{"--context", k.Context}, args...)
@@ -147,7 +155,7 @@ func (k *K8sBackend) podManifest(spec StartSpec, token string) map[string]any {
 func (k *K8sBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error) {
 	agentID := spec.AgentID
 	inst := k.instanceName(spec)
-	runScoped := Scope() == "run" && spec.RunID != ""
+	runScoped := ScopeEffective(k) == "run" && spec.RunID != ""
 	if !runScoped {
 		// 对账复用（与 DockerBackend 同语义）；CrashLoop 等"phase=Running 但容器已死"
 		// 的假健康由 Status 判 error 拦截，不在复用路径再做健康探测。
@@ -219,6 +227,9 @@ func (k *K8sBackend) applyStdin(ctx context.Context, manifest []byte) error {
 		}
 	}
 	args := []string{"apply", "-f", "-"}
+	if k.Kubeconfig != "" {
+		args = append([]string{"--kubeconfig", k.Kubeconfig}, args...)
+	}
 	if k.Context != "" {
 		args = append([]string{"--context", k.Context}, args...)
 	}
@@ -273,6 +284,9 @@ func (k *K8sBackend) portForwardEndpoint(ctx context.Context, inst string) (Endp
 		}
 	}
 	args := []string{"port-forward", "pod/" + inst, fmt.Sprintf("%s:%d", port, k.containerPort())}
+	if k.Kubeconfig != "" {
+		args = append([]string{"--kubeconfig", k.Kubeconfig}, args...)
+	}
 	if k.Context != "" {
 		args = append([]string{"--context", k.Context}, args...)
 	}

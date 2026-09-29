@@ -420,6 +420,10 @@ export const api = {
   // REQ-179/M-O16：全局运行配置（执行方式；系统级）
   runtimeConfig: () => req<{ execution_method: 'docker' | 'native' | 'k8s'; docker_available: boolean; options: { value: string; label: string }[] }>('/api/runtime-config'),
   setRuntimeConfig: (execution_method: string) => req<{ execution_method: string }>('/api/runtime-config', { method: 'PUT', body: JSON.stringify({ execution_method }) }),
+  // REQ-191/M31：运行环境统一配置（沙箱运行方式 + K8s 访问认证；DB 覆盖 env）
+  runtimeEnv: () => req<RuntimeEnvPayload>('/api/runtime-env'),
+  setRuntimeEnv: (p: Partial<RuntimeEnvPayload['settings']>) => req<RuntimeEnvPayload>('/api/runtime-env', { method: 'PUT', body: JSON.stringify(p) }),
+  testRuntimeEnv: (target: 'docker' | 'k8s') => req<{ target: string; ok: boolean; detail: string }>('/api/runtime-env/test', { method: 'POST', body: JSON.stringify({ target }) }),
   // ---- REQ-148 供应商分组：多实例与别名（分组标识与 BaseURL 解耦） ----
   listProviderGroups: () => req<ProviderGroupMeta[]>('/api/provider-groups'),
   createProviderGroup: (alias: string) =>
@@ -643,6 +647,28 @@ export interface SandboxStatus {
   detail?: string
   memory?: string
   cpus?: number
+}
+
+/** REQ-191/M31 运行环境配置（settings=DB 原值空=跟随启动环境；effective=DB 覆盖 env 后生效值） */
+export interface RuntimeEnvSettings {
+  sandbox_mode: '' | 'inprocess' | 'docker' | 'k8s' | 'auto'
+  sandbox_image: string
+  sandbox_scope: '' | 'agent' | 'run'
+  docker_bin: string
+  kubectl_bin: string
+  k8s_kubeconfig: string
+  k8s_context: string
+  k8s_namespace: string
+  k8s_endpoint_mode: '' | 'port-forward' | 'pod-ip'
+  platform_url_in_cluster: string
+  platform_url_external: string
+  updated_at?: string
+}
+export interface RuntimeEnvPayload {
+  settings: RuntimeEnvSettings
+  effective: RuntimeEnvSettings
+  defaults: RuntimeEnvSettings
+  sandbox_enabled: boolean
 }
 
 /** REQ-148 供应商分组元数据（分组 ID + 展示别名；成员连接经 provider_group_id 归属） */

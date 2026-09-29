@@ -38,6 +38,7 @@ type Server struct {
 	ResearchRoot  string             // REQ-150：research/ 立项依据层根目录（只读查看，2026-09-25 扩展）
 	KnowledgeRoot string             // REQ-161：platform-knowledge/ 平台知识根目录（只读查看，2026-09-25 扩展）
 	Companion     *companion.Service // REQ-170/M28：伴生本体旁路管线（Run/Resume 收尾触发，低侵入）
+	RuntimeEnv    *RuntimeEnv        // REQ-191/M31：运行环境统一配置（DB 覆盖 env，动态沙箱后端解析）
 	Mux           *http.ServeMux
 	mcpMu         sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
 	mcpHTTP       http.Handler // REQ-131/M18：Streamable HTTP handler（mcp_serve 变更后重建）
@@ -171,6 +172,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/agents/{id}/sandbox", s.sandboxStatus)
 	m.HandleFunc("POST /api/agents/{id}/sandbox/start", s.sandboxStart)
 	m.HandleFunc("POST /api/agents/{id}/sandbox/stop", s.sandboxStop)
+	// REQ-191/M31：运行环境统一配置（设置页「运行环境」分区；本体引擎执行方式仍走 /api/runtime-config 反代）
+	m.HandleFunc("GET /api/runtime-env", s.runtimeEnvGet)
+	m.HandleFunc("PUT /api/runtime-env", s.runtimeEnvPut)
+	m.HandleFunc("POST /api/runtime-env/test", s.runtimeEnvTest)
 	// REQ-148 供应商分组：同一供应商可多实例（分组标识与 BaseURL 解耦）+ 别名（展示层）
 	m.HandleFunc("GET /api/provider-groups", s.listProviderGroups)
 	m.HandleFunc("POST /api/provider-groups", s.createProviderGroup)

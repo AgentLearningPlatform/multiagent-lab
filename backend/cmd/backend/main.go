@@ -19,7 +19,6 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kg"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/ontology"
-	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/secrets"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/skill"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
@@ -79,51 +78,35 @@ func main() {
 	if err := chat.RegisterAssistantL1Tools(reg, chat.AssistantDeps{Store: st, KnowledgeRoot: getenv("KNOWLEDGE_ROOT", "../platform-knowledge")}, kbSvc); err != nil {
 		log.Printf("[backend] assistant L1 tools register: %v", err)
 	}
-	// M10 §6.3：沙箱执行后端（SANDBOX_IMAGE 配置即启用；SANDBOX_BACKEND=docker|k8s，默认 docker）
-	if img := getenv("SANDBOX_IMAGE", ""); img != "" {
-		platformURL := getenv("PLATFORM_URL_EXTERNAL", "http://host.docker.internal"+addr)
-		switch getenv("SANDBOX_BACKEND", "docker") {
-		case "k8s":
-			// M10 10d：K8s Pod 后端（kubectl CLI，零新依赖；端点模式 SANDBOX_K8S_ENDPOINT_MODE=port-forward|pod-ip；
-			// Pod 内回访主平台经 PLATFORM_URL_IN_CLUSTER，缺省回退 PLATFORM_URL_EXTERNAL）
-			svc.Runtime = &runtime.K8sBackend{
-				Image:       img,
-				Bin:         getenv("KUBECTL_BIN", ""),
-				Namespace:   getenv("SANDBOX_K8S_NAMESPACE", ""),
-				Context:     getenv("SANDBOX_K8S_CONTEXT", ""),
-				PlatformURL: getenv("PLATFORM_URL_IN_CLUSTER", platformURL),
-				TokenIssue:  srv.IssueManifestToken,
-			}
-			log.Printf("[backend] k8s sandbox backend enabled: image=%s namespace=%q endpoint_mode=%s", img, getenv("SANDBOX_K8S_NAMESPACE", ""), getenv("SANDBOX_K8S_ENDPOINT_MODE", "port-forward"))
-		case "auto":
-			// REQ-190：自动检测——k8s pod 优先 → docker 次之 → 均不可用进程内兜底
-			//（chat 分发前 Available 预检；探测粘滞缓存，环境变化自动换档）
-			svc.Runtime = &runtime.AutoBackend{Candidates: []runtime.Backend{
-				&runtime.K8sBackend{
-					Image:       img,
-					Bin:         getenv("KUBECTL_BIN", ""),
-					Namespace:   getenv("SANDBOX_K8S_NAMESPACE", ""),
-					Context:     getenv("SANDBOX_K8S_CONTEXT", ""),
-					PlatformURL: getenv("PLATFORM_URL_IN_CLUSTER", platformURL),
-					TokenIssue:  srv.IssueManifestToken,
-				},
-				&runtime.DockerBackend{
-					Image:       img,
-					Bin:         getenv("DOCKER_BIN", ""),
-					PlatformURL: platformURL,
-					TokenIssue:  srv.IssueManifestToken,
-				},
-			}}
-			log.Printf("[backend] auto sandbox backend enabled: image=%s (k8s → docker → inprocess)", img)
-		default:
-			svc.Runtime = &runtime.DockerBackend{
-				Image:       img,
-				Bin:         getenv("DOCKER_BIN", ""),
-				PlatformURL: platformURL,
-				TokenIssue:  srv.IssueManifestToken,
-			}
-			log.Printf("[backend] docker sandbox backend enabled: image=%s platform_url=%s", img, platformURL)
-		}
+	// M10 §6.3 + REQ-191/M31：沙箱执行后端动态装配——运行方式（进程内嵌/docker/k8s/auto）与
+	// K8s 访问认证集中为「运行环境」配置（DB runtime_settings 覆盖启动期 env，env 为初始值
+	// 兜底）；设置页修改后新 Run 生效（resolver 按配置重建后端，auto 探测缓存随之重置），
+	// 运行中实例不受影响。inprocess/未配置镜像 = 未启用沙箱（与原 SANDBOX_IMAGE 空语义一致）。
+	// 注：Defaults.SandboxMode 存 env SANDBOX_BACKEND 原值（docker|k8s|auto），空时由
+	// api.RuntimeEnv.Build 按「SANDBOX_IMAGE 非空即启用，缺省 docker」语义判定——存量零回归。
+	platformURL := getenv("PLATFORM_URL_EXTERNAL", "http://host.docker.internal"+addr)
+	srv.RuntimeEnv = &api.RuntimeEnv{
+		Store:      st,
+		TokenIssue: srv.IssueManifestToken,
+		Defaults: store.RuntimeSettings{
+			SandboxMode:          getenv("SANDBOX_BACKEND", ""),
+			SandboxImage:         getenv("SANDBOX_IMAGE", ""),
+			SandboxScope:         getenv("SANDBOX_SCOPE", ""),
+			DockerBin:            getenv("DOCKER_BIN", ""),
+			KubectlBin:           getenv("KUBECTL_BIN", ""),
+			K8sKubeconfig:        getenv("SANDBOX_K8S_KUBECONFIG", ""),
+			K8sContext:           getenv("SANDBOX_K8S_CONTEXT", ""),
+			K8sNamespace:         getenv("SANDBOX_K8S_NAMESPACE", ""),
+			K8sEndpointMode:      getenv("SANDBOX_K8S_ENDPOINT_MODE", ""),
+			PlatformURLInCluster: getenv("PLATFORM_URL_IN_CLUSTER", ""),
+			PlatformURLExternal:  platformURL,
+		},
+	}
+	svc.Runtime = &api.DynamicRuntime{Env: srv.RuntimeEnv}
+	if img := srv.RuntimeEnv.Defaults.SandboxImage; img != "" {
+		log.Printf("[backend] runtime env resolver enabled: env_mode=%s image=%s（运行方式可在设置页「运行环境」分区动态切换）", getenv("SANDBOX_BACKEND", "(按镜像自动判定)"), img)
+	} else {
+		log.Printf("[backend] runtime env resolver enabled: sandbox not configured（可在设置页「运行环境」分区启用）")
 	}
 
 	httpSrv := &http.Server{

@@ -27,9 +27,13 @@ type DockerBackend struct {
 	PlatformURL string                               // 容器内访问主平台的地址（如 http://host.docker.internal:8080）
 	TokenIssue  func(agentID string) (string, error) // 一次性 manifest token 签发回调
 	HealthzWait time.Duration                        // 启动后等待 healthz 就绪的上限（默认 60s）
+	Scope       string                               // 实例作用域 agent|run（REQ-191：运行环境 DB 配置覆盖 env；空=跟随 env）
 }
 
 func (d *DockerBackend) Name() string { return "docker" }
+
+// ScopeMode 显式作用域（runtime.Scoper；REQ-191）。
+func (d *DockerBackend) ScopeMode() string { return d.Scope }
 
 // Available 探测 docker 守护进程可达（REQ-190 auto 候选探测；超时由调用方 ctx 控制）。
 func (d *DockerBackend) Available(ctx context.Context) bool {
@@ -42,7 +46,7 @@ func (d *DockerBackend) containerName(agentID string) string { return "agt-" + a
 // instanceName 实例名（10c 作用域）：run 域且携带 RunID → agt-{agentID}-r-{run8}（每次 Run
 // 独立容器，用后即清）；否则 agent 域常驻实例 agt-{agentID}（跨 Run 复用）。
 func (d *DockerBackend) instanceName(spec StartSpec) string {
-	if Scope() == "run" && spec.RunID != "" {
+	if ScopeEffective(d) == "run" && spec.RunID != "" {
 		run := spec.RunID
 		if len(run) > 8 {
 			run = run[:8]
@@ -101,7 +105,7 @@ func (d *DockerBackend) docker(ctx context.Context, args ...string) (string, err
 func (d *DockerBackend) Start(ctx context.Context, spec StartSpec) (Endpoint, error) {
 	agentID := spec.AgentID
 	name := d.instanceName(spec)
-	runScoped := Scope() == "run" && spec.RunID != ""
+	runScoped := ScopeEffective(d) == "run" && spec.RunID != ""
 	// 对账：agent 域容器已在跑则复用；run 域不复用（每次全新实例）
 	if !runScoped {
 		if st, _ := d.Status(ctx, agentID); st.State == "running" {

@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 )
 
@@ -64,4 +65,27 @@ func Scope() string {
 	default:
 		return "agent"
 	}
+}
+
+// ErrSandboxDisabled 运行环境配置为进程内嵌（无沙箱）时 Start/Stop 被调用（REQ-191）。
+// chat 分发侧经 Name()=="inprocess" 预判不会走到；防御性导出供 DynamicRuntime 使用。
+var ErrSandboxDisabled = errors.New("sandbox disabled: runtime mode is inprocess")
+
+// Scoper 显式作用域（REQ-191：运行环境 DB 配置覆盖 env SANDBOX_SCOPE）——
+// 实现者返回自身 Scope 字段值（空=未配置）。
+type Scoper interface {
+	ScopeMode() string
+}
+
+// ScopeEffective 后端生效作用域：实现 Scoper 且字段非空用配置值，否则回落 env（存量零回归）。
+func ScopeEffective(b Backend) string {
+	if sc, ok := b.(Scoper); ok {
+		switch strings.ToLower(sc.ScopeMode()) {
+		case "agent":
+			return "agent"
+		case "run":
+			return "run"
+		}
+	}
+	return Scope()
 }

@@ -132,13 +132,14 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 
 	// REQ-19e/19f 对比模式由 API 层按 RunInput.Panes 分发到 RunCompare（SSE 契约与单路一致）
 
-	// M10 §6.3：执行后端分发——沙箱（docker/k8s Pod，形态由平台 SANDBOX_BACKEND 统一决定）→
+	// M10 §6.3：执行后端分发——沙箱（docker/k8s Pod，形态由平台「运行环境」配置统一决定，REQ-191）→
 	// Start + /run SSE 透传；inprocess → 进程内装配执行。agent.RuntimeBackend 是沙箱意图
 	// （docker|k8s|auto 均视为走沙箱），实际执行形态以平台装配的 Runtime 后端为准（REQ-190：
 	// auto=自动检测——分发前 Available 预检，k8s/docker 均不可达时诚实回退进程内；显式
-	// 配置与实际形态不匹配发 run.warning，auto 免告警）。
+	// 配置与实际形态不匹配发 run.warning，auto 免告警；REQ-191：动态后端 inprocess 形态
+	// 即「未启用沙箱」，与静态未装配同语义回退）。
 	if conv.Scope == "agent" && agent != nil && agent.RuntimeBackend != "" && agent.RuntimeBackend != "inprocess" {
-		if s.Runtime != nil {
+		if s.Runtime != nil && s.Runtime.Name() != "inprocess" {
 			if p, ok := s.Runtime.(runtime.Prober); ok && !p.Available(ctx) {
 				emit(newEvent("run.warning", runID, map[string]any{"message": "自动检测：k8s/docker 沙箱均不可用，本次以进程内执行"}))
 			} else {
@@ -150,7 +151,7 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 				return s.runDocker(ctx, conv, agent, runID, input, debug, debugPersist, emit)
 			}
 		} else {
-			emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了沙箱执行后端但平台未启用（SANDBOX_IMAGE 未配置），已回退 inprocess"}))
+			emit(newEvent("run.warning", runID, map[string]any{"message": "agent 配置了沙箱执行后端但平台运行环境为进程内嵌（设置页「运行环境」可配置），已回退 inprocess"}))
 		}
 	}
 
@@ -1042,8 +1043,9 @@ func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent
 		histVals[i] = *m
 	}
 
-	// 2) 确保沙箱实例就绪（10c：SANDBOX_SCOPE=run 时每次 Run 独立容器，收尾即清）
-	runScoped := runtime.Scope() == "run"
+	// 2) 确保沙箱实例就绪（10c：作用域 run 时每次 Run 独立容器，收尾即清；REQ-191：
+	// 作用域可由运行环境 DB 配置覆盖 env——后端实现 Scoper 时用其配置值）
+	runScoped := runtime.ScopeEffective(s.Runtime) == "run"
 	spec := runtime.StartSpec{AgentID: agent.ID, Memory: agent.SandboxMemory, CPUs: agent.SandboxCPUs}
 	if runScoped {
 		spec.RunID = runID
