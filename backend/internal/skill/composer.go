@@ -30,20 +30,41 @@ func (c *Composer) LoadedSkills(a *store.Agent) []*store.Skill {
 	return out
 }
 
-// ComposeInstruction 把启用技能的指令段注入系统提示词（§6.12 合并格式）。
+// ComposeInstruction 技能渐进披露注入（REQ-203/M38 B6）：系统提示词只注入「目录」——
+// 技能名与一句话描述，正文不常驻（多技能全量注入会撑爆系统提示词，且上下文预算档位下
+// 属昂贵常驻）；正文经装配期注册的 load_skill 工具按需加载。
+// 变更注：原形态为 <skill> 正文全量拼接（§6.12 v0.6 口径），REQ-203 拍板改为目录+懒加载。
 func (c *Composer) ComposeInstruction(a *store.Agent) string {
 	if a == nil {
 		return ""
 	}
 	base := a.Instruction
-	var extra []string
-	for _, sk := range c.LoadedSkills(a) {
-		extra = append(extra, fmt.Sprintf("<skill name=%q>%s</skill>", sk.Name, sk.Instruction))
-	}
-	if len(extra) == 0 {
+	skills := c.LoadedSkills(a)
+	if len(skills) == 0 {
 		return base
 	}
-	return base + "\n\n# 启用技能\n" + strings.Join(extra, "\n\n")
+	var b strings.Builder
+	b.WriteString(base)
+	b.WriteString("\n\n# 启用技能（正文按需加载）\n")
+	b.WriteString("以下技能已挂载；正文不常驻本提示词——需要执行该技能时，调用 load_skill 工具（参数 name=技能名）获取完整指令后再照做：\n")
+	for _, sk := range skills {
+		desc := strings.TrimSpace(sk.Description)
+		if desc == "" { // 无描述回退：正文首行截断，保目录可用性
+			desc = firstLine(sk.Instruction, 60)
+		}
+		b.WriteString(fmt.Sprintf("- 「%s」：%s\n", sk.Name, desc))
+	}
+	return b.String()
+}
+
+// firstLine 取文本首行并截断（目录回退描述用）。
+func firstLine(s string, n int) string {
+	s = strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // SkillTools 计算 skills[].tools 白名单并集（去重，保持出现顺序）。

@@ -63,6 +63,24 @@ type assembleScope struct {
 	ToolApprovalOverride string // REQ-135②：对话级工具审批覆盖（''=跟随 Agent 级 | on | off）
 }
 
+// resolveWorkRoot REQ-202 ①：文件原语工具的安全根解析——项目会话沿用项目文件根
+//（ProjectDirRoot：绑定 local_dir 优先，回退 FilesRoot/{projectID}）；非项目会话用
+// agent.work_dir（~ 展开 + IsAbsDir 校验，非法值告警返回空——不放松安全边界）。
+func (a *Assembler) resolveWorkRoot(sc assembleScope, ag *store.Agent) string {
+	if sc.ProjectID != "" && a.FilesRoot != "" {
+		if root, err := tool.ProjectDirRoot(tool.ProjectDirDeps{Store: a.Store, ProjectID: sc.ProjectID, FilesRoot: a.FilesRoot}); err == nil {
+			return root
+		}
+	}
+	if ag != nil {
+		d := fsutil.NormalizeDir(ag.WorkDir)
+		if d != "" && fsutil.IsAbsDir(d) {
+			return d
+		}
+	}
+	return ""
+}
+
 func (a *Assembler) Assemble(ctx context.Context, agent *store.Agent, conv *store.Conversation) (*BuildResult, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent is nil")
@@ -428,9 +446,14 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 指向本平台 /mcp 端点（自引用），已拒绝装配", ms.Name, ms.URL))
 			continue
 		}
-		bts, ferr := tool.FetchMCPTools(ctx, ms.Name, ms.URL, mcpFetchTimeout)
+		var bts []einotool.BaseTool
+		ferr := DoWithRetry(ctx, 2, func() error { // REQ-202 ④：幂等重试白名单（deadline/reset/5xx，N=2）
+			var e error
+			bts, e = tool.FetchMCPTools(ctx, ms.Name, ms.URL, mcpFetchTimeout)
+			return e
+		})
 		if ferr != nil {
-			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 连接失败，本次运行不加载其工具: %v", ms.Name, ms.URL, ferr))
+			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 连接失败（含幂等重试），本次运行不加载其工具: %v", ms.Name, ms.URL, ferr))
 			continue
 		}
 		if len(bts) == 0 {
@@ -496,6 +519,71 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 		} else if _, dup := tb.SourceOf["read_file"]; !dup {
 			tb.Tools = append(tb.Tools, bt)
 			tb.SourceOf["read_file"] = "builtin"
+		}
+	}
+
+	// 5.5) 通用原语（REQ-202/M38 Harness 执行面）：http_fetch / todo_write 常备装配；
+	// 文件原语（grep/glob/read_file/write_file）按「安全根」装配——项目会话沿用项目文件根
+	//（上方 5 步已装 read_file 等，SourceOf 去重不重复注册）；非项目会话用 agent.work_dir
+	//（fsutil 归一+IsAbsDir 校验），未配置则不装配（无根即无文件能力，安全边界不放松）。
+	// 来源标注 builtin；run_command 按 REQ-202 口径默认关（沙箱执行世界+绑定目录+审批三前置
+	// 中「沙箱内执行」未建，本期不装配，cmdGuard 规则表已在 hooks.go 先行）。
+	if _, dup := tb.SourceOf["http_fetch"]; !dup {
+		if bt, ferr := tool.NewHTTPFetchTool(); ferr == nil {
+			tb.Tools = append(tb.Tools, bt)
+			tb.SourceOf["http_fetch"] = "builtin"
+		}
+	}
+	if a.Store != nil && sc.ConversationID != "" {
+		if bt, terr := tool.NewTodoWriteTool(tool.TodoDeps{Store: a.Store, ConversationID: sc.ConversationID}); terr == nil {
+			tb.Tools = append(tb.Tools, bt)
+			tb.SourceOf["todo_write"] = "builtin"
+		} else {
+			tb.Warnings = append(tb.Warnings, "todo_write 工具实例化失败: "+terr.Error())
+		}
+	}
+	if a.Composer != nil {
+		if loaded := a.Composer.LoadedSkills(ag); len(loaded) > 0 {
+			if bt, lerr := skill.NewLoadSkillTool(loaded); lerr == nil {
+				if _, dup := tb.SourceOf["load_skill"]; !dup {
+					tb.Tools = append(tb.Tools, bt)
+					tb.SourceOf["load_skill"] = "builtin" // REQ-203：技能正文懒加载面
+				}
+			} else {
+				tb.Warnings = append(tb.Warnings, "load_skill 工具实例化失败: "+lerr.Error())
+			}
+		}
+	}
+	if d := a.resolveWorkRoot(sc, ag); d != "" {
+		deps := tool.DirToolDeps{Root: d}
+		for _, mk := range []struct {
+			name string
+			new  func(tool.DirToolDeps) (einotool.BaseTool, error)
+		}{
+			{"grep", tool.NewGrepTool},
+			{"glob", tool.NewGlobTool},
+			{"write_file", tool.NewWriteFileTool},
+			{"read_file", tool.NewDirReadFileTool},
+		} {
+			if _, dup := tb.SourceOf[mk.name]; dup {
+				continue
+			}
+			bt, terr := mk.new(deps)
+			if terr != nil {
+				tb.Warnings = append(tb.Warnings, mk.name+" 工具实例化失败: "+terr.Error())
+				continue
+			}
+			tb.Tools = append(tb.Tools, bt)
+			tb.SourceOf[mk.name] = "builtin"
+		}
+	}
+
+	// 5.6) 工具 hooks 包装（REQ-202 ②：pre 守卫/post 观测，审批之外的确定性检查层；
+	// 包装在内层——审批在外层先生效，批准后才进 hook 守卫）
+	hooks := tool.DefaultHookChain()
+	if !hooks.Empty() {
+		for i, bt := range tb.Tools {
+			tb.Tools[i] = hooks.Wrap(bt)
 		}
 	}
 
