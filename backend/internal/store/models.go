@@ -33,6 +33,10 @@ type Agent struct {
 	CompanionAutoThreshold float64 `json:"companion_auto_threshold"`
 	// REQ-201/M37：上下文预算档位（'' = 标准档；compact 紧凑 / standard 标准 / full 完整不限量=存量行为）
 	ContextMode string `json:"context_mode"`
+	// REQ-202/M38：工作目录（读写/grep/glob 的安全根，fsutil.SafeJoin 约束；空=仅项目会话文件工具）
+	WorkDir string `json:"work_dir"`
+	// REQ-202/M38：结束前验证命令（verify_on_stop 背压；空=不验证；失败不标记 completed）
+	VerifyCommand string `json:"verify_command"`
 	CreatedAt              string  `json:"created_at"`
 	UpdatedAt              string  `json:"updated_at"`
 }
@@ -97,6 +101,8 @@ type Conversation struct {
 	ToolApproval *string `json:"tool_approval,omitempty"`
 	// ContextState 上下文压缩状态（REQ-201/M37：JSON 摘要+覆盖消息 ID；空=未压缩）
 	ContextState string `json:"context_state,omitempty"`
+	// TodoJSON todo_write 任务清单（REQ-202/M38：模型自写进度，机器可读侧；空=未写）
+	TodoJSON string `json:"todo_json,omitempty"`
 	TopK         int     `json:"top_k"`
 	MinScore     float64 `json:"min_score"`
 	CreatedAt    string  `json:"created_at"`

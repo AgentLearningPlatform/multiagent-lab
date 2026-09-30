@@ -32,6 +32,10 @@ export interface Agent {
   companion_auto_threshold?: number
   /** REQ-201/M37：上下文预算档位（'' = 标准档；compact 紧凑 / standard 标准 / full 完整不限量） */
   context_mode?: string
+  /** REQ-202/M38：工作目录（文件原语安全根，SafeJoin 约束；空=仅项目会话文件工具） */
+  work_dir?: string
+  /** REQ-202/M38：verify_on_stop 验证命令（空=不验证；失败标记 verify_failed） */
+  verify_command?: string
   created_at: string
   updated_at: string
 }

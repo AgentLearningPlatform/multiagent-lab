@@ -113,6 +113,7 @@ type readFileIn struct {
 }
 
 type readFileOut struct {
+	Error   string `json:"error,omitempty"` // REQ-202：业务错误回执（work_dir 泛化形态用；文本回喂不炸 run）
 	Path    string `json:"path"`
 	Size    int64  `json:"size"`
 	Content string `json:"content"`

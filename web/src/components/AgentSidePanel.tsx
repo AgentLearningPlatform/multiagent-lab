@@ -237,6 +237,8 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
         inference_backend: agent.inference_backend ?? 'eino-adk',
         logo_url: (agent.logo_url ?? '').trim(),
         context_mode: agent.context_mode ?? '', // REQ-201：full-replace 透传防清零（伴生表单不含此字段）
+        work_dir: agent.work_dir ?? '', // REQ-202：透传防清零
+        verify_command: agent.verify_command ?? '', // REQ-202：透传防清零
         tools: agent.tools ?? [],
         skills: agent.skills ?? [],
         mcp_servers: agent.mcp_servers ?? [],
@@ -411,6 +413,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         sandbox_cpus: v.sandbox_cpus ?? 0, // M10/10b：沙箱资源限制
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
         context_mode: v.context_mode ?? '', // REQ-201/M37：上下文预算档位
+        work_dir: (v.work_dir ?? '').trim(), // REQ-202/M38：文件原语安全根
+        verify_command: (v.verify_command ?? '').trim(), // REQ-202/M38：verify_on_stop 背压
         logo_url: (v.logo_url ?? '').trim(), // REQ-137
         tools: v.tools ?? [],
         // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
@@ -641,6 +645,22 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                         </div>
                       )}
                     />
+                  </Form.Item>
+
+                  {sec('Harness 执行面（REQ-202）')}
+                  <Form.Item
+                    name="work_dir"
+                    label="工作目录"
+                    tooltip="文件原语工具（grep/glob/read_file/write_file）的安全根：绝对路径，越界由 SafeJoin 强制拒绝；空=仅项目会话具备文件能力。"
+                  >
+                    <Input allowClear placeholder="如 /home/user/project（绝对路径，空=不装配文件原语）" />
+                  </Form.Item>
+                  <Form.Item
+                    name="verify_command"
+                    label="验证命令（verify_on_stop）"
+                    tooltip="运行标记完成前在安全根执行（sh -c，10s 超时）：退出码非 0 即背压——本次运行标记为 verify_failed 并在过程时间线透出输出。示例：go build ./...。"
+                  >
+                    <Input allowClear placeholder="如 go build ./...（空=不验证）" />
                   </Form.Item>
 
                   {sec('MCP Servers')}
