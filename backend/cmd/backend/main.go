@@ -157,7 +157,7 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:              addr,
-		Handler:           withStatic(cors(srv.Mux)),
+		Handler:           withStatic(cors(accessAuth(srv.Mux))), // accessAuth：REQ-209 远程访问凭证（PLATFORM_TOKEN 未设置时零开销透传）
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
