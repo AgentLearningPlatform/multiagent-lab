@@ -83,6 +83,36 @@ func (s *Store) EnsureBuiltinAssistantInstruction(defaultPrompt string) error {
 	return err
 }
 
+// assistantRequiredTools REQ-213 内置工具面基座：L0 五只读 + L1 平台知识/提案三件
+// ——「授权更多」的不可摘除部分（迁移 023 只 seed 了 L0，L1 三件 REQ-186 阶段一/三补注册时漏并入行）。
+var assistantRequiredTools = []string{"doc_read", "list_model_connections", "list_agents", "list_kbs",
+	"get_assistant_config", "sync_platform_kb", "search_platform_kb", "propose_assistant_config"}
+
+// EnsureAssistantTools REQ-213 启动引导（幂等）：内置行 tools 并入基座八工具——迁移 030 修正
+// 存量 seed 形态；对 tools 被后续操作改动的库（缺基座成员）这里并集自愈；已齐则零写入。
+func (s *Store) EnsureAssistantTools() error {
+	a, err := s.GetAgent("builtin-assistant")
+	if err != nil || a == nil {
+		return err
+	}
+	has := map[string]bool{}
+	for _, t := range a.Tools {
+		has[t] = true
+	}
+	missing := []string{}
+	for _, t := range assistantRequiredTools {
+		if !has[t] {
+			missing = append(missing, t)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	a.Tools = append(a.Tools, missing...)
+	_, err = s.UpdateAgent(a)
+	return err
+}
+
 // EnsureAssistantContentConv REQ-192⑤ 调用留痕：确保「内容优化」会话存在（builtin-assistant
 // 名下，AI 内容优化统一落此会话，来源标注在消息 meta），返回会话 ID。
 func (s *Store) EnsureAssistantContentConv() (string, error) {

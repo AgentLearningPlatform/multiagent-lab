@@ -16,6 +16,7 @@ import {
 import { api, connDisplayName } from '../api/client'
 import AIOptimizeButton from './AIOptimizeButton'
 import AgentCompanionManage from './AgentCompanionManage'
+import AssistantProposalBanner from './AssistantProposalBanner'
 import type { SandboxStatus } from '../api/client'
 import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, Skill, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
@@ -85,6 +86,10 @@ function McpServerRow({ name, remove }: { name: number; remove: (i: number) => v
  */
 const PANEL_VIEW_KEY = 'eino.agentpanel.view'
 
+// REQ-213：内置助手基座工具（L0 五只读 + L1 平台知识/提案三件）——内置行不可摘除（禁用勾选态）。
+const ASSISTANT_BASE_TOOLS = ['doc_read', 'list_model_connections', 'list_agents', 'list_kbs',
+  'get_assistant_config', 'sync_platform_kb', 'search_platform_kb', 'propose_assistant_config']
+
 export default function AgentSidePanel({
   agent,
   open,
@@ -96,9 +101,10 @@ export default function AgentSidePanel({
   onClose: () => void
   onChanged?: () => void
 }) {
-  // REQ-193：侧板一级视图（配置 | 伴生本体）——与「智能体配置」同级双入口，刷新记忆
+  // REQ-193：侧板一级视图（配置 | 伴生本体）——与「智能体配置」同级双入口，刷新记忆；
+  // REQ-213：内置行无伴生视图，记忆值忽略恒回配置
   const [view, setView] = useState<'config' | 'companion'>(() =>
-    localStorage.getItem(PANEL_VIEW_KEY) === 'companion' ? 'companion' : 'config',
+    localStorage.getItem(PANEL_VIEW_KEY) === 'companion' && !agent.is_builtin ? 'companion' : 'config',
   )
   const switchView = (v: 'config' | 'companion') => {
     setView(v)
@@ -158,6 +164,8 @@ export default function AgentSidePanel({
             aria-label="伴生本体"
             aria-selected={view === 'companion'}
             role="tab"
+            // REQ-213：内置助手（平台辅助角色）无伴生诉求，伴生视图入口隐藏
+            hidden={!!agent.is_builtin}
             onClick={() => switchView('companion')}
           >
             <ClusterOutlined />
@@ -345,6 +353,9 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
 function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
   const { showToast, bumpData } = useUI()
   const [form] = Form.useForm()
+  // REQ-213：内置行（平台助手）适配——白名单 8 字段可编辑（instruction/模型/温度/tools/skills/
+  // mcp/max_tokens/max_iteration），身份与角色字段禁用；基座工具不可摘除；提案横幅置顶。
+  const isBuiltin = !!agent.is_builtin
   const instructionValue = Form.useWatch('instruction', form) ?? ''
   const [allConns, setAllConns] = useState<ModelConnection[]>([])
   const [tools, setTools] = useState<ToolInfo[]>([])
@@ -400,6 +411,23 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
     try {
       const v = await form.validateFields()
       setSaving(true)
+      if (isBuiltin) {
+        // REQ-213：内置行走白名单 8 字段（后端合并保护身份/角色字段；tools 基座并集兜底）
+        await api.updateAgent(agent.id, {
+          instruction: v.instruction ?? '',
+          model_conn_id: v.model_conn_id || null,
+          temperature: v.temperature ?? null,
+          max_tokens: v.max_tokens ?? null,
+          max_iteration: v.max_iteration ?? 15,
+          tools: v.tools ?? [],
+          skills: v.skills ?? [],
+          mcp_servers: (v.mcp_servers ?? []).filter((s: { name?: string; url?: string }) => s?.name && s?.url),
+        })
+        showToast('平台助手配置已保存，下次对话生效')
+        bumpData()
+        onChanged?.()
+        return
+      }
       await api.updateAgent(agent.id, {
         name: v.name,
         description: v.description ?? '',
@@ -467,6 +495,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
 
   return (
     <div className="proj-view-body">
+      {isBuiltin && <AssistantProposalBanner onChanged={onChanged} />}
       <Form form={form} layout="vertical" initialValues={agent} requiredMark={false} size="small">
         <Tabs
           defaultActiveKey="basic"
@@ -478,11 +507,11 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
               forceRender: true,
               children: (
                 <>
-                  <Form.Item name="name" label="名称" rules={[{ required: true, message: '名称必填' }]}>
-                    <Input placeholder="智能体名称" />
+                  <Form.Item name="name" label="名称" rules={isBuiltin ? [] : [{ required: true, message: '名称必填' }]} extra={isBuiltin ? '内置助手名称不可修改' : undefined}>
+                    <Input placeholder="智能体名称" disabled={isBuiltin} />
                   </Form.Item>
-                  <Form.Item name="description" label="描述（用于多智能体协作时互相理解）">
-                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} />
+                  <Form.Item name="description" label="描述（用于多智能体协作时互相理解）" extra={isBuiltin ? '内置助手描述不可修改' : undefined}>
+                    <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} disabled={isBuiltin} />
                   </Form.Item>
                   <Form.Item name="instruction" label={<Space size={6}>系统提示词（Instruction）<AIOptimizeButton kind="agent_instruction" value={instructionValue} onApply={(v) => form.setFieldValue('instruction', v)} /></Space>}>
                     <Input.TextArea autoSize={{ minRows: 6, maxRows: 14 }} placeholder="定义角色、能力边界、回答风格…" />
@@ -491,8 +520,9 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
                     <InputNumber min={1} max={100} style={{ width: '100%' }} />
                   </Form.Item>
-                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra="M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱；k8s=Pod 沙箱；auto=自动检测（REQ-190：k8s pod 优先→docker 次之→均不可用进程内兜底；平台需配置 SANDBOX_IMAGE）">
+                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra={isBuiltin ? '内置助手固定进程内执行' : 'M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱；k8s=Pod 沙箱；auto=自动检测（REQ-190：k8s pod 优先→docker 次之→均不可用进程内兜底；平台需配置 SANDBOX_IMAGE）'}>
                     <Select
+                      disabled={isBuiltin}
                       options={[
                         { value: 'inprocess', label: 'inprocess（进程内）' },
                         { value: 'docker', label: 'docker（沙箱容器）' },
@@ -519,9 +549,10 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item
                     name="inference_backend"
                     label="推理后端"
-                    extra="「在哪儿跑」由运行后端决定，「谁来推理」由此决定：eino-adk 为平台自研（完整能力）；外部 CLI 后端模型由其自身配置决定（Agent 模型连接不生效），技能/MCP 降级为提示注入，不支持多 Agent 编排"
+                    extra={isBuiltin ? '内置助手固定 eino-adk 自研后端' : '「在哪儿跑」由运行后端决定，「谁来推理」由此决定：eino-adk 为平台自研（完整能力）；外部 CLI 后端模型由其自身配置决定（Agent 模型连接不生效），技能/MCP 降级为提示注入，不支持多 Agent 编排'}
                   >
                     <Select
+                      disabled={isBuiltin}
                       options={inferenceBackendOptions(backends)}
                       showSearch
                       optionFilterProp="label"
@@ -531,9 +562,9 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item
                     name="logo_url"
                     label="自定义后端 Logo URL（REQ-137）"
-                    extra="推理后端为自定义/外部部署（非内置）时，会话列表与对话界面将展示此图标；未配置回退默认图标"
+                    extra={isBuiltin ? '内置助手不可自定义' : '推理后端为自定义/外部部署（非内置）时，会话列表与对话界面将展示此图标；未配置回退默认图标'}
                   >
-                    <Input placeholder="https://…/logo.png" allowClear />
+                    <Input placeholder="https://…/logo.png" allowClear disabled={isBuiltin} />
                   </Form.Item>
                 </>
               ),
@@ -577,10 +608,11 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item
                     name="context_mode"
                     label="上下文预算"
-                    tooltip="REQ-201：历史 token 预算档位——超限时先压缩（LLM 摘要持久化）再裁剪，压缩/裁剪均以运行警告诚实标注。「完整」不限量（存量行为）；「紧凑」约 6k tokens 适合长对话省成本；默认标准约 24k。"
+                    tooltip={isBuiltin ? '内置助手固定标准档' : 'REQ-201：历史 token 预算档位——超限时先压缩（LLM 摘要持久化）再裁剪，压缩/裁剪均以运行警告诚实标注。「完整」不限量（存量行为）；「紧凑」约 6k tokens 适合长对话省成本；默认标准约 24k。'}
                   >
                     <Select
                       allowClear
+                      disabled={isBuiltin}
                       placeholder="标准（约 24k tokens）"
                       options={[
                         { value: 'compact', label: '紧凑（约 6k tokens）' },
@@ -625,14 +657,21 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item
                     name="tools"
                     label="工具白名单"
-                    extra={toolsErr ? '工具注册表暂不可用，可稍后重试。' : '来自工具注册表（内置 / 本体 / MCP 动态工具），勾选后随运行装配。'}
+                    extra={toolsErr ? '工具注册表暂不可用，可稍后重试。' : isBuiltin ? '内置基座工具（L0/L1）不可摘除（禁用项）；可另行勾选通用工具，保存后生效。' : '来自工具注册表（内置 / 本体 / MCP 动态工具），勾选后随运行装配；「propose_assistant_config」为平台助手专属，不可勾选。'}
                   >
                     <Select
                       mode="multiple"
                       allowClear
                       virtual={false}
                       placeholder={toolsErr ? '工具注册表暂不可用' : '选择可用工具'}
-                      options={tools.map((t) => ({ value: t.id, label: t.name, title: t.description, source: t.source }))}
+                      options={tools.map((t) => ({
+                        value: t.id,
+                        label: t.name,
+                        title: t.description,
+                        source: t.source,
+                        // REQ-213：内置行基座八工具禁选（不可摘除）；普通行提案工具禁选（内置专属）
+                        disabled: isBuiltin ? ASSISTANT_BASE_TOOLS.includes(t.id) : t.id === 'propose_assistant_config',
+                      }))}
                       notFoundContent={toolsErr ? '工具注册表暂不可用' : '暂无工具'}
                       classNames={{ popup: { root: 'tool-select-popup' } }}
                       optionRender={(opt) => (
@@ -651,16 +690,16 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item
                     name="work_dir"
                     label="工作目录"
-                    tooltip="文件原语工具（grep/glob/read_file/write_file）的安全根：绝对路径，越界由 SafeJoin 强制拒绝；空=仅项目会话具备文件能力。"
+                    tooltip={isBuiltin ? '内置助手不开放文件原语安全根配置' : '文件原语工具（grep/glob/read_file/write_file）的安全根：绝对路径，越界由 SafeJoin 强制拒绝；空=仅项目会话具备文件能力。'}
                   >
-                    <Input allowClear placeholder="如 /home/user/project（绝对路径，空=不装配文件原语）" />
+                    <Input allowClear disabled={isBuiltin} placeholder="如 /home/user/project（绝对路径，空=不装配文件原语）" />
                   </Form.Item>
                   <Form.Item
                     name="verify_command"
                     label="验证命令（verify_on_stop）"
-                    tooltip="运行标记完成前在安全根执行（sh -c，10s 超时）：退出码非 0 即背压——本次运行标记为 verify_failed 并在过程时间线透出输出。示例：go build ./...。"
+                    tooltip={isBuiltin ? '内置助手不开放 verify_on_stop 配置' : '运行标记完成前在安全根执行（sh -c，10s 超时）：退出码非 0 即背压——本次运行标记为 verify_failed 并在过程时间线透出输出。示例：go build ./...。'}
                   >
-                    <Input allowClear placeholder="如 go build ./...（空=不验证）" />
+                    <Input allowClear disabled={isBuiltin} placeholder="如 go build ./...（空=不验证）" />
                   </Form.Item>
 
                   {sec('MCP Servers')}
@@ -716,14 +755,15 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                 </>
               ),
             },
-            {
-              // REQ-193：伴生本体页签摘除——上提为侧板一级视图（activity bar「伴生本体」按钮），
-              // 开关+REQ-187 三字段迁「伴生配置」页、候选管理迁「伴生管理」页（铺平）
+            // REQ-193：伴生本体页签摘除——上提为侧板一级视图（activity bar「伴生本体」按钮），
+            // 开关+REQ-187 三字段迁「伴生配置」页、候选管理迁「伴生管理」页（铺平）
+            // REQ-213：内置行不开放对外服务页（mcp_serve 锁死，无从编辑）
+            ...(isBuiltin ? [] : [{
               key: 'serve',
               label: '对外服务',
               forceRender: true,
               children: <McpServeTab agent={agent} />,
-            },
+            }]),
           ]}
         />
       </Form>
@@ -732,18 +772,20 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         <Button type="primary" size="small" loading={saving} onClick={save}>
           保存
         </Button>
-        <Popconfirm
-          title={`删除智能体「${agent.name}」？`}
-          description="其历史对话将保留。"
-          okText="删除"
-          okButtonProps={{ danger: true }}
-          cancelText="取消"
-          onConfirm={remove}
-        >
-          <Button danger size="small" loading={deleting}>
-            删除智能体
-          </Button>
-        </Popconfirm>
+        {!isBuiltin && (
+          <Popconfirm
+            title={`删除智能体「${agent.name}」？`}
+            description="其历史对话将保留。"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={remove}
+          >
+            <Button danger size="small" loading={deleting}>
+              删除智能体
+            </Button>
+          </Popconfirm>
+        )}
       </div>
     </div>
   )

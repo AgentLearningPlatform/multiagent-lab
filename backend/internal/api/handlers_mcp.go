@@ -45,6 +45,9 @@ func (s *Server) mcpHandler() http.Handler {
 	}
 	seen := map[string]bool{}
 	for _, a := range agents {
+		if a.IsBuiltin { // REQ-213⑥：内置行显式排除对外挂载（防御性——mcp_serve 白名单锁死之外的第二道闸）
+			continue
+		}
 		if !a.McpServe.Enabled {
 			continue
 		}
