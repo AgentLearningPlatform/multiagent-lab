@@ -4,6 +4,8 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -51,6 +53,8 @@ func doConnectorReq(s *Server, method, target string, body any) *httptest.Respon
 	case "POST":
 		if strings.HasSuffix(target, "/test") {
 			s.testConnector(w, req)
+		} else if strings.HasSuffix(target, "/preview") {
+			s.previewConnector(w, req)
 		} else {
 			s.createConnector(w, req)
 		}
@@ -194,5 +198,108 @@ func TestConnectorTestWritesStatus(t *testing.T) {
 	got, _ := s.Store.GetConnector(c.ID)
 	if got.Status != "error" {
 		t.Fatalf("status 应回写 error, got %s", got.Status)
+	}
+}
+
+// ---- REQ-214 P2 批次单测 ----
+
+// stubMCPServer 最小 MCP 面（initialize/tools_list），并记录收到的请求头（认证头注入断言用）。
+func stubMCPServer(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	var gotAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		body, _ := io.ReadAll(r.Body)
+		var msg struct {
+			ID    any    `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(body, &msg)
+		w.Header().Set("Content-Type", "application/json")
+		var result any
+		switch msg.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}, "serverInfo": map[string]any{"name": "stub", "version": "0"}}
+		case "notifications/initialized":
+			w.WriteHeader(202)
+			return
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{"name": "echo"}}}
+		default:
+			result = map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result})
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &gotAuth
+}
+
+// preview 预检：不落库、返回工具清单。
+func TestConnectorPreviewDoesNotPersist(t *testing.T) {
+	s := newConnectorAPIFixture(t)
+	srv, _ := stubMCPServer(t)
+	before, _ := s.Store.ListConnectors()
+	n0 := len(before)
+	w := doConnectorReq(s, "POST", "/api/connectors/preview", map[string]any{
+		"kind": "mcp", "name": "preview-x", "config": map[string]any{"url": srv.URL},
+	})
+	if w.Code != 200 {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		OK    bool     `json:"ok"`
+		Tools []string `json:"tools"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if !out.OK || len(out.Tools) != 1 || !strings.HasSuffix(out.Tools[0], "__echo") {
+		t.Fatalf("preview 结果: %+v", out)
+	}
+	after, _ := s.Store.ListConnectors()
+	if len(after) != n0 {
+		t.Fatalf("preview 不应落库: %d -> %d", n0, len(after))
+	}
+}
+
+// test 端点：工具清单 + tested_at 落库。
+func TestConnectorTestPersistsTools(t *testing.T) {
+	s := newConnectorAPIFixture(t)
+	srv, _ := stubMCPServer(t)
+	c, _ := s.Store.CreateConnector(&store.Connector{Kind: store.ConnectorKindMCP, Name: "with-tools",
+		Config: map[string]any{"url": srv.URL}})
+	w := doConnectorReq(s, "POST", "/api/connectors/"+c.ID+"/test", nil)
+	var out struct {
+		OK    bool `json:"ok"`
+		Tools []string `json:"tools"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if !out.OK || len(out.Tools) == 0 {
+		t.Fatalf("test 应带工具清单: %+v", out)
+	}
+	got, _ := s.Store.GetConnector(c.ID)
+	if len(got.Tools) == 0 || got.TestedAt == "" {
+		t.Fatalf("tools/tested_at 应回写: %+v", got)
+	}
+}
+
+// 认证头：credentials.headers 加密落库 → preview 探测时注入 Authorization。
+func TestConnectorAuthHeadersInjected(t *testing.T) {
+	s := newConnectorAPIFixture(t)
+	srv, auths := stubMCPServer(t)
+	w := doConnectorReq(s, "POST", "/api/connectors/preview", map[string]any{
+		"kind": "mcp", "name": "auth-x",
+		"config":      map[string]any{"url": srv.URL},
+		"credentials": map[string]any{"headers": map[string]any{"Authorization": "Bearer sk-test-123"}},
+	})
+	if w.Code != 200 {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	found := false
+	for _, a := range *auths {
+		if a == "Bearer sk-test-123" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Authorization 头未注入: %v", *auths)
 	}
 }

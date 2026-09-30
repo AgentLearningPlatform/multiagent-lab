@@ -9,7 +9,7 @@
  * 本分区只做连接器的生命周期管理与连接测试（REQ-191 先例）。
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from 'antd'
 import { ApiOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../../api/client'
 import type { Connector } from '../../api/types'
@@ -40,6 +40,9 @@ export function ConnectorsPane() {
   const [connectors, setConnectors] = useState<Connector[] | null>(null)
   const [modal, setModal] = useState<{ open: boolean; editing?: Connector }>({ open: false })
   const [testing, setTesting] = useState<string | null>(null)
+  // REQ-214 P2④：Modal 内「测试连接（不保存）」预检结果
+  const [preview, setPreview] = useState<{ ok: boolean; detail: string; tools: string[] } | null>(null)
+  const [previewing, setPreviewing] = useState(false)
   const [form] = Form.useForm()
   const kindWatched = (Form.useWatch('kind', form) ?? 'mcp') as Connector['kind']
 
@@ -60,6 +63,7 @@ export function ConnectorsPane() {
   const openCreate = () => {
     form.resetFields()
     form.setFieldsValue({ kind: 'mcp' })
+    setPreview(null)
     setModal({ open: true })
   }
   const openEdit = (c: Connector) => {
@@ -75,8 +79,10 @@ export function ConnectorsPane() {
       host: c.config?.host ?? '',
       port: c.config?.port ?? undefined,
       user: c.config?.user ?? '',
+      read_only: c.config?.read_only === true,
       // 凭据永不回填——占位提示「已加密存储」
     })
+    setPreview(null)
     setModal({ open: true, editing: c })
   }
 
@@ -91,6 +97,7 @@ export function ConnectorsPane() {
         if ((v.kubeconfig_path ?? '').trim()) config.kubeconfig_path = (v.kubeconfig_path ?? '').trim()
         if ((v.context ?? '').trim()) config.context = (v.context ?? '').trim()
         if ((v.namespace ?? '').trim()) config.namespace = (v.namespace ?? '').trim()
+        config.read_only = v.read_only === true // REQ-214 P2⑦：只读=插件服务不注册 apply
         if ((v.kubeconfig ?? '').trim()) credentials.kubeconfig = v.kubeconfig
       }
       if (kind === 'ssh') {
@@ -100,6 +107,18 @@ export function ConnectorsPane() {
         if ((v.password ?? '').trim()) credentials.password = v.password
         if ((v.private_key ?? '').trim()) credentials.private_key = v.private_key
         if ((v.passphrase ?? '').trim()) credentials.passphrase = v.passphrase
+      }
+      if (kind === 'mcp' && (v.headers_json ?? '').trim()) {
+        // REQ-214 P2③：认证头（JSON 对象，加密进 credentials.headers；如 {"Authorization": "Bearer …"}）
+        try {
+          const parsed = JSON.parse(v.headers_json)
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            credentials.headers = parsed
+          }
+        } catch {
+          showToast('认证头须为合法 JSON 对象', 'err')
+          return
+        }
       }
       if (modal.editing) {
         const payload: Record<string, unknown> = { name: v.name, description: v.description ?? '', config }
@@ -114,6 +133,7 @@ export function ConnectorsPane() {
         showToast('连接器已创建——可在智能体侧板勾选授权')
       }
       setModal({ open: false })
+      setPreview(null)
       load()
       bumpData()
     } catch (e: any) {
@@ -132,6 +152,52 @@ export function ConnectorsPane() {
       showToast(e.message, 'err')
     } finally {
       setTesting(null)
+    }
+  }
+
+  // REQ-214 P2④：Modal 内预检（不落库）——创建前先测通
+  const runPreview = async () => {
+    try {
+      const v = await form.validateFields()
+      const kind = v.kind as Connector['kind']
+      const config: Record<string, unknown> = {}
+      const credentials: Record<string, unknown> = {}
+      if (kind === 'mcp') {
+        config.url = (v.url ?? '').trim()
+        if ((v.headers_json ?? '').trim()) {
+          try {
+            const parsed = JSON.parse(v.headers_json)
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) credentials.headers = parsed
+          } catch {
+            showToast('认证头须为合法 JSON 对象', 'err')
+            return
+          }
+        }
+      }
+      if (kind === 'kubernetes') {
+        if ((v.kubeconfig_path ?? '').trim()) config.kubeconfig_path = (v.kubeconfig_path ?? '').trim()
+        if ((v.context ?? '').trim()) config.context = (v.context ?? '').trim()
+        if ((v.namespace ?? '').trim()) config.namespace = (v.namespace ?? '').trim()
+        config.read_only = v.read_only === true
+        if ((v.kubeconfig ?? '').trim()) credentials.kubeconfig = v.kubeconfig
+      }
+      if (kind === 'ssh') {
+        config.host = (v.host ?? '').trim()
+        if (v.port) config.port = String(v.port)
+        if ((v.user ?? '').trim()) config.user = (v.user ?? '').trim()
+        if ((v.password ?? '').trim()) credentials.password = v.password
+        if ((v.private_key ?? '').trim()) credentials.private_key = v.private_key
+        if ((v.passphrase ?? '').trim()) credentials.passphrase = v.passphrase
+      }
+      setPreviewing(true)
+      const r = await api.previewConnector({ kind, name: v.name || 'preview', config, credentials })
+      setPreview(r)
+      load()
+    } catch (e: any) {
+      if (e?.errorFields) return
+      showToast(e.message, 'err')
+    } finally {
+      setPreviewing(false)
     }
   }
 
@@ -168,6 +234,18 @@ export function ConnectorsPane() {
         rowKey="id"
         dataSource={connectors}
         pagination={false}
+        expandable={{
+          // REQ-214 P2①：工具清单预览（授权前知道将得到什么工具；未测试过则不可展开）
+          rowExpandable: (c) => (c.tools?.length ?? 0) > 0,
+          expandedRowRender: (c) => (
+            <div style={{ padding: '4px 0' }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>授权本连接器后，模型将获得以下工具（<code>{'{连接器名}__{工具名}'}</code> 前缀）：</Typography.Text>
+              <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {(c.tools ?? []).map((t) => <Tag key={t} style={{ margin: 0 }}><code style={{ fontSize: 11 }}>{t}</code></Tag>)}
+              </div>
+            </div>
+          ),
+        }}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器——点「新建连接器」创建；智能体侧板勾选授权后生效" /> }}
         columns={[
           {
@@ -190,13 +268,18 @@ export function ConnectorsPane() {
               c.has_credentials ? <Tag color="green" style={{ margin: 0 }}>已加密</Tag> : <Tag style={{ margin: 0 }}>无</Tag>,
           },
           {
-            title: '状态', key: 'status', width: 90, render: (_, c) => (
-              <Tooltip title={c.status_detail || '未测试'}>
-                <Tag color={c.status === 'ok' ? 'green' : c.status === 'error' ? 'red' : 'default'} style={{ margin: 0 }}>
-                  {c.status === 'ok' ? '可达' : c.status === 'error' ? '不可达' : '未测试'}
-                </Tag>
-              </Tooltip>
-            ),
+            title: '状态', key: 'status', width: 90, render: (_, c) => {
+              // REQ-214 P2⑤：状态时效——Tooltip 带最近测试时间（状态为时点快照不自动刷新）
+              const tested = c.tested_at ? new Date(c.tested_at).toLocaleString() : ''
+              const tip = c.status === 'unknown' ? '未测试' : `${c.status_detail || ''}${tested ? `（${tested} 测试）` : ''}`
+              return (
+                <Tooltip title={tip}>
+                  <Tag color={c.status === 'ok' ? 'green' : c.status === 'error' ? 'red' : 'default'} style={{ margin: 0 }}>
+                    {c.status === 'ok' ? '可达' : c.status === 'error' ? '不可达' : '未测试'}
+                  </Tag>
+                </Tooltip>
+              )
+            },
           },
           {
             title: '被引用', key: 'refs', width: 140, render: (_, c) =>
@@ -266,14 +349,23 @@ export function ConnectorsPane() {
           </Form.Item>
 
           {kindWatched === 'mcp' && (
-            <Form.Item
-              name="url"
-              label="MCP 端点 URL"
-              rules={[{ required: true, message: 'URL 必填' }, { pattern: /^https?:\/\//, message: '须为 http(s) URL（Streamable HTTP MCP）' }]}
-              extra="如 http://127.0.0.1:8092/mcp；指向本平台 /mcp 属自引用会被装配拒绝"
-            >
-              <Input placeholder="http://127.0.0.1:8092/mcp" />
-            </Form.Item>
+            <>
+              <Form.Item
+                name="url"
+                label="MCP 端点 URL"
+                rules={[{ required: true, message: 'URL 必填' }, { pattern: /^https?:\/\//, message: '须为 http(s) URL（Streamable HTTP MCP）' }]}
+                extra="如 http://127.0.0.1:8092/mcp；指向本平台 /mcp 属自引用会被装配拒绝"
+              >
+                <Input placeholder="http://127.0.0.1:8092/mcp" />
+              </Form.Item>
+              <Form.Item
+                name="headers_json"
+                label="认证头（凭据，可选）"
+                extra={modal.editing?.has_credentials ? '已加密存储，留空保持不变' : '需鉴权的托管 MCP 服务填写，如 {"Authorization": "Bearer sk-…"}（JSON 对象；加密落库，请求时注入）'}
+              >
+                <Input.TextArea rows={2} placeholder='{"Authorization": "Bearer …"}' />
+              </Form.Item>
+            </>
           )}
 
           {kindWatched === 'kubernetes' && (
@@ -289,6 +381,15 @@ export function ConnectorsPane() {
                   <Input placeholder="空 = kubeconfig 默认" />
                 </Form.Item>
               </Space.Compact>
+              <Form.Item
+                name="read_only"
+                label="只读模式"
+                valuePropName="checked"
+                tooltip="开启后不注册 kubectl_apply 写工具（模型只能 get/describe/logs）——工具级白名单的最轻形态"
+                extra="生产集群建议开启；需要写操作时关闭并配合「工具调用人工审批」使用"
+              >
+                <Switch size="small" />
+              </Form.Item>
               <Form.Item
                 name="kubeconfig"
                 label="kubeconfig 内容（凭据）"
@@ -327,6 +428,23 @@ export function ConnectorsPane() {
             </>
           )}
         </Form>
+        <div style={{ borderTop: '1px solid var(--c-border, #f0f0f0)', paddingTop: 10, marginTop: 4 }}>
+          <Space size={8} align="center">
+            <Button size="small" icon={<ApiOutlined />} loading={previewing} onClick={runPreview}>
+              测试连接（不保存）
+            </Button>
+            {preview && (
+              <Typography.Text type={preview.ok ? 'secondary' : 'danger'} style={{ fontSize: 12 }}>
+                {preview.ok ? '✓ ' : '✗ '}{preview.detail}
+              </Typography.Text>
+            )}
+          </Space>
+          {preview?.ok && (preview.tools?.length ?? 0) > 0 && (
+            <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {preview.tools.map((t) => <Tag key={t} style={{ margin: 0 }}><code style={{ fontSize: 11 }}>{t}</code></Tag>)}
+            </div>
+          )}
+        </div>
       </Modal>
     </>
   )

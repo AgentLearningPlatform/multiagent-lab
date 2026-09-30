@@ -9,6 +9,7 @@ import (
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -48,13 +49,23 @@ func (r *renamedStreamable) Info(ctx context.Context) (*schema.ToolInfo, error) 
 // 工具以 {server}__{tool} 前缀重命名后返回；连接/初始化/列工具失败返回 error，
 // 由装配层降级记告警（§13 风险：MCP 不可用不阻断运行，不做重试风暴）。
 func FetchMCPTools(ctx context.Context, serverName, url string, timeout time.Duration) ([]einotool.BaseTool, error) {
+	return FetchMCPToolsWithHeaders(ctx, serverName, url, nil, timeout)
+}
+
+// FetchMCPToolsWithHeaders REQ-214 P2：带自定义请求头的变体（mcp 直通连接器的认证头，
+// 凭据态 headers 经装配层解密注入；不经此函数的头一律不带）。
+func FetchMCPToolsWithHeaders(ctx context.Context, serverName, url string, headers map[string]string, timeout time.Duration) ([]einotool.BaseTool, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cli, err := mcpclient.NewStreamableHttpClient(url)
+	opts := []transport.StreamableHTTPCOption{}
+	if len(headers) > 0 {
+		opts = append(opts, transport.WithHTTPHeaders(headers))
+	}
+	cli, err := mcpclient.NewStreamableHttpClient(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("mcp client create: %w", err)
 	}

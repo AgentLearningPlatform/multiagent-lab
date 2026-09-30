@@ -26,24 +26,28 @@ const BuiltinConnectorOpenOntologies = "open-ontologies"
 
 func scanConnector(row interface{ Scan(...any) error }) (*Connector, error) {
 	var c Connector
-	var configJSON string
+	var configJSON, toolsJSON string
 	var creds []byte
 	var isBuiltin int
-	err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.Description, &configJSON, &creds, &c.Status, &c.StatusDetail, &isBuiltin, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.Description, &configJSON, &creds, &c.Status, &c.StatusDetail, &isBuiltin, &c.CreatedAt, &c.UpdatedAt, &toolsJSON, &c.TestedAt)
 	if err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(configJSON), &c.Config)
+	_ = json.Unmarshal([]byte(toolsJSON), &c.Tools)
 	c.CredentialsEncrypted = creds
 	c.HasCredentials = len(creds) > 0
 	c.IsBuiltin = isBuiltin == 1
 	if c.Config == nil {
 		c.Config = map[string]any{}
 	}
+	if c.Tools == nil {
+		c.Tools = []string{}
+	}
 	return &c, nil
 }
 
-const connectorCols = `id,kind,name,description,config_json,credentials_encrypted,status,status_detail,is_builtin,created_at,updated_at`
+const connectorCols = `id,kind,name,description,config_json,credentials_encrypted,status,status_detail,is_builtin,created_at,updated_at,tools_json,tested_at`
 
 // ListConnectors 全量连接器（按创建时间升序）。
 func (s *Store) ListConnectors() ([]*Connector, error) {
@@ -92,8 +96,9 @@ func (s *Store) CreateConnector(c *Connector) (*Connector, error) {
 	if c.Status == "" {
 		c.Status = "unknown"
 	}
-	_, err := s.DB.Exec(`INSERT INTO connector (id,kind,name,description,config_json,credentials_encrypted,status,status_detail,is_builtin,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		c.ID, c.Kind, c.Name, c.Description, string(configJSON), c.CredentialsEncrypted, c.Status, c.StatusDetail, boolToInt(c.IsBuiltin), now(), now())
+	toolsJSON, _ := json.Marshal(c.Tools)
+	_, err := s.DB.Exec(`INSERT INTO connector (id,kind,name,description,config_json,credentials_encrypted,status,status_detail,is_builtin,tools_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.ID, c.Kind, c.Name, c.Description, string(configJSON), c.CredentialsEncrypted, c.Status, c.StatusDetail, boolToInt(c.IsBuiltin), string(toolsJSON), now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -113,8 +118,9 @@ func (s *Store) UpdateConnector(c *Connector) (*Connector, error) {
 		c.CredentialsEncrypted = prev.CredentialsEncrypted
 	}
 	configJSON, _ := json.Marshal(c.Config)
-	res, err := s.DB.Exec(`UPDATE connector SET kind=?,name=?,description=?,config_json=?,credentials_encrypted=?,status=?,status_detail=?,is_builtin=?,updated_at=? WHERE id=?`,
-		c.Kind, c.Name, c.Description, string(configJSON), c.CredentialsEncrypted, c.Status, c.StatusDetail, boolToInt(c.IsBuiltin), now(), c.ID)
+	toolsJSON, _ := json.Marshal(c.Tools)
+	res, err := s.DB.Exec(`UPDATE connector SET kind=?,name=?,description=?,config_json=?,credentials_encrypted=?,status=?,status_detail=?,is_builtin=?,tools_json=?,tested_at=?,updated_at=? WHERE id=?`,
+		c.Kind, c.Name, c.Description, string(configJSON), c.CredentialsEncrypted, c.Status, c.StatusDetail, boolToInt(c.IsBuiltin), string(toolsJSON), c.TestedAt, now(), c.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict

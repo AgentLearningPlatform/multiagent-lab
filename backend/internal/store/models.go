@@ -75,6 +75,8 @@ type Connector struct {
 	HasCredentials       bool           `json:"has_credentials"` // 读侧派生（凭据永不回传明文）
 	Status               string         `json:"status"`          // unknown | ok | error（连接测试回写）
 	StatusDetail         string         `json:"status_detail"`
+	Tools                []string       `json:"tools"`           // REQ-214 P2：工具名清单（test 成功落库——授权前知情）
+	TestedAt             string         `json:"tested_at"`       // REQ-214 P2：最近一次连接测试时间（状态时效性）
 	IsBuiltin            bool           `json:"is_builtin"`
 	CreatedAt            string         `json:"created_at"`
 	UpdatedAt            string         `json:"updated_at"`

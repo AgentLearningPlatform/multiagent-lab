@@ -118,6 +118,11 @@ func cfgStr(c *store.Connector, key string) string {
 	return v
 }
 
+func cfgBool(c *store.Connector, key string) bool {
+	b, _ := c.Config[key].(bool)
+	return b
+}
+
 // toolText 统一工具结果文本：stdout + 非零 exit code 透传（验收：exit code/stderr 不吞）。
 func toolText(stdout string, err error) string {
 	if err == nil {
@@ -136,8 +141,20 @@ func toolText(stdout string, err error) string {
 	return b.String()
 }
 
+// KubernetesToolNames Kubernetes 连接器的完整工具名清单（read_only 时剔除 apply）。
+func KubernetesToolNames(readOnly bool) []string {
+	names := []string{"kubectl_get", "kubectl_describe", "kubectl_logs"}
+	if !readOnly {
+		names = append(names, "kubectl_apply")
+	}
+	return names
+}
+
+// SSHToolNames SSH 连接器工具名清单。
+func SSHToolNames() []string { return []string{"exec"} }
+
 // addKubernetesTools Kubernetes 连接器工具集：kubectl CLI 包装（零新依赖，沿 runtime/k8s.go 口径）。
-// 阶段二暴露 get/describe/logs/apply 四个语义化工具；工具级白名单（只读子集收窄）列阶段三观察项。
+// config.read_only=true 时跳过 apply（REQ-214 P2⑦：工具级白名单的最轻形态——写操作隐藏）。
 func (p *PluginService) addKubernetesTools(srv *mcpserver.MCPServer, c *store.Connector) error {
 	creds, err := p.resolveCredentials(c)
 	if err != nil {
@@ -226,6 +243,9 @@ func (p *PluginService) addKubernetesTools(srv *mcpserver.MCPServer, c *store.Co
 		return mcp.NewToolResultText(toolText(stdout, err)), nil
 	})
 
+	if cfgBool(c, "read_only") {
+		return nil // 只读模式：写操作工具不注册（REQ-214 P2⑦）
+	}
 	apply := mcp.NewTool("kubectl_apply",
 		mcp.WithDescription(desc+"：应用资源清单（kubectl apply -f -，写操作——建议开启工具审批后使用）"),
 		mcp.WithString("manifest", mcp.Required(), mcp.Description("完整的 YAML/JSON 资源清单内容")),

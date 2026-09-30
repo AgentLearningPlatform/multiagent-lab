@@ -432,7 +432,10 @@ export const api = {
   updateConnector: (id: string, p: { name?: string; description?: string; config?: Record<string, unknown>; credentials?: Record<string, unknown> }) =>
     req<Connector>(`/api/connectors/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(p) }),
   deleteConnector: (id: string) => req<{ ok: boolean }>(`/api/connectors/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  testConnector: (id: string) => req<{ ok: boolean; detail: string; status: string }>(`/api/connectors/${encodeURIComponent(id)}/test`, { method: 'POST' }),
+  testConnector: (id: string) => req<{ ok: boolean; detail: string; status: string; tools: string[] }>(`/api/connectors/${encodeURIComponent(id)}/test`, { method: 'POST' }),
+  // REQ-214 P2④：创建前预检（不落库，按表单探测）
+  previewConnector: (p: { kind: string; name?: string; description?: string; config?: Record<string, unknown>; credentials?: Record<string, unknown> }) =>
+    req<{ ok: boolean; detail: string; tools: string[] }>('/api/connectors/preview', { method: 'POST', body: JSON.stringify(p) }),
   // ---- REQ-148 供应商分组：多实例与别名（分组标识与 BaseURL 解耦） ----
   listProviderGroups: () => req<ProviderGroupMeta[]>('/api/provider-groups'),
   createProviderGroup: (alias: string) =>

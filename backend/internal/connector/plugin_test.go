@@ -213,3 +213,43 @@ func TestToolTextExitCode(t *testing.T) {
 		t.Fatalf("空输出提示: %s", s)
 	}
 }
+
+// REQ-214 P2⑦：只读模式——tools/list 不含 kubectl_apply（工具级白名单最轻形态）。
+func TestPluginKubernetesReadOnly(t *testing.T) {
+	p, st, box := newPluginFixture(t)
+	bin, _ := stubKubectl(t)
+	p.KubectlBin = bin
+	enc := encryptKubeconfig(t, box)
+	c, err := st.CreateConnector(&store.Connector{
+		Kind: store.ConnectorKindKubernetes, Name: "k8s-ro",
+		Config:               map[string]any{"read_only": true},
+		CredentialsEncrypted: enc,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(p.Handler())
+	defer srv.Close()
+	bts, err := tool.FetchMCPTools(context.Background(), c.Name, srv.URL+"/connectors/"+c.ID+"/mcp", 10e9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, bt := range bts {
+		if ti, _ := bt.Info(context.Background()); ti != nil {
+			names[ti.Name] = true
+		}
+	}
+	if names["k8s-ro__kubectl_apply"] {
+		t.Fatal("只读模式不应注册 kubectl_apply")
+	}
+	if !names["k8s-ro__kubectl_get"] || !names["k8s-ro__kubectl_logs"] {
+		t.Fatalf("只读模式应保留读工具: %v", names)
+	}
+	if got := KubernetesToolNames(true); len(got) != 3 {
+		t.Fatalf("只读静态清单应 3 项: %v", got)
+	}
+	if got := KubernetesToolNames(false); len(got) != 4 {
+		t.Fatalf("完整静态清单应 4 项: %v", got)
+	}
+}

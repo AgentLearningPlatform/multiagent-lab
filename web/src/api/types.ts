@@ -54,6 +54,10 @@ export interface Connector {
   has_credentials: boolean
   status: 'unknown' | 'ok' | 'error'
   status_detail: string
+  /** REQ-214 P2：工具名清单（test 落库；授权前知情） */
+  tools: string[]
+  /** REQ-214 P2：最近一次连接测试时间（状态时效性） */
+  tested_at?: string
   is_builtin: boolean
   refs: string[]
   created_at: string

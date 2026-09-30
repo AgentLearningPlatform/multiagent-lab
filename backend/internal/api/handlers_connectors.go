@@ -27,6 +27,8 @@ type connectorOut struct {
 	HasCredentials bool           `json:"has_credentials"`
 	Status         string         `json:"status"`
 	StatusDetail   string         `json:"status_detail"`
+	Tools          []string       `json:"tools"`     // REQ-214 P2：工具名清单（test 落库；授权前知情）
+	TestedAt       string         `json:"tested_at"` // REQ-214 P2：最近测试时间（状态时效）
 	IsBuiltin      bool           `json:"is_builtin"`
 	Refs           []string       `json:"refs"` // 引用该连接器的 agent 名（删除保护）
 	CreatedAt      string         `json:"created_at"`
@@ -44,7 +46,8 @@ func (s *Server) connectorOut(c *store.Connector) connectorOut {
 	return connectorOut{
 		ID: c.ID, Kind: c.Kind, Name: c.Name, Description: c.Description,
 		Config: c.Config, HasCredentials: c.HasCredentials,
-		Status: c.Status, StatusDetail: c.StatusDetail, IsBuiltin: c.IsBuiltin,
+		Status: c.Status, StatusDetail: c.StatusDetail, Tools: c.Tools, TestedAt: c.TestedAt,
+		IsBuiltin: c.IsBuiltin,
 		Refs: refs, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
@@ -245,9 +248,67 @@ func (s *Server) deleteConnector(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// testConnector POST /api/connectors/{id}/test：按 kind 探测连接并回写 status。
-// mcp = 真 MCP 握手（initialize + list_tools，报告工具数）；kubernetes = kubectl 集群探针；
+// probeConnector 按 kind 探测连接（test 与 preview 共用）。
+// mcp = 真 MCP 握手（initialize + list_tools，取回工具名清单）；kubernetes = kubectl 集群探针；
 // ssh = 拨号 + 认证。探测仅验证可达性，不做重试风暴（REQ-191 口径）。
+func (s *Server) probeConnector(ctx context.Context, c *store.Connector) (ok bool, detail string, tools []string) {
+	switch c.Kind {
+	case store.ConnectorKindMCP:
+		headers := s.mcpHeaders(c)
+		bts, ferr := tool.FetchMCPToolsWithHeaders(ctx, c.Name, urlOf(c.Config), headers, 12*time.Second)
+		ok = ferr == nil
+		if ok {
+			detail = "可达，暴露 " + strconv.Itoa(len(bts)) + " 个工具"
+			names := make([]string, 0, len(bts))
+			for _, bt := range bts {
+				if ti, ierr := bt.Info(ctx); ierr == nil && ti != nil && ti.Name != "" {
+					names = append(names, ti.Name)
+				}
+			}
+			tools = names
+		} else {
+			detail = "不可达：" + ferr.Error()
+		}
+		return ok, detail, tools
+	case store.ConnectorKindKubernetes:
+		ok, detail = s.testKubernetesConnector(ctx, c)
+		if ok {
+			ro, _ := c.Config["read_only"].(bool)
+			tools = connector.KubernetesToolNames(ro)
+		}
+		return ok, detail, tools
+	case store.ConnectorKindSSH:
+		ok, detail = s.testSSHConnector(ctx, c)
+		if ok {
+			tools = connector.SSHToolNames()
+		}
+		return ok, detail, tools
+	default:
+		return false, "未知连接器类型 " + c.Kind, nil
+	}
+}
+
+// mcpHeaders mcp 直通连接器的认证头（credentials.headers 凭据态，REQ-214 P2③；明文仅调用栈内存）。
+func (s *Server) mcpHeaders(c *store.Connector) map[string]string {
+	creds, err := s.resolveCredentials(c)
+	if err != nil {
+		log.Printf("[connectors] %s 认证头解密失败（按无头直通）: %v", c.Name, err)
+		return nil
+	}
+	raw, ok := creds["headers"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := map[string]string{}
+	for k, v := range raw {
+		if sv, ok := v.(string); ok && sv != "" {
+			out[k] = sv
+		}
+	}
+	return out
+}
+
+// testConnector POST /api/connectors/{id}/test：探测连接并回写 status + 工具清单 + tested_at。
 func (s *Server) testConnector(w http.ResponseWriter, r *http.Request) {
 	c, err := s.Store.GetConnector(r.PathValue("id"))
 	if err != nil {
@@ -256,35 +317,55 @@ func (s *Server) testConnector(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	ok := false
-	detail := ""
-	switch c.Kind {
-	case store.ConnectorKindMCP:
-		var bts, ferr = func() (int, error) {
-			tools, e := tool.FetchMCPTools(ctx, c.Name, urlOf(c.Config), 12*time.Second)
-			return len(tools), e
-		}()
-		ok = ferr == nil
-		if ok {
-			detail = "可达，暴露 " + strconv.Itoa(bts) + " 个工具"
-		} else {
-			detail = "不可达：" + ferr.Error()
-		}
-	case store.ConnectorKindKubernetes:
-		ok, detail = s.testKubernetesConnector(ctx, c)
-	case store.ConnectorKindSSH:
-		ok, detail = s.testSSHConnector(ctx, c)
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "未知连接器类型 " + c.Kind})
-		return
-	}
+	ok, detail, tools := s.probeConnector(ctx, c)
 	c.Status = map[bool]string{true: "ok", false: "error"}[ok]
 	c.StatusDetail = detail
+	c.TestedAt = nowRFC3339()
+	if tools != nil {
+		c.Tools = tools
+	}
 	if _, err := s.Store.UpdateConnector(c); err != nil {
 		log.Printf("[connectors] test 回写状态失败: %v", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "detail": detail, "status": c.Status})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "detail": detail, "status": c.Status, "tools": c.Tools})
 }
+
+// previewConnector POST /api/connectors/preview：不落库按表单探测（REQ-214 P2④ 创建前先测通）。
+// 凭据明文仅此一瞬（与 create 同暴露面），探测结果不回写任何存储。
+func (s *Server) previewConnector(w http.ResponseWriter, r *http.Request) {
+	var in connectorIn
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if he := validateConnectorIn(&in); he != nil {
+		writeErr(w, he)
+		return
+	}
+	enc, err := s.encryptCredentials(in.Credentials)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	c := &store.Connector{
+		Kind: in.Kind, Name: orDefault(in.Name, "preview"),
+		Description: in.Description, Config: in.Config, CredentialsEncrypted: enc,
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	ok, detail, tools := s.probeConnector(ctx, c)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "detail": detail, "tools": tools})
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+// nowRFC3339 当前时间（API 层回写 tested_at 用；UTC RFC3339 与 store 时间戳形态对齐）。
+func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 // resolveCredentials 解密凭据 JSON（无凭据返回空 map）。明文仅在调用栈内存存在。
 func (s *Server) resolveCredentials(c *store.Connector) (map[string]any, error) {

@@ -443,6 +443,16 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
       .catch(() => setConnectors([]))
   }, [])
 
+  // REQ-214 P2⑥：已授权但当前不可达的连接器（配置时点预警——运行时将降级告警）
+  const watchedConnectors = Form.useWatch('connectors', form) as string[] | undefined
+  const unreachableAuthorized = useMemo(
+    () =>
+      connectors.filter(
+        (c) => c.status === 'error' && (watchedConnectors ?? agent.connectors ?? []).includes(c.id),
+      ),
+    [connectors, watchedConnectors, agent.connectors],
+  )
+
   const goConnectorSettings = () => {
     localStorage.setItem('eino.settings.section', 'connectors')
     setPage('settings')
@@ -762,19 +772,34 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                       连接外部能力的统一入口（自定义 MCP / Kubernetes / SSH）。工具以 <code>{'{连接器名}__{tool}'}</code> 前缀并入白名单候选，凭据服务端绑定不进模型上下文；勾选 = 授权本智能体使用（连接白名单），连接失败降级不阻断运行。
                     </span>
                   </div>
+                  {unreachableAuthorized.length > 0 && (
+                    <Alert
+                      style={{ marginBottom: 8 }}
+                      type="warning"
+                      showIcon
+                      message={`已授权连接器当前不可达：${unreachableAuthorized.map((c) => c.name).join('、')}——运行时将降级告警（不加载其工具），可到设置页重新测试`}
+                    />
+                  )}
                   <Form.Item name="connectors" style={{ marginBottom: 8 }}>
                     <Checkbox.Group style={{ display: 'flex', flexDirection: 'column', gap: 4 }} disabled={isBuiltin}>
                       {connectors.map((c) => {
                         const meta = kindMeta(c.kind)
+                        // REQ-214 P2②：工具集提示——授权前知道模型将得到什么工具
+                        const tip =
+                          (c.tools?.length ?? 0) > 0
+                            ? `工具集：${c.tools.join('、')}${c.tested_at ? `（${new Date(c.tested_at).toLocaleString()} 测试）` : ''}`
+                            : '尚未测试——设置页「测试」后显示工具集'
                         return (
                           <Checkbox key={c.id} value={c.id}>
-                            <span style={{ fontSize: 12 }}>
-                              <Tag color={meta.color} style={{ marginInlineEnd: 4 }}>{meta.label}</Tag>
-                              {c.name}
-                              {c.is_builtin && <Tag style={{ marginInlineEnd: 0 }}>内置</Tag>}
-                              {c.status === 'error' && <Tag color="red" style={{ marginInlineEnd: 0 }}>不可达</Tag>}
-                              {c.status === 'ok' && <Tag color="green" style={{ marginInlineEnd: 0 }}>可达</Tag>}
-                            </span>
+                            <Tooltip title={tip}>
+                              <span style={{ fontSize: 12 }}>
+                                <Tag color={meta.color} style={{ marginInlineEnd: 4 }}>{meta.label}</Tag>
+                                {c.name}
+                                {c.is_builtin && <Tag style={{ marginInlineEnd: 0 }}>内置</Tag>}
+                                {c.status === 'error' && <Tag color="red" style={{ marginInlineEnd: 0 }}>不可达</Tag>}
+                                {c.status === 'ok' && <Tag color="green" style={{ marginInlineEnd: 0 }}>可达</Tag>}
+                              </span>
+                            </Tooltip>
                           </Checkbox>
                         )
                       })}

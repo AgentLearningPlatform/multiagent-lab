@@ -5,6 +5,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -454,7 +455,7 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 	//    托管插件服务承载（同一条 MCP 客户端管线：{连接器实例名}__{tool} 前缀、审批/审计自动生效，
 	//    凭据服务端绑定不进工具参数）；ag.MCPServers 为存量兼容残留（启动迁移后为空，双保险保留）。
 	//    连接失败降级继续，不阻断运行。
-	fetchEndpoint := func(name, target string) {
+	fetchEndpoint := func(name, target string, headers map[string]string) {
 		// REQ-131/M18：拦截本平台 /mcp 自引用（防 agent→server→agent 循环递归）
 		if isSelfMCPEndpoint(target) {
 			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 指向本平台 /mcp 端点（自引用），已拒绝装配", name, target))
@@ -463,7 +464,7 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 		var bts []einotool.BaseTool
 		ferr := DoWithRetry(ctx, 2, func() error { // REQ-202 ④：幂等重试白名单（deadline/reset/5xx，N=2）
 			var e error
-			bts, e = tool.FetchMCPTools(ctx, name, target, mcpFetchTimeout)
+			bts, e = tool.FetchMCPToolsWithHeaders(ctx, name, target, headers, mcpFetchTimeout)
 			return e
 		})
 		if ferr != nil {
@@ -496,9 +497,11 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 				continue
 			}
 			var target string
+			var headers map[string]string
 			switch c.Kind {
 			case store.ConnectorKindMCP:
 				target, _ = c.Config["url"].(string)
+				headers = a.mcpHeaders(c) // REQ-214 P2：认证头（凭据态解密；明文仅装配栈内存）
 			case store.ConnectorKindKubernetes, store.ConnectorKindSSH:
 				if pluginBase == "" {
 					tb.Warnings = append(tb.Warnings, fmt.Sprintf("连接器 %s（%s）需要插件服务但平台未启用（CONNECTOR_PLUGIN_ADDR），本次运行不加载其工具", c.Name, c.Kind))
@@ -515,14 +518,14 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 				tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 指向本平台连接器插件服务（绕过连接器授权），已拒绝装配", c.Name, target))
 				continue
 			}
-			fetchEndpoint(c.Name, target)
+			fetchEndpoint(c.Name, target, headers)
 		}
 	}
 	for _, ms := range ag.MCPServers {
 		if ms.URL == "" {
 			continue
 		}
-		fetchEndpoint(ms.Name, ms.URL)
+		fetchEndpoint(ms.Name, ms.URL, nil)
 	}
 
 	// 4) 本体 facade（M8 §6.10-1：挂载运行方案时并入 onto_* 工具；
@@ -817,6 +820,25 @@ func (a *Assembler) buildModel(ctx context.Context, ag *store.Agent) (model.Base
 	// REQ-117/M17：按观测级别包装（level 0 原样返回），每次 Generate/Stream 采集 model.step
 	cm = wrapDebug(cm, ag.Name, debugFrom(ctx))
 	return cm, rec.Conn.Name + "@" + rec.Conn.ModelName, rec.Conn.ID, nil
+}
+
+// mcpHeaders mcp 直通连接器的认证头（REQ-214 P2③：credentials.headers 凭据态解密注入
+// FetchMCPTools——需鉴权的托管 MCP 服务解锁；无凭据/解析失败返回 nil 按无头直通）。
+func (a *Assembler) mcpHeaders(c *store.Connector) map[string]string {
+	if a.Box == nil || len(c.CredentialsEncrypted) == 0 {
+		return nil
+	}
+	plain, err := a.Box.Decrypt(c.CredentialsEncrypted)
+	if err != nil {
+		return nil
+	}
+	var creds struct {
+		Headers map[string]string `json:"headers"`
+	}
+	if json.Unmarshal([]byte(plain), &creds) != nil {
+		return nil
+	}
+	return creds.Headers
 }
 
 // mcpSnapshotOf 装配快照的 mcp 字段（REQ-117 契约保持 name@target 形态）：
