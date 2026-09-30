@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -411,5 +412,59 @@ func TestHandleListConcepts(t *testing.T) {
 	res, err = h(context.Background(), newReq(map[string]any{"ontology_id": "missing"}))
 	if err != nil || !res.IsError || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "ONTOLOGY_SERVICE_UNAVAILABLE") {
 		t.Fatalf("未挂载本体应路由失败: %v / %v", err, res)
+	}
+}
+
+// REQ-216 增量④：ownerCache TTL 失效——agent 换绑本体后最迟一个 TTL 收敛，不再 stale 到进程重启。
+func TestOwnerCacheTTLExpiry(t *testing.T) {
+	var mu sync.Mutex
+	ontologyID := "onto_v1"
+	ownerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		oid := ontologyID
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"agent_id":"agt-1","ontology_id":"` + oid + `","graph":"http://eino-lab/graph/ont-` + oid + `"}`))
+	}))
+	defer ownerSrv.Close()
+	t.Setenv("PLATFORM_API_URL", ownerSrv.URL)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), filepath.Join("..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now().Format(time.RFC3339)
+	p := &store.Profile{ID: "p1", Name: "n", Engine: "oxigraph", OntologyIDs: []string{"onto_v1", "onto_v2"},
+		Config: "{}", Status: "created", CreatedAt: now, UpdatedAt: now}
+	if err := st.Create(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStatus("p1", "running", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	f := New(st, func(string) (string, error) { return "http://127.0.0.1:1/query", nil })
+	// 收紧 TTL 便于测试
+	oldTTL := ownerCacheTTL
+	ownerCacheTTL = 20 * time.Millisecond
+	t.Cleanup(func() { ownerCacheTTL = oldTTL })
+
+	oid1, errRes := f.companionOntology("agt-1", "")
+	if errRes != nil || oid1 != "onto_v1" {
+		t.Fatalf("首次解析应得 onto_v1: %s %v", oid1, errRes)
+	}
+	// TTL 内走缓存（换绑不生效）
+	mu.Lock()
+	ontologyID = "onto_v2"
+	mu.Unlock()
+	oid2, _ := f.companionOntology("agt-1", "")
+	if oid2 != "onto_v1" {
+		t.Fatalf("TTL 内应命中缓存 onto_v1: %s", oid2)
+	}
+	// TTL 过期 → 重新解析到换绑后的本体
+	time.Sleep(40 * time.Millisecond)
+	oid3, _ := f.companionOntology("agt-1", "")
+	if oid3 != "onto_v2" {
+		t.Fatalf("TTL 过期后应重解析 onto_v2: %s", oid3)
 	}
 }

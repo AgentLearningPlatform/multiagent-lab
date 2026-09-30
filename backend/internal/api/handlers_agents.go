@@ -178,6 +178,9 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// REQ-216 增量②c：伴生数据随删清理（候选+游标；绑定行随 agent 级联消失）。
+	// 图数据不动——伴生子图归属本体资产（同本体其他绑定者沉淀保留），本体详情页可管理。
+	_ = s.Store.DeleteAgentCompanionData(id)
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": id})
 }
 

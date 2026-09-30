@@ -189,9 +189,9 @@ func (f *Facade) companionOntology(agentID, convID string) (string, *mcp.CallToo
 		cacheKey = "conv:" + strings.TrimSpace(convID)
 	}
 	f.ownerMu.Lock()
-	if oid, ok := f.ownerCache[cacheKey]; ok {
+	if e, ok := f.ownerCache[cacheKey]; ok && time.Since(e.at) < ownerCacheTTL {
 		f.ownerMu.Unlock()
-		return oid, nil
+		return e.oid, nil
 	}
 	f.ownerMu.Unlock()
 	oid, err := f.companionOntologyOf(agentID, convID)
@@ -199,7 +199,7 @@ func (f *Facade) companionOntology(agentID, convID string) (string, *mcp.CallToo
 		return "", mcp.NewToolResultErrorf("OWNER_RESOLVE_FAILED: %v", err)
 	}
 	f.ownerMu.Lock()
-	f.ownerCache[cacheKey] = oid
+	f.ownerCache[cacheKey] = ownerEntry{oid: oid, at: time.Now()}
 	f.ownerMu.Unlock()
 	return oid, nil
 }

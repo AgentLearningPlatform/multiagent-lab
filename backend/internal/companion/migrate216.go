@@ -222,6 +222,7 @@ func (s *Service) migrateGraphs(ctx context.Context) error {
 	}
 	migrated := 0
 	var firstErr error
+	touched := map[string]string{} // REQ-216 增量①：迁移落图的本体 → 引擎基址（迁移后刷快照）
 	for _, a := range agents {
 		if err := s.migrateOneAgentGraph(ctx, legacy, ep, a.ID, a.CompanionOntologyID); err != nil {
 			if firstErr == nil {
@@ -230,10 +231,16 @@ func (s *Service) migrateGraphs(ctx context.Context) error {
 			log.Printf("[companion] REQ-216 图迁移失败（agent %s）: %v", a.ID, err)
 			continue
 		}
+		if base, berr := s.Plans.EnsureHostPlan(ctx, a.CompanionOntologyID); berr == nil {
+			touched[a.CompanionOntologyID] = base
+		}
 		migrated++
 	}
 	legacy.Stop() // 迁移即退役：无论成败不再持有旧实例（失败的 agent 下次启动重试）
 	retireLegacyProcess()
+	for oid, base := range touched {
+		s.snapshotRefresh(ctx, oid, base) // 迁移复制的数据同样入快照（持久性保障）
+	}
 	if firstErr != nil {
 		return firstErr
 	}

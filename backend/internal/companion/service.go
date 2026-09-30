@@ -171,6 +171,10 @@ type Service struct {
 	// REQ-194②召回增强：进程内标签向量缓存（REQ-216 起键=ontologyID；伴生子图写入时失效）
 	vecMu    sync.Mutex
 	vecCache map[string]map[string][]float32
+
+	// REQ-216 增量①：快照回灌状态（本体 → 已完成校验的引擎基址；进程重启或基址变更后重检一次）
+	infMu        sync.Mutex
+	inflatedBase map[string]string
 }
 
 // NewService 构造（plans 为空则按 env 默认端口构造）。
@@ -178,7 +182,17 @@ func NewService(st *store.Store, box *secrets.Box, plans *PlanEngines) *Service 
 	if plans == nil {
 		plans = NewPlanEngines("", "")
 	}
-	return &Service{Store: st, Box: box, Plans: plans, running: map[string]bool{}, vecCache: map[string]map[string][]float32{}}
+	return &Service{Store: st, Box: box, Plans: plans, running: map[string]bool{}, vecCache: map[string]map[string][]float32{}, inflatedBase: map[string]string{}}
+}
+
+// EnsureHost 供 API 层复用：确保宿主方案 running + 重建检测回灌（绑定/状态读路径同口径）。
+func (s *Service) EnsureHost(ctx context.Context, ontologyID string) (string, error) {
+	base, err := s.Plans.EnsureHostPlan(ctx, ontologyID)
+	if err != nil {
+		return "", err
+	}
+	s.ensureInflated(ctx, ontologyID, base)
+	return base, nil
 }
 
 // invalidateLabelCache 伴生子图写入后失效标签向量缓存（REQ-216 起按本体图键）。
@@ -199,9 +213,10 @@ func boundOntology(agent *store.Agent) string {
 	return strings.TrimSpace(agent.CompanionOntologyID)
 }
 
-// graphQuery 宿主方案引擎 SPARQL SELECT（读侧兜底拉起：Ensure 确保宿主方案 running）。
+// graphQuery 宿主方案引擎 SPARQL SELECT（读侧兜底拉起：Ensure 确保宿主方案 running；
+// 重建检测回灌：方案重建后首访自快照恢复子图）。
 func (s *Service) graphQuery(ctx context.Context, ontologyID, sparql string) ([]byte, error) {
-	base, err := s.Plans.EnsureHostPlan(ctx, ontologyID)
+	base, err := s.EnsureHost(ctx, ontologyID)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +229,7 @@ func (s *Service) graphQuery(ctx context.Context, ontologyID, sparql string) ([]
 
 // graphUpdate 宿主方案引擎 SPARQL UPDATE（写侧 Ensure 同口径）。
 func (s *Service) graphUpdate(ctx context.Context, ontologyID, sparql string) error {
-	base, err := s.Plans.EnsureHostPlan(ctx, ontologyID)
+	base, err := s.EnsureHost(ctx, ontologyID)
 	if err != nil {
 		return err
 	}
@@ -492,6 +507,10 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 		}
 	}
 	s.invalidateLabelCache(ontID) // REQ-194②：图写入失效标签向量缓存（REQ-216 起按本体图）
+	// REQ-216 增量①：快照同步刷新（持久性保障——引擎数据目录被方案重建时据此无损回灌）
+	if base, berr := s.Plans.EnsureHostPlan(ctx, ontID); berr == nil {
+		s.snapshotRefresh(ctx, ontID, base)
+	}
 	return s.Store.DecideCompanionCandidate(candID, "confirmed")
 }
 
@@ -600,7 +619,7 @@ func (s *Service) Graph(ctx context.Context, agentID string) (map[string]any, er
 	}
 	out["graph"] = GraphURI(ontID)
 	out["ontology_id"] = ontID
-	base, err := s.Plans.EnsureHostPlan(ctx, ontID)
+	base, err := s.EnsureHost(ctx, ontID)
 	if err != nil {
 		out["plan_error"] = err.Error()
 		return out, nil
@@ -657,11 +676,12 @@ func (s *Service) ResetAgent(_ context.Context, agentID string) error {
 }
 
 // ResetOntology 本体级伴生图清空（REQ-216：本体视角全量管理面——DROP 本体伴生子图 +
-// 清全部绑定 agent 的候选与游标；本体资产本身不受影响）。
+// 清全部绑定 agent 的候选与游标 + 删快照；本体资产本身不受影响）。
 func (s *Service) ResetOntology(ctx context.Context, ontologyID string) error {
 	if err := s.graphUpdate(ctx, ontologyID, DropGraph(ontologyID)); err != nil {
 		return err
 	}
+	snapshotDelete(ontologyID)
 	s.invalidateLabelCache(ontologyID)
 	return s.Store.DeleteOntologyCompanionData(ontologyID)
 }
@@ -688,8 +708,8 @@ func (s *Service) StatusByAgent(ctx context.Context, agentID string) (map[string
 		return st, nil
 	}
 	st["graph"] = GraphURI(ontID)
-	// 读侧兜底拉起：状态查询同样确保宿主方案 running（治「打开没数据」根因）
-	base, err := s.Plans.EnsureHostPlan(ctx, ontID)
+	// 读侧兜底拉起：状态查询同样确保宿主方案 running（治「打开没数据」根因；含重建检测回灌）
+	base, err := s.EnsureHost(ctx, ontID)
 	if err != nil {
 		st["engine_running"] = false
 		st["plan_error"] = err.Error()

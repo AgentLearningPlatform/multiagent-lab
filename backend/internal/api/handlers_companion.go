@@ -52,6 +52,12 @@ func (s *Server) listCompanionCandidates(w http.ResponseWriter, r *http.Request)
 			writeErr(w, err)
 			return
 		}
+		// REQ-216 增量③：本体视角批量——group_by=entity 按实体归组（详情页「全部入图/拒绝」，
+		// 与侧板 agent 视角批量同构；REQ-216⑥「confirm/reject+批量」范围补齐）
+		if r.URL.Query().Get("group_by") == "entity" {
+			writeJSON(w, http.StatusOK, map[string]any{"groups": companion.GroupCandidatesByEntity(list)})
+			return
+		}
 		if list == nil {
 			list = []*store.CompanionCandidate{}
 		}
@@ -144,6 +150,13 @@ func (s *Server) bindCompanionAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ontID := strings.TrimSpace(body.OntologyID)
+	if ontID != "" {
+		// REQ-216 增量②a：绑定校验——本体必须真实存在（防脏绑定悬挂：宿主方案 start 永远失败）
+		if _, err := s.Companion.Plans.OntologyName(r.Context(), ontID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "本体不存在或构建平面不可达（" + ontID + "）: " + err.Error()})
+			return
+		}
+	}
 	if ontID == "" {
 		if body.Create == nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ontology_id 必填，或传 create 创建空本体"})
@@ -183,6 +196,11 @@ func (s *Server) ontologyCompanionCandidates(w http.ResponseWriter, r *http.Requ
 	list, err := s.Companion.Store.ListCompanionCandidatesByOntology(ontID, status)
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	// REQ-216 增量③：本体视角批量——group_by=entity 按实体归组（详情页「全部入图/拒绝」）
+	if r.URL.Query().Get("group_by") == "entity" {
+		writeJSON(w, http.StatusOK, map[string]any{"groups": companion.GroupCandidatesByEntity(list)})
 		return
 	}
 	if list == nil {

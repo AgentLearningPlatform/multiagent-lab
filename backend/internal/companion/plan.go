@@ -35,6 +35,7 @@ type PlanEngines struct {
 	mu      sync.Mutex
 	eps     map[string]string // ontologyID → 引擎基址缓存（查询失败失效重查；宿主方案重建后自愈）
 	hostIDs map[string]string // ontologyID → 宿主方案 id（status 透出/观测）
+	locks   map[string]*sync.Mutex // REQ-216 增量④：每本体串行锁（Ensure 单飞化——防并发重复建方案）
 }
 
 // NewPlanEngines 构造（URL 空取默认同机端口）。
@@ -51,6 +52,7 @@ func NewPlanEngines(runtimeURL, buildURL string) *PlanEngines {
 		HTTP:       &http.Client{Timeout: 60 * time.Second}, // start 为同步健康等待，预算放宽
 		eps:        map[string]string{},
 		hostIDs:    map[string]string{},
+		locks:      map[string]*sync.Mutex{},
 	}
 }
 
@@ -82,13 +84,31 @@ func (p *PlanEngines) HostPlan(ontologyID string) string {
 	return p.hostIDs[ontologyID]
 }
 
+// ontologyLock 每本体串行锁（REQ-216 增量④：Ensure 单飞化——同本体并发确认时
+// list→create 段不再竞态重复建方案）。
+func (p *PlanEngines) ontologyLock(ontologyID string) *sync.Mutex {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if lk, ok := p.locks[ontologyID]; ok {
+		return lk
+	}
+	lk := &sync.Mutex{}
+	p.locks[ontologyID] = lk
+	return lk
+}
+
 // EnsureHostPlan 确保本体宿主方案 running，返回引擎基址。三段式：
 // 缓存命中 → 直返；含该本体的 running 方案 → 复用；同本体存量方案 → 拉起；
 // 无任何方案 → 创建「伴生·{本体名}」并 start。运行平面不可达返回错误（调用方降级）。
+// 全程持每本体锁（REQ-216 增量④单飞化；缓存命中路径无开销差异）。
 func (p *PlanEngines) EnsureHostPlan(ctx context.Context, ontologyID string) (string, error) {
 	if ontologyID == "" {
 		return "", fmt.Errorf("本体 id 为空（伴生未绑定本体）")
 	}
+	lk := p.ontologyLock(ontologyID)
+	lk.Lock()
+	defer lk.Unlock()
+
 	p.mu.Lock()
 	if base, ok := p.eps[ontologyID]; ok {
 		p.mu.Unlock()
@@ -122,7 +142,7 @@ func (p *PlanEngines) EnsureHostPlan(ctx context.Context, ontologyID string) (st
 		}
 	}
 	// ③ 自动创建「伴生·{本体名}」并 start
-	name, _ := p.ontologyName(ctx, ontologyID)
+	name, _ := p.OntologyName(ctx, ontologyID)
 	if name == "" {
 		name = ontologyID
 	}
@@ -259,8 +279,8 @@ func (p *PlanEngines) createProfile(ctx context.Context, name, ontologyID string
 	return &out, nil
 }
 
-// ontologyName 构建平面取本体名（建宿主方案命名用；失败回退 ontologyID，不阻断）。
-func (p *PlanEngines) ontologyName(ctx context.Context, ontologyID string) (string, error) {
+// OntologyName 构建平面取本体名（建宿主方案命名/绑定存在性校验用；失败返回错误——Ensure 忽略回退 ontologyID）。
+func (p *PlanEngines) OntologyName(ctx context.Context, ontologyID string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/ontologies/%s", p.BuildURL, ontologyID), nil)
 	if err != nil {
 		return "", err

@@ -198,6 +198,7 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/connectors/{id}", s.updateConnector)
 	m.HandleFunc("DELETE /api/connectors/{id}", s.deleteConnector)
 	m.HandleFunc("POST /api/connectors/{id}/test", s.testConnector)
+	m.HandleFunc("POST /api/connectors/preview", s.previewConnector) // REQ-214 P2：创建前预检（不落库）
 	// REQ-148 供应商分组：同一供应商可多实例（分组标识与 BaseURL 解耦）+ 别名（展示层）
 	m.HandleFunc("GET /api/provider-groups", s.listProviderGroups)
 	m.HandleFunc("POST /api/provider-groups", s.createProviderGroup)
@@ -270,6 +271,8 @@ func (s *Server) routes() {
 	if s.Ontology != nil {
 		m.Handle("/api/ontologies", s.Ontology.BuildProxy()) // → 构建平面 BUILD_SVC_URL(:8091)
 		m.Handle("/api/ontologies/", s.Ontology.BuildProxy())
+		// REQ-216 增量②b：本体删除伴生拦截（精确路由压过反代前缀——绑定者 409 保护+删除后快照清理）
+		m.HandleFunc("DELETE /api/ontologies/{id}", s.deleteOntologyGuard)
 		// REQ-103 模式 A：OntoChat 会话/turn/save 全在构建平面 /api/ontochat/*（bugfix：此前漏注册反代，
 		// 同源请求命中主后端 404 文本，前端 JSON.parse 报 "Unexpected non-whitespace character after JSON"）
 		m.Handle("/api/ontochat", s.Ontology.BuildProxy())

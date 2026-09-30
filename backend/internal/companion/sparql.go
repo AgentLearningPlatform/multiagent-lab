@@ -181,6 +181,18 @@ SELECT ?s ?p ?o WHERE {
 } ORDER BY ?s LIMIT 500`, GraphURI(graphID))
 }
 
+// SelectGraphAllTriples 子图全量三元组（无过滤、高上限——快照导出/迁移复制用；高限防失控）。
+func SelectGraphAllTriples(graphID string) string {
+	return fmt.Sprintf(`SELECT ?s ?p ?o WHERE {
+  GRAPH <%s> { ?s ?p ?o }
+} ORDER BY ?s LIMIT 200000`, GraphURI(graphID))
+}
+
+// CountGraphTriples 子图三元组计数（快照回灌的重建检测探针）。
+func CountGraphTriples(graphID string) string {
+	return fmt.Sprintf(`SELECT (COUNT(*) AS ?n) WHERE { GRAPH <%s> { ?s ?p ?o } }`, GraphURI(graphID))
+}
+
 // MarkAutoConfirmed REQ-187：自动入图溯源标记（bot:autoConfirmed——区分于人工确认）。
 func MarkAutoConfirmed(graphID, candID string) string {
 	return fmt.Sprintf(`PREFIX bot: <%s>

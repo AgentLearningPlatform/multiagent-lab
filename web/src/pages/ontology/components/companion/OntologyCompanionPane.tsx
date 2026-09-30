@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Card, Empty, Popconfirm, Segmented, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../../../../api/client'
 import { companionApi } from '../../../../api/companion'
-import type { CompanionCandidate } from '../../../../api/companion'
+import type { CandidateGroup, CompanionCandidate } from '../../../../api/companion'
 import type { Agent } from '../../../../api/types'
 import { useUI } from '../../../../store/ui'
 import LoadErrorAlert from '../../../../components/LoadErrorAlert'
@@ -38,6 +38,11 @@ export default function OntologyCompanionPane({ ontologyId }: { ontologyId: stri
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [graphTick, setGraphTick] = useState(0) // confirm/reject/reset 后刷新页首成长图
+  // REQ-216 增量③：时间倒序 / 按实体双视图（本体视角批量审阅——REQ-216⑥「+批量」范围补齐）
+  const [view, setView] = useState<'time' | 'entity'>('time')
+  const [groups, setGroups] = useState<CandidateGroup[] | null>(null)
+  const [batchBusy, setBatchBusy] = useState<string | null>(null)
+  const [batchResult, setBatchResult] = useState<string | null>(null)
 
   const loadMeta = useCallback(() => {
     setMetaLoading(true)
@@ -76,6 +81,50 @@ export default function OntologyCompanionPane({ ontologyId }: { ontologyId: stri
     loadMeta()
     loadCands()
   }, [loadMeta, loadCands])
+
+  // REQ-216 增量③：按实体视图数据（桶切换/视图切换即重取；切换即清批量结果消息）
+  useEffect(() => {
+    setBatchResult(null)
+    if (view !== 'entity') return
+    setCandsLoading(true)
+    companionApi
+      .listCandidatesGroupedByOntology(ontologyId, bucket)
+      .then((r) => {
+        setGroups(r.groups ?? [])
+        setCandsErr(null)
+      })
+      .catch((e: any) => {
+        setGroups(null)
+        setCandsErr(e?.message ?? '候选加载失败')
+      })
+      .finally(() => setCandsLoading(false))
+  }, [view, bucket, ontologyId])
+
+  // 批量裁决：循环单候选端点，结果如实计数（不做硬事务，诚实原则；同侧板 agent 视角口径）
+  const decideGroup = async (g: CandidateGroup, action: 'confirm' | 'reject') => {
+    setBatchBusy(g.key)
+    setActionErr(null)
+    setBatchResult(null)
+    let ok = 0
+    let fail = 0
+    const lastErr: string[] = []
+    for (const m of g.members.filter((x) => x.status === 'pending')) {
+      try {
+        await (action === 'confirm' ? companionApi.confirmCandidate(m.id) : companionApi.rejectCandidate(m.id))
+        ok++
+      } catch (e: any) {
+        fail++
+        if (lastErr.length < 2) lastErr.push(e?.message ?? '失败')
+      }
+    }
+    setBatchBusy(null)
+    if (fail > 0) setActionErr(`批量${action === 'confirm' ? '入图' : '拒绝'}部分失败：成功 ${ok} · 失败 ${fail}${lastErr[0] ? `（${lastErr[0]}）` : ''}`)
+    else setBatchResult(`已${action === 'confirm' ? '入图' : '拒绝'} ${ok} 条（${g.entity}）`)
+    if (ok + fail > 0) {
+      loadCands()
+      setGraphTick((t) => t + 1)
+    }
+  }
 
   const decide = async (id: string, action: 'confirm' | 'reject') => {
     setDeciding(id)
@@ -235,6 +284,15 @@ export default function OntologyCompanionPane({ ontologyId }: { ontologyId: stri
                 { value: 'rejected', label: '已拒绝' },
               ]}
             />
+            <Segmented
+              size="small"
+              value={view}
+              onChange={(v) => setView(v as 'time' | 'entity')}
+              options={[
+                { value: 'time', label: '时间倒序' },
+                { value: 'entity', label: '按实体' },
+              ]}
+            />
             <Popconfirm
               title="清空该本体的伴生图？"
               description="DROP 本体伴生子图 + 清空全部绑定智能体的候选与游标（REQ-216 本体级摘除；各智能体伴生随之解绑，需重新绑定）；本体资产本身不受影响。"
@@ -251,13 +309,53 @@ export default function OntologyCompanionPane({ ontologyId }: { ontologyId: stri
           </div>
 
           {actionErr && <LoadErrorAlert title="伴生操作失败" message={actionErr} onRetry={() => setActionErr(null)} style={{ marginBottom: 12 }} />}
+          {batchResult && (
+            <div style={{ fontSize: 12, color: 'var(--ant-color-success, #389e0d)', marginBottom: 8 }} role="status">
+              {batchResult}
+            </div>
+          )}
 
           {candsErr ? (
-            <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={loadCands} />
+            <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={() => { setView('time'); loadCands() }} />
           ) : candsLoading || metaLoading ? (
             <div style={{ padding: '16px 0' }}>
               <Spin />
             </div>
+          ) : view === 'entity' ? (
+            // REQ-216 增量③：按实体归组组卡（代表候选组内计数 + 批量入图/拒绝）
+            (groups ?? []).length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 12 }}>该分组暂无候选</span>} />
+            ) : (
+              <div className="agent-companion-cands">
+                {(groups ?? []).map((g) => (
+                  <div key={g.key} className="agent-companion-cand" data-entity-group={g.key}>
+                    <div className="agent-companion-cand-head">
+                      <span className="agent-companion-cand-name" title={g.entity}>{g.entity}</span>
+                      <Tag color={g.pending_count > 0 ? 'blue' : 'default'} style={{ margin: 0 }}>
+                        {g.count} 条{g.pending_count > 0 ? ` · 待确认 ${g.pending_count}` : ''}
+                      </Tag>
+                      {bucket === 'pending' && g.pending_count > 0 && (
+                        <Space size={4} className="agent-companion-cand-actions">
+                          <Button size="small" type="primary" ghost icon={<CheckOutlined />} loading={batchBusy === g.key} onClick={() => decideGroup(g, 'confirm')} aria-label={`批量入图 ${g.entity}`}>
+                            全部入图
+                          </Button>
+                          <Button size="small" danger icon={<CloseOutlined />} loading={batchBusy === g.key} onClick={() => decideGroup(g, 'reject')} aria-label={`批量拒绝 ${g.entity}`}>
+                            全部拒绝
+                          </Button>
+                        </Space>
+                      )}
+                    </div>
+                    {g.members.map((m) => (
+                      <div key={m.id} style={{ fontSize: 12, color: 'var(--ant-color-text-tertiary, #999)', padding: '2px 0 2px 12px' }}>
+                        <Tag color={KIND_META[m.kind]?.color ?? 'default'} style={{ margin: 0 }}>{KIND_META[m.kind]?.text ?? m.kind}</Tag>
+                        {m.kind === 'relation' ? `${m.name} →${m.rel_target}` : m.name}
+                        <Tag color="cyan" style={{ margin: '0 0 0 8px' }}>{agentName.get(m.agent_id) || m.agent_id.slice(0, 10) + '…'}</Tag>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )
           ) : rows.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}

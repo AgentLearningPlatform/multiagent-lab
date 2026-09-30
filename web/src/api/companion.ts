@@ -120,6 +120,13 @@ export const companionApi = {
   // REQ-216⑥：本体维度候选（绑定该本体的全部 agent 跨 agent 铺平——资产详情页「伴生候选」页签）
   listCandidatesByOntology: (ontologyId: string, status = '') =>
     req<CompanionCandidate[]>(`/api/companion/ontologies/${encodeURIComponent(ontologyId)}/candidates${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  // REQ-216 增量③：本体维度按实体归组（详情页批量入图/拒绝——与侧板 agent 视角同构）
+  listCandidatesGroupedByOntology: (ontologyId: string, status = '') => {
+    const q = new URLSearchParams()
+    if (status) q.set('status', status)
+    q.set('group_by', 'entity')
+    return req<{ groups: CandidateGroup[] }>(`/api/companion/ontologies/${encodeURIComponent(ontologyId)}/candidates?${q.toString()}`)
+  },
   // REQ-216：绑定该本体的 agent 清单（本体伴生子图共享者）
   listOntologyAgents: (ontologyId: string) =>
     req<import('./types').Agent[]>(`/api/companion/ontologies/${encodeURIComponent(ontologyId)}/agents`),

@@ -27,13 +27,24 @@ type Facade struct {
 	// TraceSparql 翻译透视开关（REQ-94，§4.8.2）：开启时把工具翻译出的 SPARQL
 	// 与执行耗时/结果数落 trace_log，供前端“翻译透视”视图学习用。
 	TraceSparql bool
-	// ownerCache 伴生图归属解析缓存（REQ-216：agent/会话 → 绑定伴生本体 id；进程生命周期）
+	// ownerCache 伴生图归属解析缓存（REQ-216：agent/会话 → 绑定伴生本体 id）。
+	// REQ-216 增量④：TTL 失效（ownerCacheTTL）——agent 换绑本体后 facade 查询最迟一个
+	// TTL 收敛，不再 stale 到进程重启。
 	ownerMu    sync.Mutex
-	ownerCache map[string]string
+	ownerCache map[string]ownerEntry
 }
 
+// ownerEntry 归属缓存行（值 + 写入时刻，TTL 失效）。
+type ownerEntry struct {
+	oid string
+	at  time.Time
+}
+
+// ownerCacheTTL 归属缓存有效期（换绑收敛上限；解析是每查询一次平台 HTTP，TTL 不宜过短；var 便于测试收紧）。
+var ownerCacheTTL = 60 * time.Second
+
 func New(st *store.Store, endpoint func(string) (string, error)) *Facade {
-	return &Facade{Store: st, Endpoint: endpoint, HTTP: &http.Client{Timeout: 15 * time.Second}, TraceSparql: true, ownerCache: map[string]string{}}
+	return &Facade{Store: st, Endpoint: endpoint, HTTP: &http.Client{Timeout: 15 * time.Second}, TraceSparql: true, ownerCache: map[string]ownerEntry{}}
 }
 
 // Mount 挂载到 /mcp（Streamable HTTP，沿用 Q-14）。
