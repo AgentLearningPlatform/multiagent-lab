@@ -14,7 +14,9 @@ type Agent struct {
 	MaxIteration     int         `json:"max_iteration"`
 	Tools            []string    `json:"tools"`
 	Skills           []string    `json:"skills"`      // P2 生效
-	MCPServers       []MCPServer `json:"mcp_servers"` // P2 生效
+	MCPServers       []MCPServer `json:"mcp_servers"` // P2 生效；REQ-214 起退役为兼容残留（存量迁移后置空，JSON 字段保留供旧导出消费）
+	// REQ-214/M46：连接器引用（实例 id 数组）——agent 级连接白名单（最小权限第一层）。
+	Connectors      []string `json:"connectors"`
 	RuntimeBackend   string      `json:"runtime_backend"`
 	InferenceBackend string      `json:"inference_backend"`  // M13 §6.16：空 = eino-adk 自研默认
 	LogoURL          string      `json:"logo_url,omitempty"` // REQ-137：非内置后端登记的原 logo 图标 URL
@@ -54,9 +56,28 @@ type McpServe struct {
 }
 
 // MCPServer Agent 级 MCP 端点（P2）。
+// REQ-214 起产品层退役为「自定义 MCP 连接器」（connector kind=mcp），本结构保留作迁移输入与旧导出兼容。
 type MCPServer struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
+}
+
+// Connector 外部连接器（REQ-214/M46：统一 agent 连接外部能力的产品抽象）。
+// 两轴 = 连接对象（Kind）× 交付驱动（mcp 直通 / 平台托管插件服务）；
+// 凭据服务端绑定（CredentialsEncrypted），不进 LLM 上下文不进工具参数。
+type Connector struct {
+	ID                   string         `json:"id"`
+	Kind                 string         `json:"kind"` // mcp | kubernetes | ssh
+	Name                 string         `json:"name"` // 实例名（装配前缀槽位 {name}__{tool}）
+	Description          string         `json:"description"`
+	Config               map[string]any `json:"config"`          // kind 专属非敏感配置
+	CredentialsEncrypted []byte         `json:"-"`               // AES-256-GCM 密文（secrets.Box）
+	HasCredentials       bool           `json:"has_credentials"` // 读侧派生（凭据永不回传明文）
+	Status               string         `json:"status"`          // unknown | ok | error（连接测试回写）
+	StatusDetail         string         `json:"status_detail"`
+	IsBuiltin            bool           `json:"is_builtin"`
+	CreatedAt            string         `json:"created_at"`
+	UpdatedAt            string         `json:"updated_at"`
 }
 
 // ProjectFile 项目文件与对话产物元数据（M11 §5.2 project_file）。

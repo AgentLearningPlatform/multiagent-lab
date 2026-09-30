@@ -15,6 +15,7 @@ import (
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/api"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/chat"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/connector"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kg"
@@ -118,6 +119,29 @@ func main() {
 		log.Printf("[backend] runtime env resolver enabled: sandbox not configured（可在设置页「运行环境」分区启用）")
 	}
 
+	// REQ-214/M46：外部连接器启动引导——存量 mcp_servers 挂载幂等迁移为连接器实例+引用
+	//（实例名沿用原 name，装配前缀槽位不变=工具名零破坏；mcp_servers 置空即完成）+ oo 预设内置化。
+	if n, err := st.MigrateAgentMCPToConnectors(); err != nil {
+		log.Printf("[backend] migrate agent mcp_servers to connectors: %v", err)
+	} else if n > 0 {
+		log.Printf("[backend] REQ-214: 已迁移 %d 个 agent 的存量 MCP 挂载为连接器引用", n)
+	}
+	if err := st.EnsureBuiltinOpenOntologiesConnector(); err != nil {
+		log.Printf("[backend] ensure builtin open-ontologies connector: %v", err)
+	}
+	// REQ-214/M46 阶段二：平台托管自研 Go MCP 插件服务（进程内嵌、loopback 独立端口）——
+	// kubernetes/ssh 连接器经此走标准 MCP 客户端管线，凭据服务端绑定不进 LLM 上下文不进工具参数。
+	pluginAddr := getenv("CONNECTOR_PLUGIN_ADDR", "127.0.0.1:8093")
+	asm.PluginEndpoint = "http://" + pluginAddr
+	plugin := connector.NewPlugin(st, box, srv.RuntimeEnv.Defaults.KubectlBin)
+	pluginSrv := &http.Server{Addr: pluginAddr, Handler: plugin.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		log.Printf("[connector-plugin] listening on %s（kubernetes/ssh 连接器运行平面）", pluginAddr)
+		if err := pluginSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("[connector-plugin] 插件服务启动失败（k8s/ssh 连接器装配将降级告警）: %v", err)
+		}
+	}()
+
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           withStatic(cors(srv.Mux)),
@@ -139,6 +163,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(ctx)
+	_ = pluginSrv.Shutdown(ctx)
 }
 
 func getenv(k, def string) string {

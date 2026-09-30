@@ -38,6 +38,24 @@ export interface Agent {
   work_dir?: string
   /** REQ-202/M38：verify_on_stop 验证命令（空=不验证；失败标记 verify_failed） */
   verify_command?: string
+  /** REQ-214/M46：连接器授权白名单（实例 id 数组；agent 级最小权限第一层） */
+  connectors?: string[]
+  created_at: string
+  updated_at: string
+}
+
+/** REQ-214/M46：外部连接器（统一 agent 连接外部能力的产品抽象；凭据服务端加密绑定，永不回传） */
+export interface Connector {
+  id: string
+  kind: 'mcp' | 'kubernetes' | 'ssh'
+  name: string
+  description: string
+  config: Record<string, unknown>
+  has_credentials: boolean
+  status: 'unknown' | 'ok' | 'error'
+  status_detail: string
+  is_builtin: boolean
+  refs: string[]
   created_at: string
   updated_at: string
 }

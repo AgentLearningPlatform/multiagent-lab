@@ -35,6 +35,9 @@ type Assembler struct {
 	Ontology    *ontology.Service // M8：本体对接（nil 时本体不生效）
 	FilesRoot   string            // M11：项目文件根目录（空=save_file 不启用），如 ./data/projects
 	CheckPoints CheckPoints       // M11 收尾：中断检查点存储（nil=中断不持久化、无法恢复）
+	// REQ-214/M46：连接器插件服务基址（如 http://127.0.0.1:8093）——kubernetes/ssh 连接器
+	// 经此走标准 MCP 客户端管线；空 = 插件服务未启用（k8s/ssh 连接器装配降级告警）。
+	PluginEndpoint string
 }
 
 // BuildResult 装配产物。
@@ -143,7 +146,7 @@ func (a *Assembler) assembleSingle(ctx context.Context, ag *store.Agent, sc asse
 		LoadedSkills:    b.Meta.LoadedSkills,
 		OntoUnavailable: b.Meta.OntoUnavailable,
 		Snapshot: snapshotOf("single", []map[string]any{
-			agentSnapshotEntry("single", ag.Name, b.Meta.ModelLabel, b.Meta.SourceOf, b.Meta.LoadedSkills, ag.MCPServers, b.Meta.Instruction),
+			agentSnapshotEntry("single", ag.Name, b.Meta.ModelLabel, b.Meta.SourceOf, b.Meta.LoadedSkills, a.mcpSnapshotOf(ag), b.Meta.Instruction),
 		}),
 	}, nil
 }
@@ -244,7 +247,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 		if berr != nil {
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
-		entries = append(entries, agentSnapshotEntry("member", s.Name, sb.Meta.ModelLabel, sb.Meta.SourceOf, sb.Meta.LoadedSkills, s.MCPServers, sb.Meta.Instruction))
+		entries = append(entries, agentSnapshotEntry("member", s.Name, sb.Meta.ModelLabel, sb.Meta.SourceOf, sb.Meta.LoadedSkills, a.mcpSnapshotOf(s), sb.Meta.Instruction))
 		tools = append(tools, normalizeEmptyArgsTool(adk.NewAgentTool(ctx, sb.Inst)))
 		for k, v := range sb.Meta.SourceOf {
 			if _, dup := src[k]; !dup {
@@ -261,7 +264,7 @@ func (a *Assembler) assembleAgentAsTool(ctx context.Context, coord *store.Agent,
 	if err != nil {
 		return nil, err
 	}
-	entries = append(entries, agentSnapshotEntry("coordinator", coord.Name, label, tbc.SourceOf, tbc.LoadedSkills, coord.MCPServers, coordInstruction))
+	entries = append(entries, agentSnapshotEntry("coordinator", coord.Name, label, tbc.SourceOf, tbc.LoadedSkills, a.mcpSnapshotOf(coord), coordInstruction))
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: inst, EnableStreaming: true, CheckPointStore: a.CheckPoints})
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
@@ -298,7 +301,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 			return nil, fmt.Errorf("build member %q: %w", s.Name, berr)
 		}
 		subAgents = append(subAgents, sb.Inst)
-		entries = append(entries, agentSnapshotEntry("member", s.Name, sb.Meta.ModelLabel, sb.Meta.SourceOf, sb.Meta.LoadedSkills, s.MCPServers, sb.Meta.Instruction))
+		entries = append(entries, agentSnapshotEntry("member", s.Name, sb.Meta.ModelLabel, sb.Meta.SourceOf, sb.Meta.LoadedSkills, a.mcpSnapshotOf(s), sb.Meta.Instruction))
 		for k, v := range sb.Meta.SourceOf {
 			if _, dup := src[k]; !dup {
 				src[k] = v
@@ -311,7 +314,7 @@ func (a *Assembler) assembleTransfer(ctx context.Context, coord *store.Agent, su
 	if err != nil {
 		return nil, fmt.Errorf("set sub agents: %w", err)
 	}
-	entries = append(entries, agentSnapshotEntry("coordinator", coord.Name, label, tbc.SourceOf, tbc.LoadedSkills, coord.MCPServers, coordInstruction))
+	entries = append(entries, agentSnapshotEntry("coordinator", coord.Name, label, tbc.SourceOf, tbc.LoadedSkills, a.mcpSnapshotOf(coord), coordInstruction))
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: root, EnableStreaming: true, CheckPointStore: a.CheckPoints})
 	return &BuildResult{
 		Runner: runner, AgentName: coord.Name,
@@ -362,19 +365,29 @@ func (a *Assembler) buildOne(ctx context.Context, ag *store.Agent, sc assembleSc
 	}, nil
 }
 
-// isSelfMCPEndpoint 判断 URL 是否指向本平台 /mcp 端点（环回主机 + /mcp 路径）。
+// isSelfMCPEndpoint 判断 URL 是否指向本平台 /mcp 端点（环回主机 + 路径恰为 /mcp）。
 // 防止 agent 配置本平台对外端点造成 agent→server→agent 链式递归（§6.13 安全边界）。
+// REQ-214：路径须精确等于 /mcp——/connectors/{id}/mcp 等插件服务子路径不算自引用
+//（指向插件服务的直通绕过由装配层 PluginEndpoint 前缀防线单独拦截）。
 func isSelfMCPEndpoint(raw string) bool {
 	u := strings.TrimSpace(raw)
-	if !strings.Contains(u, "/mcp") {
+	rest := u
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	path := "/"
+	if j := strings.Index(rest, "/"); j >= 0 {
+		path = rest[j:]
+	}
+	if strings.TrimRight(path, "/") != "/mcp" {
 		return false
 	}
-	host := u
-	if i := strings.Index(host, "://"); i >= 0 {
-		host = host[i+3:]
+	host := rest
+	if j := strings.Index(host, "/"); j >= 0 {
+		host = host[:j]
 	}
-	if i := strings.Index(host, "/"); i >= 0 {
-		host = host[:i]
+	if q := strings.Index(host, "?"); q >= 0 {
+		host = host[:q]
 	}
 	h := strings.ToLower(host)
 	if i := strings.LastIndex(h, ":"); i >= 0 {
@@ -436,29 +449,30 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 		}
 	}
 
-	// 3) MCP servers（M9；连接失败降级继续，不阻断运行）
-	for _, ms := range ag.MCPServers {
-		if ms.URL == "" {
-			continue
-		}
+	// 3) MCP 端点装配（M9 §6.11；REQ-214/M46 起挂载单元 server → 连接器实例）：
+	//    a.Connectors 引用（agent 级连接白名单）——mcp 直通走 config.url，kubernetes/ssh 由平台
+	//    托管插件服务承载（同一条 MCP 客户端管线：{连接器实例名}__{tool} 前缀、审批/审计自动生效，
+	//    凭据服务端绑定不进工具参数）；ag.MCPServers 为存量兼容残留（启动迁移后为空，双保险保留）。
+	//    连接失败降级继续，不阻断运行。
+	fetchEndpoint := func(name, target string) {
 		// REQ-131/M18：拦截本平台 /mcp 自引用（防 agent→server→agent 循环递归）
-		if isSelfMCPEndpoint(ms.URL) {
-			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 指向本平台 /mcp 端点（自引用），已拒绝装配", ms.Name, ms.URL))
-			continue
+		if isSelfMCPEndpoint(target) {
+			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 指向本平台 /mcp 端点（自引用），已拒绝装配", name, target))
+			return
 		}
 		var bts []einotool.BaseTool
 		ferr := DoWithRetry(ctx, 2, func() error { // REQ-202 ④：幂等重试白名单（deadline/reset/5xx，N=2）
 			var e error
-			bts, e = tool.FetchMCPTools(ctx, ms.Name, ms.URL, mcpFetchTimeout)
+			bts, e = tool.FetchMCPTools(ctx, name, target, mcpFetchTimeout)
 			return e
 		})
 		if ferr != nil {
-			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 连接失败（含幂等重试），本次运行不加载其工具: %v", ms.Name, ms.URL, ferr))
-			continue
+			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 连接失败（含幂等重试），本次运行不加载其工具: %v", name, target, ferr))
+			return
 		}
 		if len(bts) == 0 {
-			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s 未暴露任何工具", ms.Name))
-			continue
+			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s 未暴露任何工具", name))
+			return
 		}
 		for _, bt := range bts {
 			ti, ierr := bt.Info(ctx)
@@ -470,8 +484,45 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 				continue
 			}
 			tb.Tools = append(tb.Tools, bt)
-			tb.SourceOf[ti.Name] = "mcp:" + ms.Name
+			tb.SourceOf[ti.Name] = "mcp:" + name
 		}
+	}
+	if a.Store != nil {
+		pluginBase := strings.TrimRight(a.PluginEndpoint, "/")
+		for _, id := range ag.Connectors {
+			c, cerr := a.Store.GetConnector(id)
+			if cerr != nil {
+				tb.Warnings = append(tb.Warnings, fmt.Sprintf("连接器 %q 不存在，已跳过", id))
+				continue
+			}
+			var target string
+			switch c.Kind {
+			case store.ConnectorKindMCP:
+				target, _ = c.Config["url"].(string)
+			case store.ConnectorKindKubernetes, store.ConnectorKindSSH:
+				if pluginBase == "" {
+					tb.Warnings = append(tb.Warnings, fmt.Sprintf("连接器 %s（%s）需要插件服务但平台未启用（CONNECTOR_PLUGIN_ADDR），本次运行不加载其工具", c.Name, c.Kind))
+					continue
+				}
+				target = pluginBase + "/connectors/" + c.ID + "/mcp"
+			}
+			if target == "" {
+				tb.Warnings = append(tb.Warnings, fmt.Sprintf("连接器 %s 缺少连接目标配置，已跳过", c.Name))
+				continue
+			}
+			// 授权防线：mcp 直通 URL 指向本平台插件服务 = 绕过连接器白名单，拒绝装配
+			if c.Kind == store.ConnectorKindMCP && pluginBase != "" && strings.HasPrefix(target, pluginBase+"/") {
+				tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 指向本平台连接器插件服务（绕过连接器授权），已拒绝装配", c.Name, target))
+				continue
+			}
+			fetchEndpoint(c.Name, target)
+		}
+	}
+	for _, ms := range ag.MCPServers {
+		if ms.URL == "" {
+			continue
+		}
+		fetchEndpoint(ms.Name, ms.URL)
 	}
 
 	// 4) 本体 facade（M8 §6.10-1：挂载运行方案时并入 onto_* 工具；
@@ -766,6 +817,30 @@ func (a *Assembler) buildModel(ctx context.Context, ag *store.Agent) (model.Base
 	// REQ-117/M17：按观测级别包装（level 0 原样返回），每次 Generate/Stream 采集 model.step
 	cm = wrapDebug(cm, ag.Name, debugFrom(ctx))
 	return cm, rec.Conn.Name + "@" + rec.Conn.ModelName, rec.Conn.ID, nil
+}
+
+// mcpSnapshotOf 装配快照的 mcp 字段（REQ-117 契约保持 name@target 形态）：
+// 存量 MCPServers + 连接器实例。脱敏口径：kubernetes/ssh 连接器只透出实例名与类型
+//（config/凭据服务端绑定，不进装配快照/模型上下文——REQ-214 验收断言点）。
+func (a *Assembler) mcpSnapshotOf(ag *store.Agent) []store.MCPServer {
+	out := append([]store.MCPServer{}, ag.MCPServers...)
+	if a.Store == nil {
+		return out
+	}
+	for _, id := range ag.Connectors {
+		c, err := a.Store.GetConnector(id)
+		if err != nil {
+			continue
+		}
+		target := c.Kind + " 连接器"
+		if c.Kind == store.ConnectorKindMCP {
+			if u, ok := c.Config["url"].(string); ok {
+				target = u
+			}
+		}
+		out = append(out, store.MCPServer{Name: c.Name, URL: target})
+	}
+	return out
 }
 
 // agentSnapshotEntry REQ-117 装配快照的单 Agent 条目。

@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Card, Collapse, Divider, Empty, Form, FormInstance, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Button, Card, Checkbox, Collapse, Divider, Empty, Form, FormInstance, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   ApiOutlined,
   ClusterOutlined,
   BranchesOutlined,
   CloseOutlined,
   CopyOutlined,
-  DeleteOutlined,
   ExportOutlined,
   FolderOutlined,
-  PlusOutlined,
   ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
@@ -18,7 +16,7 @@ import AIOptimizeButton from './AIOptimizeButton'
 import AgentCompanionManage from './AgentCompanionManage'
 import AssistantProposalBanner from './AssistantProposalBanner'
 import type { SandboxStatus } from '../api/client'
-import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, Ontology, Skill, ToolInfo } from '../api/types'
+import type { Agent, Connector, InferenceBackendStatus, McpServeInfo, ModelConnection, Ontology, Skill, ToolInfo } from '../api/types'
 import { companionApi } from '../api/companion'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
@@ -39,44 +37,13 @@ const DEFAULT_PANEL_WIDTH = 560
 const MIN_PANEL_WIDTH = 320
 const MAX_PANEL_WIDTH = 720
 
-/** 本地已知 MCP server 预设（REQ-99 ③ 通用挂载契约保留；D-O15 起 semantica 预设随「去-semantica 化」移除，
- *  通用 MCP servers 编辑能力不变，后续 open-ontologies 等预设随里程碑补入） */
-const MCP_PRESETS: { name: string; url: string; desc: string }[] = [
-  {
-    name: 'open-ontologies',
-    url: 'http://127.0.0.1:8092/mcp',
-    desc: 'M8.5：oo 双轨 MCP（119 onto_* 工具，Streamable HTTP 原生；v2.0.1）——对话挂载 oo 推理/校验/映射能力；平台同源等价地址 /api/oo/mcp',
-  },
+/** REQ-214/M46：连接器类型徽标（产品层只呈现「连接器」，MCP 为交付驱动之一） */
+const CONNECTOR_KINDS: { value: Connector['kind']; label: string; color: string }[] = [
+  { value: 'mcp', label: '自定义 MCP', color: 'blue' },
+  { value: 'kubernetes', label: 'Kubernetes', color: 'purple' },
+  { value: 'ssh', label: 'SSH', color: 'cyan' },
 ]
-
-/** MCP server 编辑行（name + url，Form.List 受控） */
-function McpServerRow({ name, remove }: { name: number; remove: (i: number) => void }) {
-  return (
-    <Space.Compact block style={{ marginBottom: 6 }}>
-      <Form.Item
-        name={[name, 'name']}
-        noStyle
-        rules={[
-          { required: true, message: '名称必填' },
-          { pattern: /^[a-zA-Z0-9_-]+$/, message: '字母/数字/下划线/连字符' },
-        ]}
-      >
-        <Input placeholder="名称（如 my-mcp）" style={{ width: '38%' }} />
-      </Form.Item>
-      <Form.Item
-        name={[name, 'url']}
-        noStyle
-        rules={[
-          { required: true, message: 'URL 必填' },
-          { pattern: /^https?:\/\//, message: '须为 http(s) URL（Streamable HTTP MCP）' },
-        ]}
-      >
-        <Input placeholder="http://127.0.0.1:8093/mcp" style={{ width: '52%' }} />
-      </Form.Item>
-      <Button icon={<DeleteOutlined />} onClick={() => remove(name)} aria-label="移除该 MCP server" />
-    </Space.Compact>
-  )
-}
+const kindMeta = (k: string) => CONNECTOR_KINDS.find((x) => x.value === k) ?? CONNECTOR_KINDS[0]
 
 /**
  * 智能体右侧侧边栏（REQ-103 统一范式 + REQ-132 四分类改版 / M18；REQ-193/M33 双入口）：
@@ -424,7 +391,7 @@ function companionOntologyNameOf(agent: Agent): string {
 // ---------------------------------------------------------------------------
 
 function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
-  const { showToast, bumpData } = useUI()
+  const { showToast, bumpData, setPage } = useUI()
   const [form] = Form.useForm()
   // REQ-213：内置行（平台助手）适配——白名单 8 字段可编辑（instruction/模型/温度/tools/skills/
   // mcp/max_tokens/max_iteration），身份与角色字段禁用；基座工具不可摘除；提案横幅置顶。
@@ -437,9 +404,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
   const [backends, setBackends] = useState<InferenceBackendStatus[]>([]) // M13：推理后端探测清单
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  // MCP servers 实时值（预设挂载态判重用）。必须在组件顶层调用——Form.List 渲染槽内是
-  // rc Field 类组件的 render 上下文，在其中调 useWatch 属非法 hook 调用，会整页白屏。
-  const mcpWatched = (Form.useWatch('mcp_servers', form) ?? []) as { name?: string; url?: string }[]
+  // REQ-214/M46：连接器授权候选（设置页「连接器」分区为管理面，侧板只做勾选授权）
+  const [connectors, setConnectors] = useState<Connector[]>([])
 
   useEffect(() => {
     form.setFieldsValue({
@@ -469,6 +435,19 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
       .catch(() => setSkills([]))
   }, [])
 
+  // REQ-214/M46：连接器候选（失败静默——勾选区空态引导去设置页）
+  useEffect(() => {
+    api
+      .listConnectors()
+      .then((r) => setConnectors(r.connectors ?? []))
+      .catch(() => setConnectors([]))
+  }, [])
+
+  const goConnectorSettings = () => {
+    localStorage.setItem('eino.settings.section', 'connectors')
+    setPage('settings')
+  }
+
   // 可选 chat 连接（启用中）与生效的全局默认（默认连接须启用，与后端 GetDefaultConnection 语义一致）
   const conns = useMemo(() => allConns.filter((c) => c.conn_type === 'chat' && c.enabled), [allConns])
   const defaultConn = useMemo(
@@ -494,7 +473,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
           max_iteration: v.max_iteration ?? 15,
           tools: v.tools ?? [],
           skills: v.skills ?? [],
-          mcp_servers: (v.mcp_servers ?? []).filter((s: { name?: string; url?: string }) => s?.name && s?.url),
+          mcp_servers: agent.mcp_servers ?? [], // REQ-214：兼容残留透传（迁移后恒空）
         })
         showToast('平台助手配置已保存，下次对话生效')
         bumpData()
@@ -520,7 +499,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         tools: v.tools ?? [],
         // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
         skills: agent.skills ?? [],
-        mcp_servers: (v.mcp_servers ?? []).filter((s: { name?: string; url?: string }) => s?.name && s?.url),
+        connectors: (v.connectors ?? []) as string[], // REQ-214/M46：连接器授权白名单
+        mcp_servers: agent.mcp_servers ?? [], // REQ-214：兼容残留透传（迁移后恒空）
         // REQ-131/M18：对外服务（token 原样保留——重置走专用端点）
         mcp_serve: {
           enabled: !!v.mcp_serve_enabled,
@@ -775,41 +755,39 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                     <Input allowClear disabled={isBuiltin} placeholder="如 go build ./...（空=不验证）" />
                   </Form.Item>
 
-                  {sec('MCP Servers')}
+                  {sec('外部连接器（REQ-214）')}
                   <div style={{ marginBottom: 8 }}>
                     <ApiOutlined style={{ marginRight: 6 }} />
                     <span className="model-meta">
-                      外部 MCP 工具源（Streamable HTTP）；工具以 <code>{'{server}__{tool}'}</code> 前缀并入白名单候选，连接失败降级不阻断运行。注意：指向本平台 /mcp 端点属自引用，装配时会被拒绝。
+                      连接外部能力的统一入口（自定义 MCP / Kubernetes / SSH）。工具以 <code>{'{连接器名}__{tool}'}</code> 前缀并入白名单候选，凭据服务端绑定不进模型上下文；勾选 = 授权本智能体使用（连接白名单），连接失败降级不阻断运行。
                     </span>
                   </div>
-                  <Form.List name="mcp_servers">
-                    {(fields, { add, remove }) => (
-                      <>
-                        {fields.map(({ key, name }) => (
-                          <McpServerRow key={key} name={name} remove={remove} />
-                        ))}
-                        <Space wrap size={4}>
-                          <Button size="small" icon={<PlusOutlined />} onClick={() => add({ name: '', url: '' })}>
-                            添加 Server
-                          </Button>
-                          {MCP_PRESETS.map((p) => {
-                            const mounted = mcpWatched.some((s) => s?.name === p.name || s?.url === p.url)
-                            return (
-                              <Button
-                                key={p.name}
-                                size="small"
-                                disabled={mounted}
-                                onClick={() => add({ name: p.name, url: p.url })}
-                                title={p.desc}
-                              >
-                                {mounted ? <Tag color="green" style={{ marginInlineEnd: 0 }}>已挂载 {p.name}</Tag> : `挂载 ${p.name}`}
-                              </Button>
-                            )
-                          })}
-                        </Space>
-                      </>
-                    )}
-                  </Form.List>
+                  <Form.Item name="connectors" style={{ marginBottom: 8 }}>
+                    <Checkbox.Group style={{ display: 'flex', flexDirection: 'column', gap: 4 }} disabled={isBuiltin}>
+                      {connectors.map((c) => {
+                        const meta = kindMeta(c.kind)
+                        return (
+                          <Checkbox key={c.id} value={c.id}>
+                            <span style={{ fontSize: 12 }}>
+                              <Tag color={meta.color} style={{ marginInlineEnd: 4 }}>{meta.label}</Tag>
+                              {c.name}
+                              {c.is_builtin && <Tag style={{ marginInlineEnd: 0 }}>内置</Tag>}
+                              {c.status === 'error' && <Tag color="red" style={{ marginInlineEnd: 0 }}>不可达</Tag>}
+                              {c.status === 'ok' && <Tag color="green" style={{ marginInlineEnd: 0 }}>可达</Tag>}
+                            </span>
+                          </Checkbox>
+                        )
+                      })}
+                    </Checkbox.Group>
+                  </Form.Item>
+                  {connectors.length === 0 && (
+                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                      暂无连接器——在设置页「连接器」分区创建（内置 open-ontologies 已就绪）。
+                    </Typography.Text>
+                  )}
+                  <Button size="small" icon={<SettingOutlined />} onClick={goConnectorSettings}>
+                    管理连接器
+                  </Button>
 
                   {sec('工具调用人工审批')}
                   <Form.Item

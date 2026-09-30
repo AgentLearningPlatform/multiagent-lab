@@ -192,6 +192,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/runtime-env", s.runtimeEnvGet)
 	m.HandleFunc("PUT /api/runtime-env", s.runtimeEnvPut)
 	m.HandleFunc("POST /api/runtime-env/test", s.runtimeEnvTest)
+	// REQ-214/M46：外部连接器（设置页「连接器」分区 + 侧板授权勾选数据源；凭据加密落库永不回传）
+	m.HandleFunc("GET /api/connectors", s.listConnectors)
+	m.HandleFunc("POST /api/connectors", s.createConnector)
+	m.HandleFunc("PUT /api/connectors/{id}", s.updateConnector)
+	m.HandleFunc("DELETE /api/connectors/{id}", s.deleteConnector)
+	m.HandleFunc("POST /api/connectors/{id}/test", s.testConnector)
 	// REQ-148 供应商分组：同一供应商可多实例（分组标识与 BaseURL 解耦）+ 别名（展示层）
 	m.HandleFunc("GET /api/provider-groups", s.listProviderGroups)
 	m.HandleFunc("POST /api/provider-groups", s.createProviderGroup)

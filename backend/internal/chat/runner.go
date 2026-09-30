@@ -40,6 +40,11 @@ type Service struct {
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc // conversationID -> cancel
+	// cpAnchors REQ-214 顺修：恢复链 checkpoint 锚点（conversationID -> 恢复时所用 checkpointID）。
+	// ADK 在 Resume 后再次挂起时沿用恢复锚点 id 覆盖保存快照（adk/runner.go resumeInternal），
+	// 而平台侧此前按新 runID 派生新 id 记录挂起状态——多级审批第二次恢复必报 checkpoint not exist。
+	// 新 Run 清除锚点（回到 runID 派生）；进程重启锚点丢失，挂起失效后新 Run 自愈（既有语义）。
+	cpAnchors sync.Map
 }
 
 // CompanionSource 伴生图检索源接口（REQ-170 P2 / REQ-127~130 检索源矩阵扩展）。
@@ -136,6 +141,7 @@ func (s *Service) Run(ctx context.Context, conv *store.Conversation, agent *stor
 	if emit == nil {
 		emit = func(*Event) {}
 	}
+	s.cpAnchors.Delete(conv.ID) // 新 Run 清恢复链锚点（checkpoint id 回到 runID 派生；REQ-214 顺修）
 
 	if conv.Scope == "agent" && conv.AgentID == nil {
 		return nil, errors.New("conversation is not bound to an agent")
@@ -597,8 +603,16 @@ type interruptState struct {
 
 // handleInterrupted 捕获运行中断（ask_human / 工具审批）：提取根因中断点信息，
 // 挂起状态落 conversation.interrupt_state，发 run.interrupted 事件（前端渲染答复/审批卡）。
+// checkpoint id 取恢复链锚点（REQ-214 顺修：Resume 后再次挂起时 ADK 沿用锚点 id 保存快照），
+// 无锚点（新 Run）按 runID 派生。
 func (s *Service) handleInterrupted(ctx context.Context, conv *store.Conversation, runID string, ii *adk.InterruptInfo, emit EmitFn) {
-	st := interruptState{CheckpointID: checkPointIDOf(runID), RunID: runID}
+	cpID := checkPointIDOf(runID)
+	if anchor, ok := s.cpAnchors.Load(conv.ID); ok {
+		if a, ok2 := anchor.(string); ok2 && a != "" {
+			cpID = a
+		}
+	}
+	st := interruptState{CheckpointID: cpID, RunID: runID}
 	if ii != nil {
 		var chosen *adk.InterruptCtx
 		for _, c := range ii.InterruptContexts {
@@ -932,6 +946,9 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 		}), emit)
 		return nil, err
 	}
+	// 登记恢复链锚点：ADK 再次挂起时沿用本 id 覆盖保存快照，handleInterrupted 据此记录
+	// 同一 id（REQ-214 顺修——多级审批/多轮 ask_human 第二次恢复不再 checkpoint not exist）
+	s.cpAnchors.Store(conv.ID, st.CheckpointID)
 
 	rc := newRunConsumer(s, runCtx, conv, runID, rt, emit, start)
 	rc.consume(iter)

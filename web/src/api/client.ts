@@ -50,6 +50,7 @@ import type {
   UsageStats,
   ValidationError,
   VersionsResponse,
+  Connector,
 } from './types'
 
 /** 携带 HTTP 状态与校验错误的接口错误（供 UI 区分 404 / 400 validation_errors / 502 不可达） */
@@ -424,6 +425,14 @@ export const api = {
   runtimeEnv: () => req<RuntimeEnvPayload>('/api/runtime-env'),
   setRuntimeEnv: (p: Partial<RuntimeEnvPayload['settings']>) => req<RuntimeEnvPayload>('/api/runtime-env', { method: 'PUT', body: JSON.stringify(p) }),
   testRuntimeEnv: (target: 'docker' | 'k8s') => req<{ target: string; ok: boolean; detail: string }>('/api/runtime-env/test', { method: 'POST', body: JSON.stringify({ target }) }),
+  // ---- REQ-214/M46：外部连接器（凭据服务端加密绑定；credentials 仅创建/更新时提交） ----
+  listConnectors: () => req<{ connectors: Connector[] }>('/api/connectors'),
+  createConnector: (p: { kind: string; name: string; description?: string; config?: Record<string, unknown>; credentials?: Record<string, unknown> }) =>
+    req<Connector>('/api/connectors', { method: 'POST', body: JSON.stringify(p) }),
+  updateConnector: (id: string, p: { name?: string; description?: string; config?: Record<string, unknown>; credentials?: Record<string, unknown> }) =>
+    req<Connector>(`/api/connectors/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(p) }),
+  deleteConnector: (id: string) => req<{ ok: boolean }>(`/api/connectors/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  testConnector: (id: string) => req<{ ok: boolean; detail: string; status: string }>(`/api/connectors/${encodeURIComponent(id)}/test`, { method: 'POST' }),
   // ---- REQ-148 供应商分组：多实例与别名（分组标识与 BaseURL 解耦） ----
   listProviderGroups: () => req<ProviderGroupMeta[]>('/api/provider-groups'),
   createProviderGroup: (alias: string) =>

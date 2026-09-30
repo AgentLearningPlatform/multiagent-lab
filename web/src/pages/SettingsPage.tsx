@@ -10,9 +10,10 @@ import { DiscoverPanel } from './settings/DiscoverPanel'
 import { ModelModal } from './settings/ModelModal'
 import { ProviderModal } from './settings/ProviderModal'
 import { RuntimeEnvPane } from './settings/RuntimeEnvPane'
+import { ConnectorsPane } from './settings/ConnectorsPane'
 import { groupOf, providerOfName, type ProviderGroup } from './settings/grouping'
 
-type Category = 'models' | 'stats' | 'inference' | 'runtime' | 'security'
+type Category = 'models' | 'connectors' | 'stats' | 'inference' | 'runtime' | 'security'
 /** 统计维度：供应商为前端归并（后端无提供商实体），其余直接映射后端 group_by */
 type StatsDimension = 'model' | 'supplier' | 'agent' | 'project'
 
@@ -265,6 +266,7 @@ export default function SettingsPage() {
             style={{ padding: '0 10px', background: 'transparent' }}
             items={[
               { key: 'models', label: '模型管理' },
+              { key: 'connectors', label: '连接器' },
               { key: 'inference', label: '推理后端' },
               { key: 'stats', label: '使用统计' },
               { key: 'runtime', label: <Space size={6}>运行环境</Space> },
@@ -281,6 +283,8 @@ export default function SettingsPage() {
         <div className="settings-main">
           {category === 'inference' ? (
             <InferencePanel />
+          ) : category === 'connectors' ? (
+            <ConnectorsPane />
           ) : category === 'runtime' ? (
             <RuntimeEnvPane />
           ) : category === 'security' ? (
