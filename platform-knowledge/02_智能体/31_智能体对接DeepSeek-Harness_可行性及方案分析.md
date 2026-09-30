@@ -385,6 +385,7 @@ type cliAdapter struct {
 - **与 ACP 的分工实证**：SDK 事件含 ACP 不暴露的治理/请求面事实（sandbox、approval policy、request header/context）——§7.1「S3 审计/回放无可替代」判断成立。
 
 ### 12.4 对 S1~S3 的设计输入（新发现）
+> **S1+S2 交付注（2026-09-30，M41 领取；stub ACP 驱动）**：S1=backend/internal/inference/streaming.go（streamingProc：进程持有/行分帧/关闭阶梯 stdin EOF→SIGTERM→SIGKILL 幂等）；S2=acp.go（acpClient JSON-RPC 2.0 行帧+acpAdapter deepseek-harness-acp：initialize→session/new〔sessionId=plt-+conv.ID，RunRequest.SessionID〕→session/prompt turn 末 stopReason→session/update 转译 message.delta/tool.call/tool.result+session/request_permission 默认 deny+session/cancel；Capabilities.Resume=true 翻正）。stub ACP agent 单测 3 组全过（§12.2 帧形态直译）。**待真机 dsh 装机联调四项**：真 GLM 多步工具对话/会话延续产品语义（跨 Run 复用与历史去重）/MCP http 挂载翻正（MCPMode 仍 instruction）/权限转审批；S3 可选待领取。
 
 1. **权限映射可行**：`approval/policy=ask` + ACP `session/request_permission` 可编程应答 → 平台审批策略（默认 deny 转人工）S2 可落。
 2. **MCP 挂载直通**：ACP `mcpCapabilities.http=true` → 平台 `/mcp`（REQ-131）与 `/api/oo/mcp`（M8.5）Streamable HTTP MCP server 可直接挂进 dsh 会话（`session/new` 的 mcpServers），「平台能力进 dsh 走 MCP 挂载」无协议障碍。

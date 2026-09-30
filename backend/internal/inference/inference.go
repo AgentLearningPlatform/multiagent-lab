@@ -40,6 +40,8 @@ type Capabilities struct {
 type RunRequest struct {
 	Prompt    string
 	UserInput string            // 原始用户输入（事件展示用）
+	// SessionID 平台会话标识（REQ-206/S2 ACP 通道：dshSessionId 映射源；其他后端忽略）
+	SessionID string
 	Cwd       string            // 子进程工作目录（空 = 继承）
 	Env       map[string]string // 额外环境变量
 	Debug     int               // M17 阶段二：≥2 时原始 stdout 行透出 debug.cli 事件（仅透传不入库）
@@ -96,6 +98,7 @@ func NewRegistry() *Registry {
 	for _, b := range newCLIAdapters() {
 		r.Register(b)
 	}
+	r.Register(newACPAdapter()) // REQ-206/S2：dsh --profile acp 长驻通道（独立于 M24 headless cliAdapter）
 	return r
 }
 

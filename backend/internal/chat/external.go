@@ -110,7 +110,7 @@ func (s *Service) runExternal(ctx context.Context, conv *store.Conversation, age
 		}
 		s.emitAndRecord(runCtx, conv, runID, newEvent(ev.Type, runID, ev.Data), emit)
 	}
-	err = b.Run(runCtx, &inference.RunRequest{Prompt: prompt, UserInput: input, Debug: debug}, adaptEmit)
+	err = b.Run(runCtx, &inference.RunRequest{Prompt: prompt, UserInput: input, Debug: debug, SessionID: conv.ID}, adaptEmit)
 
 	// 6) 收尾：取消/错误/正常 → assistant 落库 + run.finished/run.error
 	if err != nil {
