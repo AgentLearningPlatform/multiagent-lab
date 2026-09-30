@@ -130,7 +130,14 @@ func mergeToolTurns(msgs []*store.Message, evs []*store.RunEvent) (out []*schema
 		pending = nil
 		return res
 	}
+	// 发射孤儿调用块（运行中断未落 assistant 消息）：合成 assistant 保持协议配对，srcIDs 留空。
+	// 例外：若尚未输出任何消息（孤儿调用早于首条 user——历史窗口外事件/时钟偏差），直接丢弃
+	// pending，避免合成块出现在历史最前面（Eino 要求首条非 system 消息为 user）。
 	emitSynthetic := func() {
+		if len(out) == 0 {
+			pending = nil
+			return
+		}
 		if extra := flush(); len(extra) > 0 {
 			out = append(out, extra...)
 			srcIDs = append(srcIDs, make([]string, len(extra))...)

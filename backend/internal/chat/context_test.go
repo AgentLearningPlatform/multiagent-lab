@@ -64,6 +64,22 @@ func TestMergeToolTurnsSynthesizesUnknownResult(t *testing.T) {
 	}
 }
 
+// A1 边界：孤儿调用早于首条 user（历史窗口外事件）→ 丢弃，不产生前导合成 assistant。
+func TestMergeToolTurnsDropsOrphanBeforeFirstUser(t *testing.T) {
+	msgs := []*store.Message{
+		{ID: "m1", Role: "user", Content: "你好", CreatedAt: "2026-09-30T08:00:00Z"},
+		{ID: "m2", Role: "assistant", Content: "你好！", CreatedAt: "2026-09-30T08:00:05Z"},
+	}
+	evs := []*store.RunEvent{toolCallEvent("dead", "dg1", "save_file", "{}", "2026-09-30T00:09:30Z")}
+	out, _ := mergeToolTurns(msgs, evs)
+	if len(out) != 2 {
+		t.Fatalf("应仅保留 user/assistant 两条（孤儿调用丢弃），got %d: %+v", len(out), out)
+	}
+	if out[0].Role != schema.User {
+		t.Fatalf("首条必须是 user，got %s", out[0].Role)
+	}
+}
+
 // A5：超长工具结果首尾剪枝并带截断标注。
 func TestPruneToolResult(t *testing.T) {
 	long := strings.Repeat("头", 3000) + strings.Repeat("中", 5000) + strings.Repeat("尾", 900)
