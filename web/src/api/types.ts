@@ -9,6 +9,8 @@ export interface Agent {
   temperature: number | null
   max_tokens: number | null
   max_iteration: number
+  /** REQ-14：agent 级工具审批策略（''=关闭 | 'all' 全部审批；会话级可覆盖）——REQ-219 顺修前端类型缺字段 */
+  tool_approval?: string
   tools: string[]
   skills: string[]
   mcp_servers: { name: string; url: string }[]

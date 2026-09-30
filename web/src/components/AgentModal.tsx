@@ -93,6 +93,7 @@ export default function AgentModal({
         temperature: v.temperature ?? null,
         max_tokens: v.max_tokens ?? null,
         max_iteration: v.max_iteration ?? 25,
+        tool_approval: v.tool_approval ?? '', // REQ-219 顺修：表单项此前存在但未入载荷（创建时审批开关不生效）
         runtime_backend: v.runtime_backend ?? 'inprocess',
         inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
         companion_ontology: !!v.companion_ontology, // M28/REQ-170：伴生本体开关

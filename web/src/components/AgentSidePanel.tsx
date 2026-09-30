@@ -47,9 +47,11 @@ const kindMeta = (k: string) => CONNECTOR_KINDS.find((x) => x.value === k) ?? CO
 
 /**
  * 智能体右侧侧边栏（REQ-103 统一范式 + REQ-132 四分类改版 / M18；REQ-193/M33 双入口）：
- * activity bar（~44px）双入口——「配置」（AgentConfigForm 四页签：基本/模型与参数/能力/对外服务）
- * 与「伴生本体」（AgentCompanionView：伴生配置/伴生管理两页）同级切换（REQ-193 伴生自页签
- * 上提一级；选中记忆 localStorage eino.agentpanel.view）。
+ * activity bar（~44px）双入口——「配置」（AgentConfigForm 八页签：基本/模型与参数/Context/
+ * Harness/Loop/Graph/能力/对外服务——REQ-219/M50 五层视角落侧板：Context/Harness/Loop/Graph
+ * 四层与「模型与参数」（Model 层）并列成栏，「配置聚合呈现≠层职责混淆」；REQ-218/M49 提级
+ * activity bar 时本页签区随迁）与「伴生本体」（AgentCompanionView：伴生配置/伴生管理两页）
+ * 同级切换（REQ-193 伴生自页签上提一级；选中记忆 localStorage eino.agentpanel.view）。
  * 页签面板 forceRender（跨页签字段同表单提交）；字段/校验/提交 API 不变，仅承载重组。
  */
 const PANEL_VIEW_KEY = 'eino.agentpanel.view'
@@ -386,6 +388,48 @@ function companionOntologyNameOf(agent: Agent): string {
   return `${agent.name || '未命名智能体'}的伴生本体`
 }
 
+/**
+ * REQ-219 顺修：普通 agent PUT 为 full-replace（store.UpdateAgent 全字段写入，空值也落库），
+ * 载荷必须全字段构造——表单值 + 非本表单字段按 agent 现值透传防清零（REQ-189/213 模式）。
+ * 保存与 SandboxPanel 启动共用（此前启动沙箱仅 PUT 两字段，会把其余配置清零）。
+ */
+function agentFullPayload(agent: Agent, v: Record<string, any>) {
+  return {
+    name: v.name ?? agent.name,
+    description: v.description ?? '',
+    instruction: v.instruction ?? '',
+    model_conn_id: v.model_conn_id || null,
+    temperature: v.temperature ?? null,
+    max_tokens: v.max_tokens ?? null,
+    max_iteration: v.max_iteration ?? 25,
+    runtime_backend: v.runtime_backend ?? 'inprocess',
+    sandbox_memory: v.sandbox_memory ?? '',
+    sandbox_cpus: v.sandbox_cpus ?? 0,
+    inference_backend: v.inference_backend ?? 'eino-adk',
+    context_mode: v.context_mode ?? '', // REQ-201/M37：上下文预算档位（Context 层）
+    work_dir: (v.work_dir ?? '').trim(), // REQ-202/M38：文件原语安全根（Harness 层）
+    verify_command: (v.verify_command ?? '').trim(), // REQ-202/M38：verify_on_stop 背压（Harness 层）
+    tool_approval: v.tool_approval ?? '', // REQ-219 顺修：表单项此前存在但未入载荷（审批开关保存不生效）
+    logo_url: (v.logo_url ?? '').trim(), // REQ-137
+    tools: v.tools ?? [],
+    // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
+    skills: agent.skills ?? [],
+    connectors: (v.connectors ?? []) as string[], // REQ-214/M46：连接器授权白名单
+    mcp_servers: agent.mcp_servers ?? [], // REQ-214：兼容残留透传（迁移后恒空）
+    // REQ-131/M18：对外服务（token 原样保留——重置走专用端点）
+    mcp_serve: {
+      enabled: !!v.mcp_serve_enabled,
+      tool_name: (v.mcp_serve_tool_name ?? '').trim(),
+      token: agent.mcp_serve?.token ?? '',
+    },
+    // REQ-170/187 + REQ-193：伴生字段自「伴生本体」视图维护——按 agent 现值透传
+    companion_ontology_id: agent.companion_ontology_id ?? '',
+    companion_extract_hint: agent.companion_extract_hint ?? '',
+    companion_extract_conn_id: agent.companion_extract_conn_id ?? '',
+    companion_auto_threshold: agent.companion_auto_threshold ?? 0,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 配置视图（REQ-132：四分类页签；字段/校验/提交逻辑不变）
 // ---------------------------------------------------------------------------
@@ -490,40 +534,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
         onChanged?.()
         return
       }
-      await api.updateAgent(agent.id, {
-        name: v.name,
-        description: v.description ?? '',
-        instruction: v.instruction ?? '',
-        model_conn_id: v.model_conn_id || null,
-        temperature: v.temperature ?? null,
-        max_tokens: v.max_tokens ?? null,
-        max_iteration: v.max_iteration ?? 25,
-        runtime_backend: v.runtime_backend ?? 'inprocess',
-        sandbox_memory: v.sandbox_memory ?? '',
-        sandbox_cpus: v.sandbox_cpus ?? 0, // M10/10b：沙箱资源限制
-        inference_backend: v.inference_backend ?? 'eino-adk', // M13：推理后端（§6.16）
-        context_mode: v.context_mode ?? '', // REQ-201/M37：上下文预算档位
-        work_dir: (v.work_dir ?? '').trim(), // REQ-202/M38：文件原语安全根
-        verify_command: (v.verify_command ?? '').trim(), // REQ-202/M38：verify_on_stop 背压
-        logo_url: (v.logo_url ?? '').trim(), // REQ-137
-        tools: v.tools ?? [],
-        // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
-        skills: agent.skills ?? [],
-        connectors: (v.connectors ?? []) as string[], // REQ-214/M46：连接器授权白名单
-        mcp_servers: agent.mcp_servers ?? [], // REQ-214：兼容残留透传（迁移后恒空）
-        // REQ-131/M18：对外服务（token 原样保留——重置走专用端点）
-        mcp_serve: {
-          enabled: !!v.mcp_serve_enabled,
-          tool_name: (v.mcp_serve_tool_name ?? '').trim(),
-          token: agent.mcp_serve?.token ?? '',
-        },
-        // REQ-170/187 + REQ-193：伴生字段自「伴生本体」视图维护——配置表单保存按 agent
-        // 现值透传（表单不再承载，避免 full-replace 零值清掉伴生配置；REQ-216 绑定 id 同口径）
-        companion_ontology_id: agent.companion_ontology_id ?? '',
-        companion_extract_hint: agent.companion_extract_hint ?? '',
-        companion_extract_conn_id: agent.companion_extract_conn_id ?? '',
-        companion_auto_threshold: agent.companion_auto_threshold ?? 0,
-      })
+      // REQ-219：载荷统一走 agentFullPayload（表单值+非表单字段透传防清零；含 tool_approval 顺修）
+      await api.updateAgent(agent.id, agentFullPayload(agent, v))
       showToast('已保存，下次运行生效')
       bumpData()
       onChanged?.()
@@ -579,36 +591,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="instruction" label={<Space size={6}>系统提示词（Instruction）<AIOptimizeButton kind="agent_instruction" value={instructionValue} onApply={(v) => form.setFieldValue('instruction', v)} /></Space>}>
                     <Input.TextArea autoSize={{ minRows: 6, maxRows: 14 }} placeholder="定义角色、能力边界、回答风格…" />
                   </Form.Item>
-                  {sec('后端身份（在哪儿跑 · 谁来推理）——REQ-164 分区调整：Agent 身份属性入基本分区')}
-                  <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
-                    <InputNumber min={1} max={100} style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra={isBuiltin ? '内置助手固定进程内执行' : 'M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱；k8s=Pod 沙箱；auto=自动检测（REQ-190：k8s pod 优先→docker 次之→均不可用进程内兜底；平台需配置 SANDBOX_IMAGE）'}>
-                    <Select
-                      disabled={isBuiltin}
-                      options={[
-                        { value: 'inprocess', label: 'inprocess（进程内）' },
-                        { value: 'docker', label: 'docker（沙箱容器）' },
-                        { value: 'k8s', label: 'k8s（Pod 沙箱）' },
-                        { value: 'auto', label: 'auto（自动检测：k8s 优先）' },
-                      ]}
-                    />
-                  </Form.Item>
-                  {(runtimeBackend === 'docker' || runtimeBackend === 'k8s' || runtimeBackend === 'auto') && (
-                    <>
-                      <Form.Item name="sandbox_memory" label="沙箱内存上限" extra="M10/10b：留空 = 默认 512m">
-                        <Select
-                          allowClear
-                          placeholder="512m（默认）"
-                          options={[{ value: '256m', label: '256m' }, { value: '512m', label: '512m' }, { value: '1g', label: '1g' }, { value: '2g', label: '2g' }]}
-                        />
-                      </Form.Item>
-                      <Form.Item name="sandbox_cpus" label="沙箱 CPU 核数" extra="留空 = 默认 1 CPU">
-                        <InputNumber min={0.5} max={8} step={0.5} style={{ width: '100%' }} placeholder="1（默认）" />
-                      </Form.Item>
-                      <SandboxPanel agentId={agent.id} form={form} />
-                    </>
-                  )}
+                  {sec('推理后端（谁来推理）——「在哪儿跑」迁 Harness 页签（REQ-219 分层归位）')}
                   <Form.Item
                     name="inference_backend"
                     label="推理后端"
@@ -668,6 +651,21 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Form.Item name="max_tokens" label="最大回复 tokens">
                     <InputNumber min={1} style={{ width: '100%' }} placeholder="默认" />
                   </Form.Item>
+                  {/* REQ-219：context_mode 迁 Context 层页签（配置聚合呈现，层职责仍归 Context） */}
+                </>
+              ),
+            },
+            // REQ-219/M50 五层视角落侧板：Context/Harness/Loop/Graph 与「模型与参数」（Model 层）
+            // 并列成栏（开发者定案：context 不并入 Harness）——配置聚合呈现≠层职责混淆
+            {
+              key: 'context',
+              label: 'Context',
+              forceRender: true,
+              children: (
+                <>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 0 }}>
+                    Context 上下文层（REQ-201/M37 · REQ-219 分层呈现）——历史预算、压缩与工具结果剪枝：决定模型每轮「真正看到什么」，压缩/裁剪均以运行警告诚实标注。
+                  </Typography.Paragraph>
                   <Form.Item
                     name="context_mode"
                     label="上下文预算"
@@ -684,6 +682,125 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                       ]}
                     />
                   </Form.Item>
+                  {sec('进程内固定（观察项，暂不可配）')}
+                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    · 压缩策略：超预算先八段式 LLM 摘要（复用本智能体模型连接）持久化，再尾半预算裁剪；
+                    <br />· 召回链：知识库与伴生图召回按序注入（embedding 未配置自动词法兜底）；
+                    <br />· 工具结果剪枝：超 4k 字符保留首尾并标注截断。
+                  </Typography.Text>
+                </>
+              ),
+            },
+            {
+              key: 'harness',
+              label: 'Harness',
+              forceRender: true,
+              children: (
+                <>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 0 }}>
+                    Harness 执行面（REQ-202/M38 · REQ-219 分层归位）——工具装配、防护 hooks、验证背压、审批 gating 与沙箱运行后端：模型之外「怎么把事做安全、做扎实」的一层。
+                  </Typography.Paragraph>
+                  {sec('运行后端（在哪儿跑）')}
+                  <Form.Item name="runtime_backend" label="运行后端" initialValue="inprocess" extra={isBuiltin ? '内置助手固定进程内执行' : 'M10：inprocess=平台进程内装配；docker=per-Agent agentd 容器沙箱；k8s=Pod 沙箱；auto=自动检测（REQ-190：k8s pod 优先→docker 次之→均不可用进程内兜底；平台需配置 SANDBOX_IMAGE）'}>
+                    <Select
+                      disabled={isBuiltin}
+                      options={[
+                        { value: 'inprocess', label: 'inprocess（进程内）' },
+                        { value: 'docker', label: 'docker（沙箱容器）' },
+                        { value: 'k8s', label: 'k8s（Pod 沙箱）' },
+                        { value: 'auto', label: 'auto（自动检测：k8s 优先）' },
+                      ]}
+                    />
+                  </Form.Item>
+                  {(runtimeBackend === 'docker' || runtimeBackend === 'k8s' || runtimeBackend === 'auto') && (
+                    <>
+                      <Form.Item name="sandbox_memory" label="沙箱内存上限" extra="M10/10b：留空 = 默认 512m">
+                        <Select
+                          allowClear
+                          placeholder="512m（默认）"
+                          options={[{ value: '256m', label: '256m' }, { value: '512m', label: '512m' }, { value: '1g', label: '1g' }, { value: '2g', label: '2g' }]}
+                        />
+                      </Form.Item>
+                      <Form.Item name="sandbox_cpus" label="沙箱 CPU 核数" extra="留空 = 默认 1 CPU">
+                        <InputNumber min={0.5} max={8} step={0.5} style={{ width: '100%' }} placeholder="1（默认）" />
+                      </Form.Item>
+                      <SandboxPanel agent={agent} form={form} />
+                    </>
+                  )}
+                  {sec('文件原语安全根与验证背压（REQ-202，自「能力」迁入）')}
+                  <Form.Item
+                    name="work_dir"
+                    label="工作目录"
+                    tooltip={isBuiltin ? '内置助手不开放文件原语安全根配置' : '文件原语工具（grep/glob/read_file/write_file）的安全根：绝对路径，越界由 SafeJoin 强制拒绝；空=仅项目会话具备文件能力。'}
+                  >
+                    <Input allowClear disabled={isBuiltin} placeholder="如 /home/user/project（绝对路径，空=不装配文件原语）" />
+                  </Form.Item>
+                  <Form.Item
+                    name="verify_command"
+                    label="验证命令（verify_on_stop）"
+                    tooltip={isBuiltin ? '内置助手不开放 verify_on_stop 配置' : '运行标记完成前在安全根执行（sh -c，10s 超时）：退出码非 0 即背压——本次运行标记为 verify_failed 并在过程时间线透出输出。示例：go build ./...。'}
+                  >
+                    <Input allowClear disabled={isBuiltin} placeholder="如 go build ./...（空=不验证）" />
+                  </Form.Item>
+                  {sec('工具调用人工审批（REQ-217④ 迁侧板落点）')}
+                  <Form.Item
+                    name="tool_approval"
+                    label="审批策略"
+                    initialValue=""
+                    extra={isBuiltin ? '内置助手不开放审批策略配置' : '开启后，本智能体每次调用工具前都会挂起等待你批准或拒绝（REQ-14 恢复语义 / 危险操作审批）；开启审批后，对外 MCP 服务（server 模式）的调用将被默认拒绝。对话头部的会话级开关可覆盖本策略'}
+                  >
+                    <Select
+                      disabled={isBuiltin}
+                      options={[
+                        { value: '', label: '关闭（直接执行）' },
+                        { value: 'all', label: '全部工具调用前审批' },
+                      ]}
+                    />
+                  </Form.Item>
+                  {sec('防护 hooks（进程内确定性层，只读）')}
+                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    · fetchGuard（启用）：http_fetch 执行前内网/环回地址预检（SSRF 粗防），拒绝时结构化回执回喂模型、调用不执行；
+                    <br />· cmdGuard（预置未启用）：危险命令模式表随 run_command 三前置（沙箱+绑定目录+审批，REQ-202 B1「缺一不上」）放开后生效；
+                    <br />· hook 纪律：只放行/拒绝、不改写参数与结果——确定性检查不进模型上下文决策。
+                  </Typography.Text>
+                </>
+              ),
+            },
+            {
+              key: 'loop',
+              label: 'Loop',
+              forceRender: true,
+              children: (
+                <>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 0 }}>
+                    Loop 循环层（REQ-204/M39 · REQ-219 分层呈现）——ReAct 迭代上限、挂起恢复与长任务推进：防死循环与跨会话续跑在这一层。
+                  </Typography.Paragraph>
+                  <Form.Item name="max_iteration" label="最大迭代次数（ReAct 上限）" initialValue={25}>
+                    <InputNumber min={1} max={100} style={{ width: '100%' }} />
+                  </Form.Item>
+                  {sec('挂起恢复与长任务（会话级，对话窗口配置）')}
+                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    · 挂起恢复：审批/追问挂起经 checkpoint 持久化，后端重启后仍可恢复（REQ-204 C1）；
+                    <br />· 对话级定时续跑：对话内配置、cap 硬上限（进程内形态，重启失效）；
+                    <br />· 进度产物：todo_write 落库 + todo.md 导出；usage tokens 随运行事件落库。
+                  </Typography.Text>
+                </>
+              ),
+            },
+            {
+              key: 'graph',
+              label: 'Graph',
+              forceRender: true,
+              children: (
+                <>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 0 }}>
+                    Graph 协作层（REQ-219 分层呈现）——多智能体编排与工作流，五层视角的第五层。当前智能体级暂无配置项（诚实占位）。
+                  </Typography.Paragraph>
+                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    · 成员协作：多智能体团队（成员/协调者/collab_mode/workflow_mode）在「项目」侧板配置；
+                    <br />· 子智能体委派：成员经装配期 agent_as_tool / transfer_to_agent 并入（项目会话生效）；
+                    <br />· 工作流编排（REQ-205/M40）：触发驱动待领取——出现真实编排诉求后在此层落地。
+                  </Typography.Text>
                 </>
               ),
             },
@@ -749,21 +866,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                     />
                   </Form.Item>
 
-                  {sec('Harness 执行面（REQ-202）')}
-                  <Form.Item
-                    name="work_dir"
-                    label="工作目录"
-                    tooltip={isBuiltin ? '内置助手不开放文件原语安全根配置' : '文件原语工具（grep/glob/read_file/write_file）的安全根：绝对路径，越界由 SafeJoin 强制拒绝；空=仅项目会话具备文件能力。'}
-                  >
-                    <Input allowClear disabled={isBuiltin} placeholder="如 /home/user/project（绝对路径，空=不装配文件原语）" />
-                  </Form.Item>
-                  <Form.Item
-                    name="verify_command"
-                    label="验证命令（verify_on_stop）"
-                    tooltip={isBuiltin ? '内置助手不开放 verify_on_stop 配置' : '运行标记完成前在安全根执行（sh -c，10s 超时）：退出码非 0 即背压——本次运行标记为 verify_failed 并在过程时间线透出输出。示例：go build ./...。'}
-                  >
-                    <Input allowClear disabled={isBuiltin} placeholder="如 go build ./...（空=不验证）" />
-                  </Form.Item>
+                  {/* REQ-219：work_dir/verify_command/tool_approval 迁 Harness 层页签 */}
 
                   {sec('外部连接器（REQ-214）')}
                   <div style={{ marginBottom: 8 }}>
@@ -813,21 +916,6 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
                   <Button size="small" icon={<SettingOutlined />} onClick={goConnectorSettings}>
                     管理连接器
                   </Button>
-
-                  {sec('工具调用人工审批')}
-                  <Form.Item
-                    name="tool_approval"
-                    label="审批策略"
-                    initialValue=""
-                    extra="开启后，本智能体每次调用工具前都会挂起等待你批准或拒绝（REQ-14 恢复语义 / 危险操作审批）；开启审批后，对外 MCP 服务（server 模式）的调用将被默认拒绝"
-                  >
-                    <Select
-                      options={[
-                        { value: '', label: '关闭（直接执行）' },
-                        { value: 'all', label: '全部工具调用前审批' },
-                      ]}
-                    />
-                  </Form.Item>
                 </>
               ),
             },
@@ -875,7 +963,8 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
  * M10/10b 沙箱面板：容器状态可见 + 启动/停止（docker 运行后端的 Agent）。
  * 状态经 /api/agents/{id}/sandbox 轮询（10s），启停后即时刷新；未启用 SANDBOX_IMAGE 时降级提示。
  */
-function SandboxPanel({ agentId, form }: { agentId: string; form: FormInstance }) {
+function SandboxPanel({ agent, form }: { agent: Agent; form: FormInstance }) {
+  const agentId = agent.id
   const { showToast } = useUI()
   const [st, setSt] = useState<SandboxStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -940,13 +1029,10 @@ function SandboxPanel({ agentId, form }: { agentId: string; form: FormInstance }
             type="primary"
             loading={busy}
             onClick={async () => {
-              // 保存表单中的资源限制再启动（Start 读取最新字段）
-              const v = form.getFieldsValue()
+              // REQ-219 顺修：启动前落库资源限制须走全量载荷——后端 PUT 为 full-replace，
+              // 此前仅传沙箱两字段会把其余配置清零（agentFullPayload 与保存共用）
               await act(async () => {
-                await api.updateAgent(agentId, {
-                  sandbox_memory: v.sandbox_memory ?? '',
-                  sandbox_cpus: v.sandbox_cpus ?? 0,
-                })
+                await api.updateAgent(agentId, agentFullPayload(agent, form.getFieldsValue()))
                 await api.sandboxStart(agentId)
               }, '沙箱容器已启动（per-Agent agentd）')
             }}
