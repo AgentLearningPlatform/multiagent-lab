@@ -359,3 +359,71 @@ func TestInsertTriplesRoundTrip(t *testing.T) {
 		t.Fatalf("目标图不符:\n%s", ins)
 	}
 }
+
+// REQ-216 P3 收尾（复查轮后续）：②宿主方案命名去叠加 / ④拉起失败冷却。
+func TestPlanNameNoDoublePrefix(t *testing.T) {
+	var createBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/runtime-profiles", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	mux.HandleFunc("GET /api/ontologies/ont_p", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"ont_p","name":"伴生·已带前缀"}`))
+	})
+	mux.HandleFunc("POST /api/runtime-profiles", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&createBody)
+		_, _ = w.Write([]byte(`{"id":"rt_p","name":"x","engine":"oxigraph","ontology_ids":["ont_p"],"port":9341,"status":"created"}`))
+	})
+	mux.HandleFunc("POST /api/runtime-profiles/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"rt_p","status":"running","port":9341}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	p := NewPlanEngines(srv.URL, srv.URL)
+	if _, err := p.EnsureHostPlan(context.Background(), "ont_p"); err != nil {
+		t.Fatal(err)
+	}
+	if createBody["name"] != "伴生·已带前缀" {
+		t.Fatalf("已带前缀不应重复拼接: %v", createBody["name"])
+	}
+}
+
+func TestStartCooldownAfterFailure(t *testing.T) {
+	old := startCooldown
+	startCooldown = 200 * time.Millisecond
+	t.Cleanup(func() { startCooldown = old })
+
+	starts := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/runtime-profiles", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"rt_e","name":"伴生·E","engine":"oxigraph","ontology_ids":["ont_e"],"port":9342,"status":"error"}]`))
+	})
+	mux.HandleFunc("POST /api/runtime-profiles/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+		starts++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"boom"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	p := NewPlanEngines(srv.URL, srv.URL)
+
+	_, err1 := p.EnsureHostPlan(context.Background(), "ont_e")
+	if err1 == nil {
+		t.Fatal("error 态方案拉起失败应报错")
+	}
+	if starts != 1 {
+		t.Fatalf("首次应尝试 start 一次, got %d", starts)
+	}
+	// 冷却期内：快速失败，不再打 start
+	_, err2 := p.EnsureHostPlan(context.Background(), "ont_e")
+	if err2 == nil || !strings.Contains(err2.Error(), "冷却中") {
+		t.Fatalf("冷却期内应快速失败: %v", err2)
+	}
+	if starts != 1 {
+		t.Fatalf("冷却期内不应重试 start, got %d", starts)
+	}
+	// 冷却过期 → 重试
+	time.Sleep(250 * time.Millisecond)
+	_, _ = p.EnsureHostPlan(context.Background(), "ont_e")
+	if starts != 2 {
+		t.Fatalf("冷却过期应重试 start, got %d", starts)
+	}
+}

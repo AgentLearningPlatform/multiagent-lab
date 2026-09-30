@@ -719,7 +719,7 @@ func (s *Service) StatusByAgent(ctx context.Context, agentID string) (map[string
 	st["engine_endpoint"] = base + "/query"
 	// REQ-216：宿主方案可观测（运行平面方案管理界面可见可启停；engine_detail 二进制/数据目录退役）
 	if pid := s.Plans.HostPlan(ontID); pid != "" {
-		st["plan"] = map[string]any{"id": pid, "endpoint": base}
+		st["plan"] = map[string]any{"id": pid, "name": s.Plans.HostPlanName(ontID), "endpoint": base}
 	}
 	if raw, err := s.Plans.Query(ctx, base, SelectLabels(ontID)); err == nil {
 		st["labels"] = json.RawMessage(extractLabelsJSON(raw))

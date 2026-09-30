@@ -49,8 +49,8 @@ export interface CompanionStatus {
   /** REQ-216：宿主方案运行态（伴生引擎=运行平面方案引擎；读侧兜底拉起后为 true） */
   engine_running: boolean
   engine_endpoint?: string
-  /** REQ-216：宿主方案可观测（id+基址；运维入口=本体运行页方案管理） */
-  plan?: { id: string; endpoint: string }
+  /** REQ-216：宿主方案可观测（id+名+基址；运维入口=本体运行页方案管理） */
+  plan?: { id: string; name?: string; endpoint: string }
   /** REQ-216：宿主方案确保失败原因（诚实呈现；如运行平面不可达） */
   plan_error?: string
   labels?: string[]

@@ -176,7 +176,10 @@ func (s *Service) migrateBindings(ctx context.Context) error {
 func (s *Service) findOrCreateCompanionOntology(ctx context.Context, agentName string) (string, error) {
 	name := CompanionOntologyName(agentName)
 	if oid, err := s.Plans.FindOntologyByName(ctx, name); err == nil && oid != "" {
-		return oid, nil
+		// 增量轮⑤：同名复用收紧——须同时命中迁移创建的描述标记，防误绑用户同名本体
+		if _, desc, derr := s.Plans.OntologyInfo(ctx, oid); derr == nil && strings.Contains(desc, "伴生本体（REQ-216") {
+			return oid, nil
+		}
 	}
 	return s.Plans.CreateEmptyOntology(ctx, name, "伴生本体（REQ-216 绑定回填自动创建；对话生长产物归属容器）")
 }

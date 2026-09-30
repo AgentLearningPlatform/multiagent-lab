@@ -35,8 +35,15 @@ type PlanEngines struct {
 	mu      sync.Mutex
 	eps     map[string]string // ontologyID → 引擎基址缓存（查询失败失效重查；宿主方案重建后自愈）
 	hostIDs map[string]string // ontologyID → 宿主方案 id（status 透出/观测）
+	names   map[string]string // ontologyID → 宿主方案名（status 透出，增量轮③可观测）
 	locks   map[string]*sync.Mutex // REQ-216 增量④：每本体串行锁（Ensure 单飞化——防并发重复建方案）
+	// 增量轮④：拉起失败冷却（error 态方案在冷却期内不重试 start——防每次读路径同步重试风暴）
+	startFailAt  map[string]time.Time
+	startFailErr map[string]string
 }
+
+// startCooldown 拉起失败冷却期（读过路径遇 error 态宿主方案期间快速失败，不阻塞接口；var 便于测试收紧）。
+var startCooldown = 30 * time.Second
 
 // NewPlanEngines 构造（URL 空取默认同机端口）。
 func NewPlanEngines(runtimeURL, buildURL string) *PlanEngines {
@@ -52,8 +59,18 @@ func NewPlanEngines(runtimeURL, buildURL string) *PlanEngines {
 		HTTP:       &http.Client{Timeout: 60 * time.Second}, // start 为同步健康等待，预算放宽
 		eps:        map[string]string{},
 		hostIDs:    map[string]string{},
+		names:      map[string]string{},
 		locks:      map[string]*sync.Mutex{},
+		startFailAt:  map[string]time.Time{},
+		startFailErr: map[string]string{},
 	}
+}
+
+// HostPlanName 当前本体宿主方案名（Ensure 成功后可读；未解析为空）。
+func (p *PlanEngines) HostPlanName(ontologyID string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.names[ontologyID]
 }
 
 func getenvDefault(k, def string) string {
@@ -114,6 +131,11 @@ func (p *PlanEngines) EnsureHostPlan(ctx context.Context, ontologyID string) (st
 		p.mu.Unlock()
 		return base, nil
 	}
+	if at, ok := p.startFailAt[ontologyID]; ok && time.Since(at) < startCooldown {
+		errMsg := p.startFailErr[ontologyID]
+		p.mu.Unlock()
+		return "", fmt.Errorf("宿主方案拉起冷却中（%s 内不重试）: %s", startCooldown, errMsg)
+	}
 	p.mu.Unlock()
 
 	profiles, err := p.listProfiles(ctx)
@@ -127,14 +149,16 @@ func (p *PlanEngines) EnsureHostPlan(ctx context.Context, ontologyID string) (st
 			return p.remember(ontologyID, pr), nil
 		}
 	}
-	// ② 同本体存量方案拉起（stopped/error/created——上次宿主或用户建后未启）
+	// ② 同本体存量方案拉起（stopped/error/created——上次宿主或用户建后未启；失败进冷却）
 	for i := range profiles {
 		pr := &profiles[i]
 		if containsOID(pr.OntologyIDs, ontologyID) {
 			started, err := p.startProfile(ctx, pr.ID)
 			if err != nil {
+				p.recordStartFail(ontologyID, err.Error())
 				return "", fmt.Errorf("宿主方案 %s（%s）拉起失败: %w", pr.Name, pr.ID, err)
 			}
+			p.clearStartFail(ontologyID)
 			if started.Port == 0 { // 启动响应异常兜底：回读快照
 				started, _ = p.getProfile(ctx, pr.ID)
 			}
@@ -146,28 +170,52 @@ func (p *PlanEngines) EnsureHostPlan(ctx context.Context, ontologyID string) (st
 	if name == "" {
 		name = ontologyID
 	}
-	created, err := p.createProfile(ctx, "伴生·"+name, ontologyID)
+	// ②命名去叠加（增量轮②）：本体名已带「伴生·」前缀（如历史宿主名直接复用为本体名）不重复拼接
+	planName := name
+	if !strings.HasPrefix(name, "伴生·") {
+		planName = "伴生·" + name
+	}
+	created, err := p.createProfile(ctx, planName, ontologyID)
 	if err != nil {
 		return "", fmt.Errorf("创建伴生宿主方案失败: %w", err)
 	}
 	started, err := p.startProfile(ctx, created.ID)
 	if err != nil {
+		p.recordStartFail(ontologyID, err.Error())
 		return "", fmt.Errorf("伴生宿主方案 %s 启动失败: %w", created.Name, err)
 	}
+	p.clearStartFail(ontologyID)
 	if started.Port == 0 { // 启动响应异常兜底：回读快照
 		started, _ = p.getProfile(ctx, created.ID)
 	}
 	return p.remember(ontologyID, started), nil
 }
 
-// remember 登记端点缓存（并发下后写胜出——同一本体的宿主方案是收敛单解）。
+// remember 登记端点/方案 id/方案名缓存（并发下后写胜出——同一本体的宿主方案是收敛单解）。
 func (p *PlanEngines) remember(ontologyID string, pr *runtimeProfile) string {
 	base := engineBase(pr.Port)
 	p.mu.Lock()
 	p.eps[ontologyID] = base
 	p.hostIDs[ontologyID] = pr.ID
+	p.names[ontologyID] = pr.Name
+	delete(p.startFailAt, ontologyID)
 	p.mu.Unlock()
 	return base
+}
+
+// recordStartFail / clearStartFail 拉起失败冷却登记（增量轮④）。
+func (p *PlanEngines) recordStartFail(ontologyID, msg string) {
+	p.mu.Lock()
+	p.startFailAt[ontologyID] = time.Now()
+	p.startFailErr[ontologyID] = msg
+	p.mu.Unlock()
+}
+
+func (p *PlanEngines) clearStartFail(ontologyID string) {
+	p.mu.Lock()
+	delete(p.startFailAt, ontologyID)
+	delete(p.startFailErr, ontologyID)
+	p.mu.Unlock()
 }
 
 // Invalidate 端点缓存失效（查询失败时调用；下次操作重解析宿主方案）。
@@ -331,6 +379,31 @@ func (p *PlanEngines) FindOntologyByName(ctx context.Context, name string) (stri
 		}
 	}
 	return "", nil
+}
+
+// OntologyInfo 构建平面取本体名+描述（迁移同名复用的描述标记校验用）。
+func (p *PlanEngines) OntologyInfo(ctx context.Context, ontologyID string) (name, desc string, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/ontologies/%s", p.BuildURL, ontologyID), nil)
+	if err != nil {
+		return "", "", err
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return "", "", fmt.Errorf("构建平面返回 %s", resp.Status)
+	}
+	var out struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", "", err
+	}
+	return out.Name, out.Description, nil
 }
 
 // CreateEmptyOntology REQ-216②：绑定交互「一键创建空本体」——经构建平面 POST /api/ontologies。

@@ -259,8 +259,10 @@ export default function AgentCompanionManage({ agent, onUnbound }: { agent: Agen
         ) : (
           <Space size={6} wrap>
             {engine?.engine_running ? (
-              <Tooltip title={`宿主方案 ${engine.plan?.id ?? '—'}（运行平面承载伴生读写，本体运行页可见可启停）｜端点 ${engine.engine_endpoint ?? ''}`}>
-                <Tag color="green" style={{ margin: 0 }}>宿主方案运行中</Tag>
+              <Tooltip title={`宿主方案 ${engine.plan?.name || engine.plan?.id || '—'}（运行平面承载伴生读写，本体运行页可见可启停）｜端点 ${engine.engine_endpoint ?? ''}`}>
+                <Tag color="green" style={{ margin: 0 }}>
+                  宿主方案运行中{engine.plan?.name ? ` · ${engine.plan.name}` : ''}
+                </Tag>
               </Tooltip>
             ) : (
               <Tooltip title={engine?.plan_error || '伴生宿主方案未运行（读路径会自动拉起）'}>
