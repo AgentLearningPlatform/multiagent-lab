@@ -212,8 +212,9 @@ func TestHandleSparqlQueryEndToEnd(t *testing.T) {
 	}
 }
 
-// M28/P2a（REQ-170）+ REQ-211/M44：sparql_query graph=companion 伴生图分支——
-// agent_id 直传 / conversation_id 经平台 graph-owner 解析（owner 桩）/ 参数校验/失败语义。
+// REQ-216/M47：sparql_query graph=companion 伴生图分支——伴生图=智能体绑定本体的伴生子图，
+// 宿主=含该本体的 running 方案引擎（agent_id 直传 / conversation_id 经平台 graph-owner 解析，
+// 双桩）/ 参数校验/失败语义。
 func TestHandleSparqlQueryCompanion(t *testing.T) {
 	var gotPath, gotRawQuery string
 	sparqlSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -223,9 +224,8 @@ func TestHandleSparqlQueryCompanion(t *testing.T) {
 			{"label":{"type":"literal","value":"Pod 扩容"}}]}}`)
 	}))
 	defer sparqlSrv.Close()
-	t.Setenv("COMPANION_GRAPH_ENDPOINT", sparqlSrv.URL)
 
-	// 平台 graph-owner 桩：conv-abc → agt-owner；conv-proj → 400（项目会话无唯一归属）
+	// 平台 graph-owner 桩：agent/会话 → 绑定伴生本体 onto1；conv-proj → 400（项目会话无唯一归属）
 	ownerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conv := r.URL.Query().Get("conversation_id")
 		w.Header().Set("Content-Type", "application/json")
@@ -234,7 +234,7 @@ func TestHandleSparqlQueryCompanion(t *testing.T) {
 			io.WriteString(w, `{"error":"项目会话无唯一所属智能体——请按 agent_id 直传"}`)
 			return
 		}
-		io.WriteString(w, `{"agent_id":"agt-owner","graph":"http://eino-lab/graph/agt-owner"}`)
+		io.WriteString(w, `{"agent_id":"agt-owner","ontology_id":"onto1","graph":"http://eino-lab/graph/ont-onto1"}`)
 	}))
 	defer ownerSrv.Close()
 	t.Setenv("PLATFORM_API_URL", ownerSrv.URL)
@@ -244,7 +244,16 @@ func TestHandleSparqlQueryCompanion(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	defer st.Close()
-	f := New(st, func(string) (string, error) { return "", nil })
+	now := time.Now().Format(time.RFC3339)
+	p := &store.Profile{ID: "p1", Name: "伴生·宿主", Engine: "oxigraph", OntologyIDs: []string{"onto1"},
+		Config: "{}", Status: "created", CreatedAt: now, UpdatedAt: now}
+	if err := st.Create(p); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	if err := st.SetStatus("p1", "running", "", ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	f := New(st, func(string) (string, error) { return sparqlSrv.URL, nil })
 	h := f.handleSparqlQuery()
 
 	newReq := func(args map[string]any) mcp.CallToolRequest {
@@ -254,7 +263,7 @@ func TestHandleSparqlQueryCompanion(t *testing.T) {
 		return req
 	}
 
-	// 1) agent_id 直传：default-graph-uri 指向 agent 图；ontology_id 可缺省
+	// 1) agent_id 直传：解析绑定本体 → 宿主方案引擎 default-graph-uri 指向伴生子图
 	res, err := h(context.Background(), newReq(map[string]any{
 		"query":    "SELECT ?label WHERE { ?s rdfs:label ?label }",
 		"graph":    "companion",
@@ -263,22 +272,22 @@ func TestHandleSparqlQueryCompanion(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("伴生查询失败: %v / %v", err, res)
 	}
-	if !strings.Contains(gotRawQuery, "default-graph-uri=") || !strings.Contains(gotRawQuery, "agt-agt-direct") {
+	if !strings.Contains(gotRawQuery, "default-graph-uri=") || !strings.Contains(gotRawQuery, "ont-onto1") {
 		t.Fatalf("转发 URL 不符: %s?%s", gotPath, gotRawQuery)
 	}
 	txt, _ := json.Marshal(res)
-	if !strings.Contains(string(txt), "http://eino-lab/graph/agt-agt-direct") {
+	if !strings.Contains(string(txt), "http://eino-lab/graph/ont-onto1") {
 		t.Fatalf("结果缺 graph 字段: %s", txt)
 	}
 
-	// 2) conversation_id 兼容：经 graph-owner 解析为所属 agent 图
+	// 2) conversation_id 兼容：经 graph-owner 解析为所属 agent 绑定的伴生子图
 	res, err = h(context.Background(), newReq(map[string]any{
 		"query": "SELECT ?label WHERE { ?s rdfs:label ?label }", "graph": "companion", "conversation_id": "conv-abc"}))
 	if err != nil || res.IsError {
 		t.Fatalf("owner 解析路径失败: %v / %v", err, res)
 	}
-	if !strings.Contains(gotRawQuery, "agt-agt-owner") {
-		t.Fatalf("应解析为所属 agent 图: %s", gotRawQuery)
+	if !strings.Contains(gotRawQuery, "ont-onto1") {
+		t.Fatalf("应解析为绑定本体伴生子图: %s", gotRawQuery)
 	}
 
 	// 3) 项目会话（无唯一归属）→ OWNER_RESOLVE_FAILED 明确报错
@@ -300,17 +309,22 @@ func TestHandleSparqlQueryCompanion(t *testing.T) {
 		t.Fatalf("非法 graph 应报错: %v / %v", err, res)
 	}
 
-	// 6) 引擎失联 → COMPANION_GRAPH_UNAVAILABLE（含自助指引）
-	t.Setenv("COMPANION_GRAPH_ENDPOINT", "http://127.0.0.1:1")
+	// 6) 宿主方案未 running → COMPANION_HOST_UNAVAILABLE（含自助指引；读侧兜底拉起在 backend）
+	if err := st.SetStatus("p1", "stopped", "", ""); err != nil {
+		t.Fatal(err)
+	}
 	res, err = h(context.Background(), newReq(map[string]any{
 		"query": "SELECT ?x WHERE { ?s ?p ?x }", "graph": "companion", "agent_id": "a1"}))
-	if err != nil || res.IsError != true || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "COMPANION_GRAPH_UNAVAILABLE") {
-		t.Fatalf("引擎失联应报 COMPANION_GRAPH_UNAVAILABLE: %v / %v", err, res)
+	if err != nil || res.IsError != true || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "COMPANION_HOST_UNAVAILABLE") {
+		t.Fatalf("宿主方案未运行应报 COMPANION_HOST_UNAVAILABLE: %v / %v", err, res)
+	}
+	if err := st.SetStatus("p1", "running", "", ""); err != nil {
+		t.Fatal(err)
 	}
 
 	// 7) 变更查询仍拒绝（白名单照旧）
 	res, err = h(context.Background(), newReq(map[string]any{
-		"query": "DELETE WHERE { ?s ?p ?o }", "graph": "companion", "agent_id": "a1"}))
+		"query": "DELETE WHERE { ?s ?p ?o }", "graph": "companion", "agent_id": "a2"}))
 	if err != nil || res.IsError != true || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "QUERY_REJECTED") {
 		t.Fatalf("伴生分支也应拒绝变更查询: %v / %v", err, res)
 	}

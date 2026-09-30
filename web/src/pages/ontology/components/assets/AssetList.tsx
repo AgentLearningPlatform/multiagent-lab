@@ -1,17 +1,21 @@
+import { useEffect, useState } from 'react'
 import { Empty, Tag } from 'antd'
 import { ontoStatus, stageDoneFlags, type ValidationState } from '../../shared'
 import type { Ontology, RuntimeProfile } from '../../../../api/types'
+import { companionApi } from '../../../../api/companion'
 
 // ---------------------------------------------------------------------------
-// REQ-181/M-O17：资产左列表（平台统一侧栏形态）——来源分组（自建 / 导入 / 种子）
+// REQ-181/M-O17：资产左列表（平台统一侧栏形态）——来源分组（自建 / 对话生长 / 种子 / fork）
 // + fork 徽标（forked_from 语义，v1 零迁移派生：original 工件 / 语义 ID / forked_from 字段）
 // + 构建段完成度 dots / 版本 / 运行状态标注。选中高亮。
+// REQ-216⑦：来源分组扩「对话生长」——有智能体绑定该本体为伴生归属（companion_ontology_id
+// 指向它）即归入（作为一个类型；伴生产物归属容器化的资产可见性落点）。
 // ---------------------------------------------------------------------------
 
-/** 来源分组（v1 零迁移派生口径，D-O21）：
- *  seed_* 语义 ID → 种子；forked_from 非空 → fork（徽标）；其余 → 自建；
- *  importer 管道产物（TTL 导入等）后续以 artifact original 标记归「导入」（当前并入自建，导入审查交付后细分）。 */
-function groupOf(o: Ontology): 'seed' | 'fork' | 'built' {
+/** 来源分组（v1 零迁移派生口径，D-O21；REQ-216 增 grown 组，优先于既有判定）：
+ *  绑定为伴生归属 → 对话生长；seed_* 语义 ID → 种子；forked_from 非空 → fork（徽标）；其余 → 自建。 */
+function groupOf(o: Ontology, bound: Set<string>): 'seed' | 'fork' | 'built' | 'grown' {
+  if (bound.has(o.id)) return 'grown'
   if (/^onto_(seed|k8s_ops|med_common|gene_core)/.test(o.id) || o.forked_from === '') {
     if (o.id.startsWith('onto_seed') || ['onto_k8s_ops', 'onto_med_common', 'onto_gene_core'].includes(o.id)) return 'seed'
   }
@@ -21,8 +25,9 @@ function groupOf(o: Ontology): 'seed' | 'fork' | 'built' {
 
 const GROUP_META: Record<string, { label: string; order: number }> = {
   built: { label: '自建', order: 0 },
-  seed: { label: '种子', order: 1 },
-  fork: { label: 'Fork', order: 2 },
+  grown: { label: '对话生长', order: 1 },
+  seed: { label: '种子', order: 2 },
+  fork: { label: 'Fork', order: 3 },
 }
 
 export default function AssetList({
@@ -38,10 +43,19 @@ export default function AssetList({
   onSelect: (id: string) => void
   validations: Record<string, ValidationState>
 }) {
-  // 分组：自建 → 种子 → fork（组内按 updated_at 已有排序保持）
+  // REQ-216⑦：伴生绑定本体 id 清单（后端 agent 表派生；加载失败静默降级为无分组）
+  const [bound, setBound] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    companionApi
+      .boundOntologies()
+      .then((r) => setBound(new Set(r.ontology_ids ?? [])))
+      .catch(() => setBound(new Set()))
+  }, [ontos])
+
+  // 分组：自建 → 对话生长 → 种子 → fork（组内按 updated_at 已有排序保持）
   const groups = new Map<string, Ontology[]>()
   for (const o of ontos) {
-    const g = groupOf(o)
+    const g = groupOf(o, bound)
     if (!groups.has(g)) groups.set(g, [])
     groups.get(g)!.push(o)
   }
@@ -68,11 +82,12 @@ export default function AssetList({
                 type="button"
                 className={`asset-list-item${active ? ' active' : ''}`}
                 onClick={() => onSelect(o.id)}
-                title={`${o.name} · v${o.version ?? '—'} · ${st.text}`}
+                title={`${o.name} · v${o.version ?? '—'} · ${st.text}${g === 'grown' ? ' · 对话生长（伴生归属）' : ''}`}
               >
                 <span className="asset-item-name" title={o.name}>{o.name}</span>
                 <span className="asset-item-meta">
                   {g === 'fork' && <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '15px', padding: '0 4px' }}>fork</Tag>}
+                  {g === 'grown' && <Tag color="geekblue" style={{ margin: 0, fontSize: 10, lineHeight: '15px', padding: '0 4px' }}>对话生长</Tag>}
                   <span className="onto-dots" title={`S1~S4 构建段 ${f.slice(0, 4).filter(Boolean).length}/4`}>
                     {f.slice(0, 4).map((done, i) => (
                       <i key={i} className={`onto-dot${done ? ' on' : ''}`} />

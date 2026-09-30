@@ -3,6 +3,7 @@ package companion
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,9 @@ import (
 // 真机集成冒烟（gated：本机 data/bin/oxigraph 存在时运行；独立数据目录+端口，不碰运行平面）。
 // 覆盖：懒启动 → 种子 schema → 概念/关系入图 → 矛盾失效化 → 图查询 → 整体摘除。
 
-func smokeEngine(t *testing.T) *Engine {
+// smokeBase 启动独立 oxigraph 实例冒充「方案引擎」端点（REQ-216：伴生读写面已归一为
+// SPARQL 标准 /query + /update——PlanEngines 只需 base URL，无需真跑 runtime-manager）。
+func smokeBase(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join("..", "..", "..", "data", "bin", "oxigraph")
 	if _, err := os.Stat(bin); err != nil {
@@ -35,39 +38,78 @@ func smokeEngine(t *testing.T) *Engine {
 	t.Cleanup(func() {
 		_ = exec.Command("pkill", "-f", "companion-graph-smoke").Run()
 	})
-	return NewEngine(bin, dir, 9198)
+	cmd := exec.Command(bin, "serve", "--location", dir, "--bind", "127.0.0.1:9198")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("冒烟 oxigraph 启动失败: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	base := "http://127.0.0.1:9198"
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		tr := &http.Client{Timeout: 2 * time.Second}
+		req, _ := http.NewRequest("POST", base+"/query", strings.NewReader("SELECT * WHERE {} LIMIT 1"))
+		req.Header.Set("Content-Type", "application/sparql-query")
+		if resp, err := tr.Do(req); err == nil {
+			_ = resp.Body.Close()
+			return base
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	t.Fatalf("冒烟 oxigraph 健康等待超时")
+	return ""
+}
+
+// smokePlans 构造指向冒烟引擎的 PlanEngines（预置端点缓存命中即不触达运行平面 REST）。
+func smokePlans(base string) *PlanEngines {
+	p := NewPlanEngines("http://127.0.0.1:1", "http://127.0.0.1:1")
+	p.mu.Lock()
+	p.eps["ont_smoke"] = base
+	p.hostIDs["ont_smoke"] = "rt_smoke"
+	p.mu.Unlock()
+	return p
 }
 
 func TestGraphEngineSmoke(t *testing.T) {
-	e := smokeEngine(t)
+	base := smokeBase(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	stStore, err := openTestStore(t)
+	if err != nil {
+		t.Fatalf("建临时库失败: %v", err)
+	}
+	if _, err := stStore.CreateAgent(&store.Agent{ID: "smoke-agt", Name: "smoke", CompanionOntologyID: "ont_smoke"}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(stStore, nil, smokePlans(base))
 
 	// ① 种子 schema 预置（幂等语义）
-	if err := e.Update(ctx, SeedSchema()); err != nil {
+	if err := svc.graphUpdate(ctx, "ont_smoke", SeedSchema()); err != nil {
 		t.Fatalf("种子 schema 写入失败: %v", err)
 	}
-	if err := e.Update(ctx, SeedSchema()); err != nil {
+	if err := svc.graphUpdate(ctx, "ont_smoke", SeedSchema()); err != nil {
 		t.Fatalf("种子 schema 幂等重写失败: %v", err)
 	}
 
 	// ② 概念入图
-	if err := e.Update(ctx, InsertNodeTriples("smoke1", "k1", "concept", "Pod 扩容", "副本水平伸缩", 0.86, "m1", testTime())); err != nil {
+	if err := svc.graphUpdate(ctx, "ont_smoke", InsertNodeTriples("ont_smoke", "k1", "concept", "Pod 扩容", "副本水平伸缩", 0.86, "m1", testTime())); err != nil {
 		t.Fatalf("概念入图失败: %v", err)
 	}
 
 	// ③ 关系入图（两端实体薄建）
-	if err := e.Update(ctx, InsertRelationTriples("smoke1", "k2", "引发", "Pod 扩容", "HPA 调整", "", 0.8, "m2", testTime())); err != nil {
+	if err := svc.graphUpdate(ctx, "ont_smoke", InsertRelationTriples("ont_smoke", "k2", "引发", "Pod 扩容", "HPA 调整", "", 0.8, "m2", testTime())); err != nil {
 		t.Fatalf("关系入图失败: %v", err)
 	}
 
 	// ④ 图内容回读（triples + labels）
-	raw, err := e.Query(ctx, SelectLabels("smoke1"))
+	raw, err := svc.graphQuery(ctx, "ont_smoke", SelectLabels("ont_smoke"))
 	if err != nil {
 		t.Fatalf("标签查询失败: %v", err)
 	}
-	// 种子 schema 在全局默认图（跨会话共享），会话 named graph 只含实例数据——labels 不应含种子类名
-	// REQ-170 P2 起 SelectLabels 限定 bot:Concept：实体标签不含关系边名（引发=bot:Relation 的 rdfs:label）
+	// 种子 schema 在默认图（方案内共享），伴生 named graph 只含实例数据——labels 不应含种子类名
+	// SelectLabels 限定 bot:Concept：实体标签不含关系边名（引发=bot:Relation 的 rdfs:label）
 	labels := extractLabelsJSON(raw)
 	for _, want := range []string{"Pod 扩容", "HPA 调整"} {
 		if !strings.Contains(labels, want) {
@@ -78,40 +120,24 @@ func TestGraphEngineSmoke(t *testing.T) {
 		t.Fatalf("关系边名不应出现在实体标签: %s", labels)
 	}
 	if strings.Contains(labels, "概念") {
-		t.Fatalf("种子类不应落在会话图: %s", labels)
-	}
-	// 默认图 schema 存在性（幂等预置的目标位置）
-	schemaRaw, err := e.Query(ctx, "SELECT ?c WHERE { ?c a <http://www.w3.org/2002/07/owl#Class> }")
-	if err != nil {
-		t.Fatalf("默认图 schema 查询失败: %v", err)
-	}
-	for _, cls := range []string{"thin/Concept", "thin/Relation", "thin/Event", "thin/Source", "thin/Agent"} {
-		if !strings.Contains(string(schemaRaw), cls) {
-			t.Fatalf("默认图缺种子类 %s: %s", cls, string(schemaRaw))
-		}
+		t.Fatalf("种子类不应落在伴生子图: %s", labels)
 	}
 
-	// ④b REQ-195：引擎加载路径可观测——ResolvedBinary 登记 + Service.Status 透出 engine_detail
-	if e.ResolvedBinary() == "" {
-		t.Fatalf("写侧拉起后应登记实际二进制路径（REQ-195）")
-	}
-	stStore, err := openTestStore(t)
-	if err != nil {
-		t.Fatalf("建临时库失败: %v", err)
-	}
-	svc := NewService(stStore, nil, e)
-	stMap, err := svc.StatusByAgent(ctx, "smoke1") // REQ-211：状态按 agent 图（此处 smoke1 即图键）
+	// ④b REQ-216：Status 透出宿主方案可观测（plan id/端点）
+	stMap, err := svc.StatusByAgent(ctx, "smoke-agt")
 	if err != nil {
 		t.Fatalf("Status 失败: %v", err)
 	}
-	ed, ok := stMap["engine_detail"].(map[string]any)
-	if !ok || ed["binary"] == "" || ed["data_dir"] == "" || ed["endpoint"] == "" {
-		t.Fatalf("Status 应透出 engine_detail(binary/data_dir/endpoint): %v", stMap["engine_detail"])
+	if stMap["engine_running"] != true || stMap["graph"] != GraphURI("ont_smoke") {
+		t.Fatalf("Status 应透出宿主方案运行态与本体伴生子图: %v", stMap)
 	}
-	t.Logf("伴生引擎可观测: binary=%s data_dir=%s endpoint=%s", ed["binary"], ed["data_dir"], ed["endpoint"])
+	plan, ok := stMap["plan"].(map[string]any)
+	if !ok || plan["id"] != "rt_smoke" {
+		t.Fatalf("Status 应透出宿主方案 plan.id: %v", stMap["plan"])
+	}
 
 	// ⑤ 矛盾失效化：同主体+同关系名新边出现 → 旧边 invalidAt
-	findRaw, err := e.Query(ctx, FindActiveEdge("smoke1", "Pod 扩容", "引发"))
+	findRaw, err := svc.graphQuery(ctx, "ont_smoke", FindActiveEdge("ont_smoke", "Pod 扩容", "引发"))
 	if err != nil {
 		t.Fatalf("矛盾检测查询失败: %v", err)
 	}
@@ -119,11 +145,10 @@ func TestGraphEngineSmoke(t *testing.T) {
 	if oldEdge == "" {
 		t.Fatalf("应找到旧边（k2），结果为空: %s", string(findRaw))
 	}
-	if err := e.Update(ctx, InvalidateEdge("smoke1", oldEdge, testTime())); err != nil {
+	if err := svc.graphUpdate(ctx, "ont_smoke", InvalidateEdge("ont_smoke", oldEdge, testTime())); err != nil {
 		t.Fatalf("旧边失效化失败: %v", err)
 	}
-	// 失效后不应再检出活动旧边
-	findRaw2, err := e.Query(ctx, FindActiveEdge("smoke1", "Pod 扩容", "引发"))
+	findRaw2, err := svc.graphQuery(ctx, "ont_smoke", FindActiveEdge("ont_smoke", "Pod 扩容", "引发"))
 	if err != nil {
 		t.Fatalf("二次矛盾检测失败: %v", err)
 	}
@@ -131,13 +156,13 @@ func TestGraphEngineSmoke(t *testing.T) {
 		t.Fatalf("失效后不应再检出活动边: %s", again)
 	}
 
-	// ⑥ 整体摘除
-	if err := e.Update(ctx, DropGraph("smoke1")); err != nil {
-		t.Fatalf("DROP GRAPH 失败: %v", err)
+	// ⑥ 整体清空（本体级）
+	if err := svc.ResetOntology(ctx, "ont_smoke"); err != nil {
+		t.Fatalf("本体伴生子图清空失败: %v", err)
 	}
-	raw2, err := e.Query(ctx, SelectGraphTriples("smoke1"))
+	raw2, err := svc.graphQuery(ctx, "ont_smoke", SelectGraphTriples("ont_smoke"))
 	if err != nil {
-		t.Fatalf("摘除后查询失败: %v", err)
+		t.Fatalf("清空后查询失败: %v", err)
 	}
 	var res struct {
 		Results struct {
@@ -148,37 +173,50 @@ func TestGraphEngineSmoke(t *testing.T) {
 		t.Fatalf("结果解析失败: %v", err)
 	}
 	if len(res.Results.Bindings) != 0 {
-		t.Fatalf("摘除后应无三元组: %d", len(res.Results.Bindings))
+		t.Fatalf("清空后应无三元组: %d", len(res.Results.Bindings))
 	}
-	e.Stop()
+	// ⑦ agent 解绑：绑定清空 + 候选游标清理，图不动（此处图已清，仅验绑定面）
+	if err := svc.ResetAgent(ctx, "smoke-agt"); err != nil {
+		t.Fatalf("agent 解绑失败: %v", err)
+	}
+	a, _ := stStore.GetAgent("smoke-agt")
+	if a.CompanionOntologyID != "" || a.CompanionOntology {
+		t.Fatalf("解绑后绑定应为空（派生开关随之关闭）: %+v", a)
+	}
 }
 
 // TestRetrievalVectorFallbackSmoke REQ-194②降级链真机冒烟：无 embedding 连接（Box=nil、
 // 临时库无 embedding 默认连接）时向量路静默失败 → 词法兜底生效，match=lexical 如实标注；
-// 2 跳邻域边（hop=2 链式文本）随命中实体注入上下文。
+// 2 跳邻域边（hop=2 链式文本）随命中实体注入上下文。REQ-216：召回走本体伴生子图。
 func TestRetrievalVectorFallbackSmoke(t *testing.T) {
-	e := smokeEngine(t)
+	base := smokeBase(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := e.Update(ctx, SeedSchema()); err != nil {
-		t.Fatalf("种子 schema 失败: %v", err)
-	}
-	if err := e.Update(ctx, InsertNodeTriples("s1", "k1", "concept", "阿司匹林", "非甾体抗炎药", 0.9, "m1", testTime())); err != nil {
-		t.Fatalf("概念入图失败: %v", err)
-	}
-	if err := e.Update(ctx, InsertRelationTriples("s1", "k2", "抑制", "阿司匹林", "前列腺素", "", 0.85, "m1", testTime())); err != nil {
-		t.Fatalf("关系入图失败: %v", err)
-	}
-	if err := e.Update(ctx, InsertRelationTriples("s1", "k3", "预防", "前列腺素", "血栓形成", "", 0.8, "m2", testTime())); err != nil {
-		t.Fatalf("二级关系入图失败: %v", err)
-	}
 	st, err := openTestStore(t)
 	if err != nil {
 		t.Fatalf("建临时库失败: %v", err)
 	}
-	svc := NewService(st, nil, e) // Box=nil → embedding 必失败 → 降级链
-	conv := &store.Conversation{ID: "s1", Scope: "agent"}
-	agt := &store.Agent{ID: "s1"} // REQ-211：召回作用域=agent 图
+	if _, err := st.CreateAgent(&store.Agent{ID: "s-agt", Name: "s", CompanionOntologyID: "ont_smoke"}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(st, nil, smokePlans(base)) // Box=nil → embedding 必失败 → 降级链
+	if err := svc.graphUpdate(ctx, "ont_smoke", SeedSchema()); err != nil {
+		t.Fatalf("种子 schema 失败: %v", err)
+	}
+	if err := svc.graphUpdate(ctx, "ont_smoke", InsertNodeTriples("ont_smoke", "k1", "concept", "阿司匹林", "非甾体抗炎药", 0.9, "m1", testTime())); err != nil {
+		t.Fatalf("概念入图失败: %v", err)
+	}
+	if err := svc.graphUpdate(ctx, "ont_smoke", InsertRelationTriples("ont_smoke", "k2", "抑制", "阿司匹林", "前列腺素", "", 0.85, "m1", testTime())); err != nil {
+		t.Fatalf("关系入图失败: %v", err)
+	}
+	if err := svc.graphUpdate(ctx, "ont_smoke", InsertRelationTriples("ont_smoke", "k3", "预防", "前列腺素", "血栓形成", "", 0.8, "m2", testTime())); err != nil {
+		t.Fatalf("二级关系入图失败: %v", err)
+	}
+	conv := &store.Conversation{ID: "conv-s", Scope: "agent", AgentID: strPtr("s-agt")}
+	agt, err := st.GetAgent("s-agt")
+	if err != nil {
+		t.Fatal(err)
+	}
 	text, entities, err := svc.RetrievalContext(ctx, conv, agt, "阿司匹林有什么作用？")
 	if err != nil {
 		t.Fatalf("检索失败: %v", err)
@@ -201,8 +239,7 @@ func TestRetrievalVectorFallbackSmoke(t *testing.T) {
 		t.Fatalf("邻域边应限流 ≤8，got %d", len(rels))
 	}
 	// 缓存失效防御：confirm 路径调 invalidateLabelCache 不 panic（图写入钩子）
-	svc.invalidateLabelCache("s1")
-	e.Stop()
+	svc.invalidateLabelCache("ont_smoke")
 }
 
 func TestStoreCompanionRoundTrip(t *testing.T) {

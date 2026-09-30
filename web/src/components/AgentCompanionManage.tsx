@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Empty, Segmented, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { Button, Empty, Popconfirm, Segmented, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { Agent, Conversation } from '../api/types'
 import { companionApi } from '../api/companion'
 import type { CandidateGroup, CompanionCandidate, CompanionStatus } from '../api/companion'
 import LoadErrorAlert from './LoadErrorAlert'
+import { useUI } from '../store/ui'
 
 // ---------------------------------------------------------------------------
 // REQ-193/M33：伴生管理铺平视图（智能体侧板「伴生本体」视图 · 伴生管理页）。
@@ -55,7 +56,8 @@ function NoteBadge({ note }: { note?: string }) {
   )
 }
 
-export default function AgentCompanionManage({ agent }: { agent: Agent }) {
+export default function AgentCompanionManage({ agent, onUnbound }: { agent: Agent; onUnbound?: () => void }) {
+  const { showToast } = useUI()
   const [convs, setConvs] = useState<Conversation[]>([])
   const [convsErr, setConvsErr] = useState<string | null>(null)
 
@@ -167,6 +169,22 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
     if (ok + fail > 0) loadAll()
   }
 
+  // REQ-216：解绑伴生本体（清该 agent 候选与游标+断开绑定；本体伴生子图数据保留）
+  const [unbinding, setUnbinding] = useState(false)
+  const doUnbind = async () => {
+    setUnbinding(true)
+    setActionErr(null)
+    try {
+      await companionApi.resetAgent(agent.id)
+      showToast('已解绑伴生本体（该智能体候选与游标已清空；本体伴生子图数据保留）')
+      onUnbound?.()
+    } catch (e: any) {
+      setActionErr(e?.message ?? '解绑失败')
+    } finally {
+      setUnbinding(false)
+    }
+  }
+
   const convTitle = useMemo(() => {
     const m = new Map<string, string>()
     for (const c of convs) m.set(c.id, c.title || c.id)
@@ -238,21 +256,30 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
       <div className="agent-companion-status" style={{ marginBottom: 8 }}>
         {engineLoading ? (
           <Spin size="small" />
-        ) : engine ? (
-          <Space size={6} wrap>
-            <Tag color={engine.engine_running ? 'green' : 'default'} style={{ margin: 0 }}>
-              引擎{engine.engine_running ? '运行中' : '未启动'}
-            </Tag>
-            <Tag color={pendingTotal > 0 ? 'blue' : 'default'} style={{ margin: 0 }}>
-              跨会话待确认 {pendingTotal}
-            </Tag>
-          </Space>
         ) : (
           <Space size={6} wrap>
-            <Tag style={{ margin: 0 }}>引擎未启动</Tag>
+            {engine?.engine_running ? (
+              <Tooltip title={`宿主方案 ${engine.plan?.id ?? '—'}（运行平面承载伴生读写，本体运行页可见可启停）｜端点 ${engine.engine_endpoint ?? ''}`}>
+                <Tag color="green" style={{ margin: 0 }}>宿主方案运行中</Tag>
+              </Tooltip>
+            ) : (
+              <Tooltip title={engine?.plan_error || '伴生宿主方案未运行（读路径会自动拉起）'}>
+                <Tag color={engine?.plan_error ? 'orange' : 'default'} style={{ margin: 0 }}>宿主方案未运行</Tag>
+              </Tooltip>
+            )}
             <Tag color={pendingTotal > 0 ? 'blue' : 'default'} style={{ margin: 0 }}>
               跨会话待确认 {pendingTotal}
             </Tag>
+            <Popconfirm
+              title="解绑伴生本体？"
+              description="清空该智能体全部候选与游标并断开绑定（REQ-216 解绑语义）；绑定本体伴生子图数据保留（本体资产详情页可管理）。"
+              okText="解绑"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={doUnbind}
+            >
+              <Button size="small" danger loading={unbinding}>解绑伴生本体</Button>
+            </Popconfirm>
           </Space>
         )}
       </div>
@@ -336,7 +363,7 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
       )}
 
       <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 10, marginBottom: 0 }}>
-        入图写入候选来源会话的伴生图（对话召回按会话隔离）；成长图 3D 与整体摘除在本体模块「伴生本体」栏（全量管理面）。
+        入图写入绑定本体的伴生子图（REQ-216：同本体多智能体共享沉淀）；本体视角集中管理与成长图 3D 在「本体资产」详情页「伴生候选」页签。
       </Typography.Paragraph>
     </div>
   )

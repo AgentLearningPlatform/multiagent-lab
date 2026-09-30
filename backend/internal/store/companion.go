@@ -138,6 +138,86 @@ func (s *Store) GetCompanionCandidate(id string) (*CompanionCandidate, error) {
 	return c, err
 }
 
+// ListCompanionCandidatesByOntology REQ-216⑥：本体视角候选列表——绑定该本体的全部 agent
+// 候选跨 agent 铺平（资产详情页「伴生候选」页签；与侧板 agent 视角同表双入口）。
+func (s *Store) ListCompanionCandidatesByOntology(ontologyID, status string) ([]*CompanionCandidate, error) {
+	q := `SELECT ` + companionCandidateCols + ` FROM companion_candidate
+WHERE agent_id IN (SELECT id FROM agent WHERE companion_ontology_id = ?)`
+	var args []any
+	args = append(args, ontologyID)
+	if status != "" {
+		q += ` AND status = ?`
+		args = append(args, status)
+	}
+	q += ` ORDER BY created_at, id`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*CompanionCandidate
+	for rows.Next() {
+		c, err := scanCandidate(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListLegacyCompanionAgents REQ-216 迁移段 A：旧 bool 列开启（companion_ontology=1）但尚未
+// 绑定本体的 agent（绑定回填清单；旧列为迁移 021 遗留、保留只读）。
+func (s *Store) ListLegacyCompanionAgents() ([]*Agent, error) {
+	return s.queryAgents(`SELECT ` + agentCols + ` FROM agent WHERE companion_ontology = 1 AND companion_ontology_id = '' ORDER BY created_at, id`)
+}
+
+// ListCompanionBoundAgents REQ-216 迁移段 B：已绑定伴生本体的全部 agent（旧图复制清单）。
+func (s *Store) ListCompanionBoundAgents() ([]*Agent, error) {
+	return s.queryAgents(`SELECT ` + agentCols + ` FROM agent WHERE companion_ontology_id != '' ORDER BY created_at, id`)
+}
+
+// ListAgentsByCompanionOntology REQ-216：绑定指定本体的全部 agent（本体伴生子图共享者）。
+func (s *Store) ListAgentsByCompanionOntology(ontologyID string) ([]*Agent, error) {
+	return s.queryAgents(`SELECT `+agentCols+` FROM agent WHERE companion_ontology_id = ? ORDER BY created_at, id`, ontologyID)
+}
+
+// queryAgents 行扫描公共形态（参数化查询 → agent 列表）。
+func (s *Store) queryAgents(q string, args ...any) ([]*Agent, error) {
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Agent
+	for rows.Next() {
+		a, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ListCompanionBoundOntologies REQ-216⑦：全部伴生绑定本体 id（去重；资产列表「对话生长」徽标）。
+func (s *Store) ListCompanionBoundOntologies() ([]string, error) {
+	rows, err := s.DB.Query(`SELECT DISTINCT companion_ontology_id FROM agent WHERE companion_ontology_id != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // DecideCompanionCandidate 候选裁决（confirm/reject），记 decided_at；仅 pending 可裁决。
 func (s *Store) DecideCompanionCandidate(id, status string) (*CompanionCandidate, error) {
 	if status != "confirmed" && status != "rejected" {
@@ -190,6 +270,22 @@ func (s *Store) DeleteAgentCompanionData(agentID string) error {
 		return err
 	}
 	_, err := s.DB.Exec(`DELETE FROM companion_cursor WHERE agent_id = ?`, agentID)
+	return err
+}
+
+// SetAgentCompanionBinding REQ-216①：写伴生本体绑定（绑定/解绑共用；派生开关随行更新）。
+func (s *Store) SetAgentCompanionBinding(agentID, ontologyID string) error {
+	_, err := s.DB.Exec(`UPDATE agent SET companion_ontology_id=?, updated_at=? WHERE id=?`, ontologyID, now(), agentID)
+	return err
+}
+
+// DeleteOntologyCompanionData REQ-216：本体级伴生数据清理（本体伴生子图 DROP 由伴生模块执行）——
+// 清全部绑定 agent 的候选与游标（本体详情页「清空伴生图」的数据面）。
+func (s *Store) DeleteOntologyCompanionData(ontologyID string) error {
+	if _, err := s.DB.Exec(`DELETE FROM companion_candidate WHERE agent_id IN (SELECT id FROM agent WHERE companion_ontology_id = ?)`, ontologyID); err != nil {
+		return err
+	}
+	_, err := s.DB.Exec(`DELETE FROM companion_cursor WHERE agent_id IN (SELECT id FROM agent WHERE companion_ontology_id = ?)`, ontologyID)
 	return err
 }
 

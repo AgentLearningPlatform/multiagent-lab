@@ -27,7 +27,7 @@ type Facade struct {
 	// TraceSparql 翻译透视开关（REQ-94，§4.8.2）：开启时把工具翻译出的 SPARQL
 	// 与执行耗时/结果数落 trace_log，供前端“翻译透视”视图学习用。
 	TraceSparql bool
-	// ownerCache 会话→所属智能体伴生图解析缓存（REQ-211；进程生命周期，会话归属不变量）
+	// ownerCache 伴生图归属解析缓存（REQ-216：agent/会话 → 绑定伴生本体 id；进程生命周期）
 	ownerMu    sync.Mutex
 	ownerCache map[string]string
 }

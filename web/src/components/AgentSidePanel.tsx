@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Card, Collapse, Divider, Empty, Form, FormInstance, Input, InputNumber, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Button, Card, Collapse, Divider, Empty, Form, FormInstance, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   ApiOutlined,
   ClusterOutlined,
@@ -18,7 +18,8 @@ import AIOptimizeButton from './AIOptimizeButton'
 import AgentCompanionManage from './AgentCompanionManage'
 import AssistantProposalBanner from './AssistantProposalBanner'
 import type { SandboxStatus } from '../api/client'
-import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, Skill, ToolInfo } from '../api/types'
+import type { Agent, InferenceBackendStatus, McpServeInfo, ModelConnection, Ontology, Skill, ToolInfo } from '../api/types'
+import { companionApi } from '../api/companion'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
 
@@ -209,28 +210,62 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
   const [page, setPage] = useState<'config' | 'manage'>('config')
   const [form] = Form.useForm()
   const [allConns, setAllConns] = useState<ModelConnection[]>([])
+  const [ontos, setOntos] = useState<Ontology[]>([])
   const [saving, setSaving] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createName, setCreateName] = useState('')
 
   useEffect(() => {
     form.setFieldsValue({
-      companion_ontology: agent.companion_ontology ?? false,
+      companion_ontology_id: agent.companion_ontology_id ?? '',
       companion_extract_hint: agent.companion_extract_hint ?? '',
       companion_extract_conn_id: agent.companion_extract_conn_id ?? '',
       companion_auto_threshold: agent.companion_auto_threshold ?? 0,
     })
-  }, [agent.id, form])
+  }, [agent.id, agent.companion_ontology_id, form])
   useEffect(() => {
     api.listConnections().then(setAllConns).catch(() => {})
+    // REQ-216：绑定候选 = 全部本体资产（对话生长产物与其他本体同仓，可复用既有本体沉淀）
+    api.listOntologies().then(setOntos).catch(() => {})
   }, [])
 
   const conns = useMemo(() => allConns.filter((c) => c.conn_type === 'chat' && c.enabled), [allConns])
 
+  // REQ-216②：一键创建空本体（建议名「{agent 名}的伴生本体」）→ 立即绑定
+  const doCreate = async () => {
+    setCreating(true)
+    try {
+      const r = await companionApi.bindAgent(agent.id, { create: { name: createName.trim() || undefined } })
+      showToast(`已创建并绑定「${r.ontology_id}」的伴生本体` + (r.plan_error ? `（宿主方案暂未就绪：${r.plan_error}）` : '，宿主方案已就绪'))
+      setCreateOpen(false)
+      form.setFieldsValue({ companion_ontology_id: r.ontology_id })
+      bumpData()
+      onChanged?.()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setCreating(false)
+    }
+  }
+
   // 保存走全量载荷（普通 agent PUT 为 full-replace）：非伴生字段以 props agent 现值透传，
-  // 仅伴生四字段来自本表单——与其他视图保存互不踩踏（REQ-189 全字段替换坑同源规避）。
+  // 仅伴生字段来自本表单——与其他视图保存互不踩踏（REQ-189 全字段替换坑同源规避）。
+  // REQ-216：绑定变更走 bind/unbind 专端点（绑定即确保宿主方案；关闭=解绑），
+  // companion_ontology_id 随载荷落库（派生开关 companion_ontology 由后端回填）。
   const save = async () => {
     try {
       const v = await form.validateFields()
+      const targetOnt: string = v.companion_ontology_id ?? ''
       setSaving(true)
+      if (targetOnt !== (agent.companion_ontology_id ?? '')) {
+        if (targetOnt === '') {
+          await companionApi.resetAgent(agent.id) // 解绑：清该 agent 候选与游标（本体伴生子图数据保留）
+        } else {
+          const r = await companionApi.bindAgent(agent.id, { ontology_id: targetOnt })
+          if (r.plan_error) showToast(`绑定成功，但宿主方案暂未就绪（读路径会自动拉起）: ${r.plan_error}`, 'err')
+        }
+      }
       await api.updateAgent(agent.id, {
         name: agent.name,
         description: agent.description,
@@ -251,7 +286,7 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
         skills: agent.skills ?? [],
         mcp_servers: agent.mcp_servers ?? [],
         mcp_serve: { enabled: !!agent.mcp_serve?.enabled, tool_name: agent.mcp_serve?.tool_name ?? '', token: agent.mcp_serve?.token ?? '' },
-        companion_ontology: !!v.companion_ontology,
+        companion_ontology_id: targetOnt,
         companion_extract_hint: v.companion_extract_hint ?? '',
         companion_extract_conn_id: v.companion_extract_conn_id ?? '',
         companion_auto_threshold: v.companion_auto_threshold ?? 0,
@@ -276,8 +311,8 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
           <div>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
               {page === 'config'
-                ? '伴生开关与抽取三字段（REQ-187）；保存后下次运行生效'
-                : '本智能体跨会话候选确认流（铺平视图）；入图写入来源会话伴生图'}
+                ? '绑定伴生本体与抽取字段（REQ-216）；保存后下次运行生效'
+                : '本智能体跨会话候选确认流（铺平视图）；入图写入绑定本体伴生子图'}
             </Typography.Text>
           </div>
         </div>
@@ -294,12 +329,27 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
       {page === 'config' ? (
         <Form form={form} layout="vertical" requiredMark={false} size="small">
           <Form.Item
-            name="companion_ontology"
-            label="伴生本体开关"
-            valuePropName="checked"
-            extra="M28/REQ-170：对话收尾后旁路抽取知识图谱入伴生引擎；管理页可跨会话确认候选；本体模块「伴生本体」栏为全量管理面；默认关闭"
+            name="companion_ontology_id"
+            label="伴生本体（绑定，REQ-216）"
+            extra="对话收尾抽取的知识写入该本体的伴生子图——多智能体绑同一本体即共享沉淀；绑定即确保运行平面宿主方案自动创建并运行。切换/清空绑定：清空=解绑（该智能体候选与游标清除，本体伴生子图数据保留）"
           >
-            <Switch checkedChildren="开" unCheckedChildren="关" />
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择本体开启伴生（不选=关闭）"
+              options={[
+                ...ontos.map((o) => ({ value: o.id, label: `${o.name}（${o.id.slice(0, 14)}…）` })),
+                { value: '__create__', label: '✚ 创建新伴生本体（空本体）' },
+              ]}
+              onChange={(v) => {
+                if (v === '__create__') {
+                  setCreateName(companionOntologyNameOf(agent))
+                  setCreateOpen(true)
+                  form.setFieldsValue({ companion_ontology_id: agent.companion_ontology_id ?? '' })
+                }
+              }}
+            />
           </Form.Item>
           <Form.Item
             name="companion_extract_hint"
@@ -335,15 +385,38 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           style={{ padding: '24px 0' }}
-          description={<span style={{ fontSize: 12 }}>伴生开关未开启——开启并对话一轮后，抽取候选在此跨会话确认入图</span>}
+          description={<span style={{ fontSize: 12 }}>伴生未开启——绑定伴生本体并对话一轮后，抽取候选在此跨会话确认入图</span>}
         >
           <Button type="primary" size="small" onClick={() => setPage('config')}>
-            去开启伴生本体
+            去绑定伴生本体
           </Button>
         </Empty>
       )}
+
+      {/* REQ-216②：创建空本体弹窗（建议名默认「{agent 名}的伴生本体」） */}
+      <Modal
+        title="创建伴生本体"
+        open={createOpen}
+        onCancel={() => setCreateOpen(false)}
+        onOk={doCreate}
+        okText="创建并绑定"
+        okButtonProps={{ loading: creating }}
+        cancelText="取消"
+        width={420}
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          创建一个空本体作为本智能体的伴生归属（REQ-216 资产化：对话生长产物入其伴生子图，
+          在「本体资产」列表可见并随「对话生长」徽标呈现）。
+        </Typography.Paragraph>
+        <Input value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="伴生本体名称" />
+      </Modal>
     </div>
   )
+}
+
+/** REQ-216②：伴生本体建议名（与后端 CompanionOntologyName 同口径）。 */
+function companionOntologyNameOf(agent: Agent): string {
+  return `${agent.name || '未命名智能体'}的伴生本体`
 }
 
 // ---------------------------------------------------------------------------
@@ -454,9 +527,9 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
           tool_name: (v.mcp_serve_tool_name ?? '').trim(),
           token: agent.mcp_serve?.token ?? '',
         },
-        // REQ-170/187 + REQ-193：伴生四字段自「伴生本体」视图维护——配置表单保存按 agent
-        // 现值透传（表单不再承载，避免 full-replace 零值清掉伴生配置）
-        companion_ontology: !!agent.companion_ontology,
+        // REQ-170/187 + REQ-193：伴生字段自「伴生本体」视图维护——配置表单保存按 agent
+        // 现值透传（表单不再承载，避免 full-replace 零值清掉伴生配置；REQ-216 绑定 id 同口径）
+        companion_ontology_id: agent.companion_ontology_id ?? '',
         companion_extract_hint: agent.companion_extract_hint ?? '',
         companion_extract_conn_id: agent.companion_extract_conn_id ?? '',
         companion_auto_threshold: agent.companion_auto_threshold ?? 0,

@@ -28,8 +28,15 @@ const (
 	MsgNS = "http://eino-lab/msg/"
 )
 
-// GraphURI 伴生图 URI（REQ-211：作用域=智能体，一 agent 一图）。
-func GraphURI(agentID string) string { return fmt.Sprintf("%sagt-%s", GraphNS, agentID) }
+// GraphURI 伴生图 URI（REQ-216：换绑本体伴生子图——一绑定本体一图，多 agent 绑同一本体
+// 共享沉淀〔隔离边界 agent→本体升维〕；宿主方案引擎同时承载本体 default graph 与伴生
+// named graph，互不干扰）。REQ-216 前为 agt-{agentID}（REQ-211）→ conv-{convID}（M28），
+// 两代旧图由启动迁移收敛（conv 迁移已完成；agt 图跨实例复制见 MigrateAgentGraphsToOntology）。
+func GraphURI(ontologyID string) string { return fmt.Sprintf("%sont-%s", GraphNS, ontologyID) }
+
+// LegacyAgentGraphURI 旧 agent 图 URI（REQ-216 启动迁移源：:9199 独立实例 agt-{id} 图
+// SPARQL 层复制到方案引擎 ont-{id} 后 DROP）。
+func LegacyAgentGraphURI(agentID string) string { return fmt.Sprintf("%sagt-%s", GraphNS, agentID) }
 
 // LegacyConvGraphURI 旧会话图 URI（REQ-211 启动迁移源：ADD TO agent 图后 DROP）。
 func LegacyConvGraphURI(convID string) string { return fmt.Sprintf("%sconv-%s", GraphNS, convID) }

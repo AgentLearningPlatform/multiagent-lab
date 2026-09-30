@@ -8,6 +8,7 @@ import { ontoStatus, stageDoneFlags, type ValidationState } from '../../shared'
 import SpecGraph from '../SpecGraph'
 import Graph3D from '../Graph3D'
 import WebVowlView from '../WebVowlView'
+import OntologyCompanionGraph from '../companion/OntologyCompanionGraph'
 
 // ---------------------------------------------------------------------------
 // 资产页杂件（B1 拆分，REQ-145）：顶部选择条 / 构建段完成度 dots / 重命名弹窗 /
@@ -124,7 +125,7 @@ export function RenameModal({ ontology, onClose, onSaved }: { ontology: Ontology
  * （key 置换，WebGL 初始化按新容器尺寸），WebVOWL 由组件内部监听尺寸变化刷新画布。
  */
 export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: string }) {
-  const [mode, setMode] = useState<'2d' | '3d' | 'webvowl'>('2d')
+  const [mode, setMode] = useState<'2d' | '3d' | 'webvowl' | 'companion'>('2d')
   const [focus2d, setFocus2d] = useState<string | null>(null) // R3：3D 选中 → 2D 联动聚焦
   // VIZ-5（REQ-175）：含本体的 running 运行方案（渐进扩展 SPARQL 通道，REQ-163 同语义）
   const [sparqlProfile, setSparqlProfile] = useState<string | null>(null)
@@ -155,11 +156,12 @@ export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: s
         <Segmented
           size="small"
           value={mode}
-          onChange={(v) => setMode(v as '2d' | '3d' | 'webvowl')}
+          onChange={(v) => setMode(v as '2d' | '3d' | 'webvowl' | 'companion')}
           options={[
             { value: '2d', label: '2D 结构（React Flow）' },
             { value: '3d', label: '三维浏览（沉浸只读）' },
             { value: 'webvowl', label: 'WebVOWL 对照（OWL 视觉语言）' },
+            { value: 'companion', label: '伴生成长图（对话生长）' },
           ]}
         />
         <span style={{ flex: 1 }} />
@@ -180,6 +182,7 @@ export function VizTabs({ spec, ontologyId }: { spec: Spec | null; ontologyId: s
         />
       )}
       {mode === 'webvowl' && <WebVowlView ontologyId={ontologyId} />}
+      {mode === 'companion' && <OntologyCompanionGraph ontologyId={ontologyId} />}
     </div>
   )
 }

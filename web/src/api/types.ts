@@ -22,8 +22,10 @@ export interface Agent {
   sandbox_cpus?: number
   /** REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name；token 为 Agent 级 Bearer） */
   mcp_serve?: { enabled: boolean; token?: string; tool_name?: string }
-  /** M28/REQ-170：伴生本体开关（对话收尾旁路抽取 KG 入伴生引擎；默认关） */
+  /** M28/REQ-170：伴生本体开关（REQ-216 起为派生只读——companion_ontology_id 非空即开启） */
   companion_ontology?: boolean
+  /** REQ-216①：伴生本体绑定（可空引用；空=未开启。开启交互=选择/一键创建空本体） */
+  companion_ontology_id?: string
   /** REQ-186：内置助手标记（智能体列表分区置顶、内置徽标、无配置入口） */
   is_builtin?: boolean
   /** REQ-187：伴生本体配置增强 */

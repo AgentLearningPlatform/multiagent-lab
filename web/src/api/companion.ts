@@ -40,13 +40,19 @@ export interface CandidateGroup {
 export interface CompanionStatus {
   /** REQ-211：状态按智能体聚合（图/待确认/标签/在抽会话数均为 agent 维度） */
   agent_id: string
+  /** REQ-216：图=绑定本体伴生子图（ont-{ontologyId}；未绑定为空串） */
   graph: string
+  /** REQ-216：绑定的伴生本体 id（空=未开启） */
+  ontology_id?: string
   pending_count: number
   cursor_count: number
+  /** REQ-216：宿主方案运行态（伴生引擎=运行平面方案引擎；读侧兜底拉起后为 true） */
   engine_running: boolean
-  engine_endpoint: string
-  /** REQ-195：引擎加载详情（实际二进制/数据目录/端点；后端旧版无此字段=undefined） */
-  engine_detail?: { binary: string; data_dir: string; endpoint: string }
+  engine_endpoint?: string
+  /** REQ-216：宿主方案可观测（id+基址；运维入口=本体运行页方案管理） */
+  plan?: { id: string; endpoint: string }
+  /** REQ-216：宿主方案确保失败原因（诚实呈现；如运行平面不可达） */
+  plan_error?: string
   labels?: string[]
 }
 
@@ -67,7 +73,12 @@ export interface CompanionGraphEdge {
 export interface CompanionGraph {
   agent_id: string
   graph: string
+  /** REQ-216：绑定本体 id（未绑定为空） */
+  ontology_id?: string
   engine_running: boolean
+  engine_endpoint?: string
+  /** REQ-216：宿主方案不可达原因（诚实降级空图时透出） */
+  plan_error?: string
   nodes: CompanionGraphNode[]
   edges: CompanionGraphEdge[]
 }
@@ -106,11 +117,29 @@ export const companionApi = {
     q.set('group_by', 'entity')
     return req<{ groups: CandidateGroup[] }>(`/api/companion/candidates?${q.toString()}`)
   },
+  // REQ-216⑥：本体维度候选（绑定该本体的全部 agent 跨 agent 铺平——资产详情页「伴生候选」页签）
+  listCandidatesByOntology: (ontologyId: string, status = '') =>
+    req<CompanionCandidate[]>(`/api/companion/ontologies/${encodeURIComponent(ontologyId)}/candidates${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  // REQ-216：绑定该本体的 agent 清单（本体伴生子图共享者）
+  listOntologyAgents: (ontologyId: string) =>
+    req<import('./types').Agent[]>(`/api/companion/ontologies/${encodeURIComponent(ontologyId)}/agents`),
   confirmCandidate: (id: string) =>
     req<{ candidate: CompanionCandidate; graph: string }>(`/api/companion/candidates/${id}/confirm`, { method: 'POST', body: '{}' }),
   rejectCandidate: (id: string) => req<CompanionCandidate>(`/api/companion/candidates/${id}/reject`, { method: 'POST', body: '{}' }),
   status: (agentId: string) => req<CompanionStatus>(`/api/companion/status?agent_id=${encodeURIComponent(agentId)}`),
+  // REQ-216：agent 级解绑（清该 agent 候选游标+断开绑定；本体伴生子图数据保留）
   resetAgent: (agentId: string) =>
     req<{ reset: boolean }>(`/api/companion/agents/${agentId}/reset`, { method: 'POST', body: '{}' }),
+  // REQ-216②：绑定伴生本体（选择既有 / 一键创建空本体；绑定即确保宿主方案 running）
+  bindAgent: (agentId: string, payload: { ontology_id?: string; create?: { name?: string } }) =>
+    req<{ agent: import('./types').Agent; ontology_id: string; graph: string; plan_error?: string }>(
+      `/api/companion/agents/${agentId}/bind`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  // REQ-216：本体级伴生图清空（DROP 子图+清全部绑定 agent 候选游标；本体资产不受影响）
+  resetOntology: (ontologyId: string) =>
+    req<{ reset: boolean }>(`/api/companion/ontologies/${encodeURIComponent(ontologyId)}/reset`, { method: 'POST', body: '{}' }),
+  // REQ-216⑦：伴生绑定本体 id 清单（资产列表「对话生长」徽标数据源）
+  boundOntologies: () => req<{ ontology_ids: string[] }>(`/api/companion/bound-ontologies`),
   graph: (agentId: string) => req<CompanionGraph>(`/api/companion/graph?agent_id=${encodeURIComponent(agentId)}`),
 }

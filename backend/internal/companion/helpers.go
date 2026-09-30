@@ -2,21 +2,11 @@ package companion
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 )
 
-// 辅助函数（环境读取 / 文本处理 / SPARQL JSON 结果解析）。
-
-// osBinary 显式引擎二进制（环境变量覆盖）。
-// REQ-195：COMPANION_OXIGRAPH_BIN 优先，回退 OXIGRAPH_BIN——与运行平面（runtime-manager）
-// 同一 env 口径，run-dev.sh 导出一份即两平面共用同一二进制，消除「伴生侧找不到/找错引擎」。
-func osBinary() string {
-	if p := os.Getenv("COMPANION_OXIGRAPH_BIN"); p != "" {
-		return p
-	}
-	return os.Getenv("OXIGRAPH_BIN")
-}
+// 辅助函数（文本处理 / SPARQL JSON 结果解析）。
+// （REQ-216：osBinary/COMPANION_OXIGRAPH_BIN env 口径随内置引擎退役删除——引擎归一运行平面。）
 
 // roleLabel 消息角色中文标注（语料可读性）。
 func roleLabel(role string) string {

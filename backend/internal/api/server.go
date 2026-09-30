@@ -78,10 +78,11 @@ func (s *Server) ooProxy() http.Handler {
 func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service, dbPath, docsRoot, researchRoot, knowledgeRoot string) *Server {
 	comp := companion.NewService(st, box, nil)
 	chatSvc.Companion = comp // REQ-170 P2「KG 检索源并入」：伴生图检索源经接口反转注入 chat（companion→chat 包环约束）
-	// REQ-211/M44：存量会话图 → agent 图一次性幂等迁移（companion_meta 标记防重复；
-	// 引擎不在位时日志告警、下次启动重试，不阻塞启动主链路）
-	if err := comp.MigrateConvGraphsToAgent(context.Background()); err != nil {
-		log.Printf("[companion] 图迁移未完成（不影响启动）: %v", err)
+	// REQ-216/M47：存量迁移幂等一次性——①旧 bool 绑定回填（创建空本体）→ ②旧 :9199 agent 图
+	// 跨实例复制到宿主方案引擎本体伴生子图 → ③conv 图收敛兜底（companion_meta 标记防重复；
+	// 构建平面/引擎不在位时日志告警、下次启动重试，不阻塞启动主链路）
+	if err := comp.MigrateAgentGraphsToOntology(context.Background()); err != nil {
+		log.Printf("[companion] REQ-216 迁移未完成（不影响启动）: %v", err)
 	}
 	chatSvc.Community = &kg.Summarizer{Store: st, Box: box} // KB-5③：全局问答社区摘要源（connID 按库经接口参数传入）
 	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, KnowledgeRoot: knowledgeRoot, Companion: comp, Mux: http.NewServeMux()}
@@ -129,13 +130,18 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/agents/{id}", s.updateAgent)
 	m.HandleFunc("DELETE /api/agents/{id}", s.deleteAgent)
 
-	// REQ-170/M28：伴生本体（候选确认流 API 先行；开关经 Agent 配置 companion_ontology 字段）
+	// REQ-170/M28：伴生本体（候选确认流 API 先行；绑定经 REQ-216 companion_ontology_id）
 	m.HandleFunc("GET /api/companion/candidates", s.listCompanionCandidates)
 	m.HandleFunc("POST /api/companion/candidates/{id}/confirm", s.confirmCompanionCandidate)
 	m.HandleFunc("POST /api/companion/candidates/{id}/reject", s.rejectCompanionCandidate)
 	m.HandleFunc("GET /api/companion/status", s.companionStatus)
 	m.HandleFunc("GET /api/companion/graph", s.companionGraph)
+	m.HandleFunc("POST /api/companion/agents/{id}/bind", s.bindCompanionAgent)
 	m.HandleFunc("POST /api/companion/agents/{id}/reset", s.resetCompanionAgent)
+	m.HandleFunc("GET /api/companion/ontologies/{id}/candidates", s.ontologyCompanionCandidates)
+	m.HandleFunc("GET /api/companion/ontologies/{id}/agents", s.ontologyCompanionAgents)
+	m.HandleFunc("POST /api/companion/ontologies/{id}/reset", s.resetCompanionOntology)
+	m.HandleFunc("GET /api/companion/bound-ontologies", s.companionBoundOntologies)
 	m.HandleFunc("GET /api/companion/graph-owner", s.companionGraphOwner)
 
 	// Projects

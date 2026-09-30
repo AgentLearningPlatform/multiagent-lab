@@ -6,35 +6,35 @@ import {
   BookOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
-  TeamOutlined,
 } from '@ant-design/icons'
 import LearnPage from './LearnPage'
 import BuildPage from './BuildPage'
 import AssetsPage from './AssetsPage'
 import RuntimePage from './RuntimePage'
 import AuditPage from './AuditPage'
-import CompanionPage from '../CompanionPage'
 
 // ---------------------------------------------------------------------------
 // 本体模块壳（D-O11 / REQ-104）：左侧边栏栏位
 //   学习中心（默认页）| 本体构建（六路径）| 本体资产（统一管理）| 本体运行（按引擎分组）
-//   | 消费与审计（D-O15/REQ-110 第五栏：原 Semantica 独立栏改造并入，导航栏收敛）
+//   | 消费与审计（D-O15/REQ-110 第五栏）
+// REQ-216⑨/D-O21 反转：伴生本体第六栏退役（回五栏）——六栏前提「伴生图非仓库资产」
+// 被归属容器化推翻，栏职能被资产详情页「伴生候选」页签+可视化区伴生成长图吸收。
 // 路由沿用 page 状态机：page='ontology' 内部以 sidebarKey 切换；
 // 构建栏以 buildPath 驱动路径页，运行栏以 engineKey 驱动引擎分组页。
 // ---------------------------------------------------------------------------
 
-export type SidebarKey = 'learn' | 'build' | 'assets' | 'companion' | 'runtime' | 'audit'
+export type SidebarKey = 'learn' | 'build' | 'assets' | 'runtime' | 'audit'
 
 const NAV: { key: SidebarKey; label: string; icon: React.ReactNode; desc: string }[] = [
   { key: 'learn', label: '学习中心', icon: <BookOutlined />, desc: '七阶段路径 · 方法论 · 任务卡' },
   { key: 'build', label: '本体构建', icon: <ApartmentOutlined />, desc: '六条构建路径' },
-  { key: 'assets', label: '本体资产', icon: <DatabaseOutlined />, desc: '已构建本体统一管理' },
-  { key: 'companion', label: '伴生本体', icon: <TeamOutlined />, desc: '对话伴生 · 候选确认 · 成长图' },
+  { key: 'assets', label: '本体资产', icon: <DatabaseOutlined />, desc: '已构建本体统一管理 · 伴生候选' },
   { key: 'runtime', label: '本体运行', icon: <CloudServerOutlined />, desc: '按运行方式分组' },
   { key: 'audit', label: '消费与审计', icon: <AuditOutlined />, desc: 'KG 图谱 · GraphRAG 试查 · 决策溯源' },
 ]
 
-/** 侧边栏选中项（模块内持久化，切走再切回不丢位置）；默认页 = 学习中心 */
+/** 侧边栏选中项（模块内持久化，切走再切回不丢位置）；默认页 = 学习中心。
+ *  REQ-216：旧 'companion' 值（第六栏）非法化回退默认页。 */
 export const ONTO_SIDEBAR_KEY = 'eino.onto.sidebar'
 
 export function readSidebarKey(): SidebarKey {
@@ -63,8 +63,6 @@ export default function OntologyModule() {
       <BuildPage />
     ) : sidebarKey === 'assets' ? (
       <AssetsPage />
-    ) : sidebarKey === 'companion' ? (
-      <CompanionPage />
     ) : sidebarKey === 'audit' ? (
       <AuditPage />
     ) : (

@@ -1,6 +1,11 @@
 package companion
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -97,7 +102,8 @@ func TestSlugAndEscapes(t *testing.T) {
 }
 
 func TestGraphURIs(t *testing.T) {
-	if g := GraphURI("abc"); g != "http://eino-lab/graph/agt-abc" {
+	// REQ-216：图换绑本体伴生子图（ont-{ontologyID}）
+	if g := GraphURI("abc"); g != "http://eino-lab/graph/ont-abc" {
 		t.Fatalf("graph URI 不符: %s", g)
 	}
 	e1 := EntityURI("滚动更新")
@@ -109,7 +115,7 @@ func TestGraphURIs(t *testing.T) {
 
 func TestInsertAndInvalidate(t *testing.T) {
 	ins := InsertNodeTriples("c1", "cand1", "concept", "Pod 扩容", "副本伸缩", 0.86, "m9", testTime())
-	for _, want := range []string{"GRAPH <http://eino-lab/graph/agt-c1>", "a bot:Concept", `rdfs:label "Pod 扩容"`, "prov:wasGeneratedBy", "bot:extractedFrom <http://eino-lab/msg/m9>"} {
+	for _, want := range []string{"GRAPH <http://eino-lab/graph/ont-c1>", "a bot:Concept", `rdfs:label "Pod 扩容"`, "prov:wasGeneratedBy", "bot:extractedFrom <http://eino-lab/msg/m9>"} {
 		if !strings.Contains(ins, want) {
 			t.Fatalf("INSERT 缺少 %q:\n%s", want, ins)
 		}
@@ -121,14 +127,14 @@ func TestInsertAndInvalidate(t *testing.T) {
 		}
 	}
 	find := FindActiveEdge("c1", "Pod 扩容", "引发")
-	if !strings.Contains(find, "FILTER NOT EXISTS") || !strings.Contains(find, "agt-c1") {
+	if !strings.Contains(find, "FILTER NOT EXISTS") || !strings.Contains(find, "ont-c1") {
 		t.Fatalf("矛盾检测查询不符:\n%s", find)
 	}
 	inv := InvalidateEdge("c1", "http://eino-lab/e/edge-cand2", testTime())
 	if !strings.Contains(inv, "bot:invalidAt") {
 		t.Fatalf("失效化不符:\n%s", inv)
 	}
-	if dp := DropGraph("c1"); !strings.Contains(dp, "DROP SILENT GRAPH <http://eino-lab/graph/agt-c1>") {
+	if dp := DropGraph("c1"); !strings.Contains(dp, "DROP SILENT GRAPH <http://eino-lab/graph/ont-c1>") {
 		t.Fatalf("DROP 不符: %s", dp)
 	}
 	seed := SeedSchema()
@@ -152,8 +158,9 @@ func TestOnRunCompleteProjectScope(t *testing.T) {
 	s := NewService(st, nil, nil)
 
 	// 三个 agent：coordinator（开伴生）/ 普通成员（开伴生）/ 外部 agent（开伴生）
+	// REQ-216：开启语义 = 绑定伴生本体（companion_ontology_id 非空）
 	for _, id := range []string{"agt_coord", "agt_member", "agt_outside"} {
-		if _, err := st.CreateAgent(&store.Agent{ID: id, Name: id, CompanionOntology: true}); err != nil {
+		if _, err := st.CreateAgent(&store.Agent{ID: id, Name: id, CompanionOntologyID: "ont_" + id}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -192,12 +199,14 @@ func TestOnRunCompleteProjectScope(t *testing.T) {
 		s.mu.Unlock()
 	}
 
-	// 开关关 → 不触发
+	// 开关关（未绑定）→ 不触发
 	s.mu.Lock()
 	s.running = map[string]bool{}
 	s.mu.Unlock()
+	if err := st.SetAgentCompanionBinding("agt_coord", ""); err != nil {
+		t.Fatal(err)
+	}
 	a, _ := st.GetAgent("agt_coord")
-	a.CompanionOntology = false
 	s.OnRunComplete(conv, a)
 	s.mu.Lock()
 	_, fired := s.running[conv.ID]
@@ -247,45 +256,106 @@ func TestAutoThresholdGrading(t *testing.T) {
 	}
 }
 
-// TestOSBinaryEnvFallback REQ-195：伴生引擎二进制 env 口径与运行平面统一——
-// COMPANION_OXIGRAPH_BIN 优先，回退 OXIGRAPH_BIN（run-dev.sh 只导出后者时伴生侧同源命中）。
-func TestOSBinaryEnvFallback(t *testing.T) {
-	t.Setenv("COMPANION_OXIGRAPH_BIN", "")
-	t.Setenv("OXIGRAPH_BIN", "")
-	if got := osBinary(); got != "" {
-		t.Fatalf("双 env 均空应返回空，got %q", got)
-	}
-	t.Setenv("OXIGRAPH_BIN", "/opt/oxigraph")
-	if got := osBinary(); got != "/opt/oxigraph" {
-		t.Fatalf("应回退 OXIGRAPH_BIN，got %q", got)
-	}
-	t.Setenv("COMPANION_OXIGRAPH_BIN", "/explicit/oxigraph")
-	if got := osBinary(); got != "/explicit/oxigraph" {
-		t.Fatalf("COMPANION_OXIGRAPH_BIN 应优先，got %q", got)
-	}
-}
-
-// TestEngineResolvedBinary REQ-195：resolvedBinary 仅在写侧拉起后登记（领养/未启动为空，可观测口径）。
-func TestEngineResolvedBinary(t *testing.T) {
-	e := NewEngine("", t.TempDir(), 0)
-	if got := e.ResolvedBinary(); got != "" {
-		t.Fatalf("未启动应返回空，got %q", got)
-	}
-}
-
-// TestGraphURIAgentScope REQ-211：图 URI 换轨——agent 图 agt- 前缀 + 旧会话图 URI 保留给迁移。
-func TestGraphURIAgentScope(t *testing.T) {
-	if g := GraphURI("a1"); g != "http://eino-lab/graph/agt-a1" {
-		t.Fatalf("agent 图 URI 不符: %s", g)
+// TestGraphURIAgentScopeLegacy REQ-211→216：旧 agent 图 URI 保留给跨实例迁移（agt-），
+// 现行图 = 本体伴生子图（ont-）。
+func TestGraphURIAgentScopeLegacy(t *testing.T) {
+	if g := LegacyAgentGraphURI("a1"); g != "http://eino-lab/graph/agt-a1" {
+		t.Fatalf("旧 agent 图 URI 不符: %s", g)
 	}
 	if g := LegacyConvGraphURI("c9"); g != "http://eino-lab/graph/conv-c9" {
 		t.Fatalf("旧会话图 URI 不符: %s", g)
 	}
-	add := AddGraph("http://eino-lab/graph/conv-c9", "http://eino-lab/graph/agt-a1")
-	if add != "ADD <http://eino-lab/graph/conv-c9> TO <http://eino-lab/graph/agt-a1>" {
-		t.Fatalf("ADD 生成不符: %s", add)
-	}
-	if dp := DropGraphByURI(LegacyConvGraphURI("c9")); dp != "DROP SILENT GRAPH <http://eino-lab/graph/conv-c9>" {
+	if dp := DropGraphByURI(LegacyAgentGraphURI("a1")); dp != "DROP SILENT GRAPH <http://eino-lab/graph/agt-a1>" {
 		t.Fatalf("迁移 DROP 应按旧 URI 显式清理（GraphURI 已换轨不能复用 DropGraph）: %s", dp)
+	}
+}
+
+// TestPlanEnginesEnsureHostPlan REQ-216③：宿主方案三段式——running 复用 → 存量方案拉起 →
+// 自动创建并 start（stub runtime-manager REST）。
+func TestPlanEnginesEnsureHostPlan(t *testing.T) {
+	var createBody map[string]any
+	started := map[string]bool{}
+	hostStatus := "running" // 段① running 复用 → 段② 前置为 stopped 验拉起
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/runtime-profiles", func(w http.ResponseWriter, r *http.Request) {
+		profiles := []map[string]any{{"id": "rt_host", "name": "伴生·医学术语", "engine": "oxigraph", "ontology_ids": []string{"ont_a"}, "port": 9301, "status": hostStatus}}
+		if createBody != nil {
+			profiles = append(profiles, map[string]any{"id": "rt_new", "name": "伴生·新本体", "engine": "oxigraph", "ontology_ids": []string{"ont_new"}, "port": 9302, "status": "created"})
+		}
+		_ = json.NewEncoder(w).Encode(profiles)
+	})
+	mux.HandleFunc("GET /api/ontologies/ont_new", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"ont_new","name":"新本体"}`))
+	})
+	mux.HandleFunc("POST /api/runtime-profiles", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&createBody)
+		_, _ = w.Write([]byte(`{"id":"rt_new","name":"伴生·新本体","engine":"oxigraph","ontology_ids":["ont_new"],"port":9302,"status":"created"}`))
+	})
+	mux.HandleFunc("POST /api/runtime-profiles/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+		started[r.PathValue("id")] = true
+		port := 9301
+		if r.PathValue("id") == "rt_new" {
+			port = 9302
+		}
+		_, _ = fmt.Fprintf(w, `{"id":%q,"status":"running","port":%d}`, r.PathValue("id"), port)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := NewPlanEngines(srv.URL, srv.URL)
+	// ① running 复用（不触发 start）
+	base, err := p.EnsureHostPlan(context.Background(), "ont_a")
+	if err != nil || base != "http://127.0.0.1:9301" || started["rt_host"] {
+		t.Fatalf("running 方案应复用且不重拉: %s %v %v", base, started, err)
+	}
+	// ② 存量方案 stopped → 拉起
+	hostStatus = "stopped"
+	p.Invalidate("ont_a")
+	base, err = p.EnsureHostPlan(context.Background(), "ont_a")
+	if err != nil || base != "http://127.0.0.1:9301" || !started["rt_host"] {
+		t.Fatalf("stopped 方案应被拉起: %s %v %v", base, started, err)
+	}
+	// ③ 无方案 → 创建「伴生·{本体名}」并 start
+	base, err = p.EnsureHostPlan(context.Background(), "ont_new")
+	if err != nil || base != "http://127.0.0.1:9302" {
+		t.Fatalf("无方案应自动创建并启动: %s %v", base, err)
+	}
+	if createBody["name"] != "伴生·新本体" || createBody["engine"] != "oxigraph" {
+		t.Fatalf("创建载荷不符: %v", createBody)
+	}
+	if p.HostPlan("ont_new") != "rt_new" {
+		t.Fatalf("宿主方案 id 应登记: %s", p.HostPlan("ont_new"))
+	}
+}
+
+// TestCompanionOntologyName REQ-216②：绑定建议名口径。
+func TestCompanionOntologyName(t *testing.T) {
+	if got := CompanionOntologyName("运维助手"); got != "运维助手的伴生本体" {
+		t.Fatalf("建议名不符: %s", got)
+	}
+	if got := CompanionOntologyName("  "); got != "未命名智能体的伴生本体" {
+		t.Fatalf("空名兜底不符: %s", got)
+	}
+}
+
+// TestInsertTriplesRoundTrip REQ-216 迁移：SPARQL JSON term → Turtle 序列化 → INSERT DATA。
+func TestInsertTriplesRoundTrip(t *testing.T) {
+	raw := []byte(`{"results":{"bindings":[
+		{"s":{"type":"uri","value":"http://eino-lab/e/X"},"p":{"type":"uri","value":"http://eino-lab/ontology/thin/definition"},"o":{"type":"literal","value":"含\"引\"号\n"}},
+		{"s":{"type":"uri","value":"http://eino-lab/e/X"},"p":{"type":"uri","value":"http://www.w3.org/2000/01/rdf-schema#label"},"o":{"type":"literal","value":"X","xml:lang":"zh"}}
+	]}}`)
+	triples, err := parseTriples(raw)
+	if err != nil || len(triples) != 2 {
+		t.Fatalf("解析不符: %v %v", triples, err)
+	}
+	ins := insertTriplesData("http://eino-lab/graph/ont-x", triples)
+	if !strings.Contains(ins, `<http://eino-lab/e/X> <http://eino-lab/ontology/thin/definition> "含\"引\"号\n"`) {
+		t.Fatalf("字面量转义不符:\n%s", ins)
+	}
+	if !strings.Contains(ins, `"X"@zh`) {
+		t.Fatalf("语言标注不符:\n%s", ins)
+	}
+	if !strings.Contains(ins, "GRAPH <http://eino-lab/graph/ont-x>") {
+		t.Fatalf("目标图不符:\n%s", ins)
 	}
 }

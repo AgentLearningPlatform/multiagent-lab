@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Empty, Input, Popconfirm, Result, Space, Splitter, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { BranchesOutlined, DeleteOutlined, EditOutlined, ImportOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
+import { companionApi } from '../../api/companion'
 import type { Ontology, RuntimeProfile, Spec } from '../../api/types'
 import { useUI } from '../../store/ui'
 import { sourceTag, type ValidationState } from './shared'
@@ -11,6 +12,7 @@ import SourceView from './components/SourceView'
 import SpecEditorPane from './components/assets/SpecEditorPane'
 import { ArtifactsPane, ExportPane, ValidatePane } from './components/assets/AssetPanes'
 import { RenameModal, VizTabs } from './components/assets/AssetExtras'
+import OntologyCompanionPane from './components/companion/OntologyCompanionPane'
 import AssetList from './components/assets/AssetList'
 import QualityCardPane from './components/assets/QualityCardPane'
 import ImportMergeWizard from './components/assets/ImportMergeWizard'
@@ -61,6 +63,15 @@ export default function AssetsPage() {
       })
   }
 
+  // REQ-216⑦：伴生绑定本体清单（详情页「伴生候选」页签「对话生长」徽标判定）
+  const [boundIds, setBoundIds] = useState<Set<string>>(new Set())
+  const reloadBound = () => {
+    companionApi
+      .boundOntologies()
+      .then((r) => setBoundIds(new Set(r.ontology_ids ?? [])))
+      .catch(() => setBoundIds(new Set()))
+  }
+
   const reloadProfiles = () => {
     api
       .listRuntimeProfiles()
@@ -71,6 +82,7 @@ export default function AssetsPage() {
   useEffect(() => {
     reloadOntos()
     reloadProfiles()
+    reloadBound()
   }, [])
 
   // 选中本体 → 拉取 Spec（404 视为尚未保存，不算错误）
@@ -318,6 +330,22 @@ export default function AssetsPage() {
                   key: 'graph',
                   label: '可视化',
                   children: <VizTabs spec={spec} ontologyId={active.id} />,
+                },
+                {
+                  key: 'companion',
+                  label: (
+                    <span>
+                      伴生候选
+                      {boundIds.has(active.id) && (
+                        <Tooltip title="对话生长：有智能体绑定该本体为伴生归属（REQ-216）">
+                          <Tag color="geekblue" style={{ margin: 0, marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 5px' }}>
+                            对话生长
+                          </Tag>
+                        </Tooltip>
+                      )}
+                    </span>
+                  ),
+                  children: <OntologyCompanionPane key={active.id} ontologyId={active.id} />,
                 },
                 {
                   key: 'graph-edit',

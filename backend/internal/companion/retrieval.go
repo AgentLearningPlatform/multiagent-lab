@@ -52,20 +52,23 @@ type entityHit struct {
 
 // RetrievalContext 实现 chat.CompanionSource（接口反转注入，companion→chat 包环约束）。
 // 返回值：注入文本（空=无命中）、实体明细（retrieval 事件用）、错误（仅引擎通信失败）。
+// REQ-216：召回作用域=绑定本体的伴生子图（同本体多 agent 共享沉淀——项目协作语义升维）。
 func (s *Service) RetrievalContext(ctx context.Context, conv *store.Conversation, agent *store.Agent, input string) (string, []map[string]any, error) {
-	if s == nil || s.Engine == nil || agent == nil || strings.TrimSpace(input) == "" {
+	if s == nil || s.Plans == nil || agent == nil || strings.TrimSpace(input) == "" {
 		return "", nil, nil
 	}
-	// REQ-211：召回作用域=agent 伴生图（该 agent 全部会话与项目会话知识共享；
-	// agent 会话 conv.AgentID==agent.ID，项目会话为运行 agent——recallCompanion 已按开关门控）
-	labels, err := s.queryLabels(ctx, agent.ID)
+	ontID := boundOntology(agent)
+	if ontID == "" {
+		return "", nil, nil
+	}
+	labels, err := s.queryLabels(ctx, ontID)
 	if err != nil {
 		return "", nil, err
 	}
 	// a) 向量主召回（embedding 未配置/失败 → 静默降级词法 + 日志）
-	vecHits, vecErr := s.vectorRecall(ctx, agent.ID, labels, input)
+	vecHits, vecErr := s.vectorRecall(ctx, ontID, labels, input)
 	if vecErr != nil {
-		log.Printf("[companion] 向量召回不可用，降级词法（agent %s）: %v", agent.ID, vecErr)
+		log.Printf("[companion] 向量召回不可用，降级词法（本体 %s）: %v", ontID, vecErr)
 	}
 	// b) 词法兜底 + 合并去重（向量优先占坑，词法补位）
 	hits, matchOf := mergeRecall(vecHits, recallEntities(labels, input))
@@ -75,11 +78,11 @@ func (s *Service) RetrievalContext(ctx context.Context, conv *store.Conversation
 	out := make([]entityHit, 0, len(hits))
 	for _, label := range hits {
 		h := entityHit{Label: label, Match: matchOf[label]}
-		def, conf, err := s.queryEntityInfo(ctx, agent.ID, label)
+		def, conf, err := s.queryEntityInfo(ctx, ontID, label)
 		if err == nil {
 			h.Definition, h.Confidence = def, conf
 		}
-		if edges, err := s.queryEntityNeighborhood(ctx, agent.ID, label); err == nil {
+		if edges, err := s.queryEntityNeighborhood(ctx, ontID, label); err == nil {
 			h.Edges, h.HasEdgeInfo = edges, true
 		}
 		out = append(out, h)
@@ -89,12 +92,12 @@ func (s *Service) RetrievalContext(ctx context.Context, conv *store.Conversation
 
 // vectorRecall 向量召回：标签向量（进程内缓存，图写入失效）与输入向量余弦 topK≤5 阈值 0.35。
 // embedding 连接取全局默认（GetDefaultConnection，REQ-46 机制，不新建伴生专属配置）。
-func (s *Service) vectorRecall(ctx context.Context, convID string, labels []string, input string) ([]string, error) {
+func (s *Service) vectorRecall(ctx context.Context, ontologyID string, labels []string, input string) ([]string, error) {
 	if len(labels) == 0 {
 		return nil, nil
 	}
 	emb := &kb.Embedder{Store: s.Store, Box: s.Box}
-	labelVecs, err := s.labelVectors(ctx, convID, labels, emb)
+	labelVecs, err := s.labelVectors(ctx, ontologyID, labels, emb)
 	if err != nil {
 		return nil, err
 	}
@@ -124,12 +127,12 @@ func (s *Service) vectorRecall(ctx context.Context, convID string, labels []stri
 }
 
 // labelVectors 标签批量向量（缓存命中跳过；缺失标签一次批量补齐后写缓存）。
-func (s *Service) labelVectors(ctx context.Context, convID string, labels []string, emb *kb.Embedder) (map[string][]float32, error) {
+func (s *Service) labelVectors(ctx context.Context, ontologyID string, labels []string, emb *kb.Embedder) (map[string][]float32, error) {
 	s.vecMu.Lock()
-	cache := s.vecCache[convID]
+	cache := s.vecCache[ontologyID]
 	if cache == nil {
 		cache = map[string][]float32{}
-		s.vecCache[convID] = cache
+		s.vecCache[ontologyID] = cache
 	}
 	var missing []string
 	for _, l := range labels {
@@ -145,10 +148,10 @@ func (s *Service) labelVectors(ctx context.Context, convID string, labels []stri
 		}
 		s.vecMu.Lock()
 		// 失效竞态防护：若期间缓存被图写入清空，仍以本次结果重建（标签随后会再失效）
-		cur := s.vecCache[convID]
+		cur := s.vecCache[ontologyID]
 		if cur == nil {
 			cur = map[string][]float32{}
-			s.vecCache[convID] = cur
+			s.vecCache[ontologyID] = cur
 		}
 		for i, l := range missing {
 			if i < len(vecs) {
@@ -161,7 +164,7 @@ func (s *Service) labelVectors(ctx context.Context, convID string, labels []stri
 	defer s.vecMu.Unlock()
 	out := make(map[string][]float32, len(labels))
 	for _, l := range labels {
-		if v, ok := s.vecCache[convID][l]; ok {
+		if v, ok := s.vecCache[ontologyID][l]; ok {
 			out[l] = v
 		}
 	}
@@ -223,21 +226,22 @@ func mergeRecall(vecHits, lexHits []string) ([]string, map[string]string) {
 	return merged, matchOf
 }
 
-// queryLabels 会话伴生图实体标签清单。引擎不在位（未启动且预期端点无存活实例）时返回空——
-// 读侧不拉起引擎（AdoptRunning 仅领养），空图不付出任何代价；写侧 confirm/抽取负责生命周期。
-func (s *Service) queryLabels(ctx context.Context, convID string) ([]string, error) {
-	if s.Engine.Endpoint() == "" && !s.Engine.AdoptRunning(ctx) {
-		return nil, nil
-	}
-	raw, err := s.Engine.Query(ctx, SelectLabels(convID))
+// queryLabels 本体伴生子图实体标签清单（REQ-216：读侧兜底拉起——graphQuery 内 Ensure
+// 确保宿主方案 running；宿主方案不可达返回空，不阻断主链路）。
+func (s *Service) queryLabels(ctx context.Context, ontologyID string) ([]string, error) {
+	raw, err := s.graphQuery(ctx, ontologyID, SelectLabels(ontologyID))
 	if err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "未绑定伴生本体") {
+			return nil, nil
+		}
+		log.Printf("[companion] 伴生图标签查询失败（按空召回）: %v", err)
+		return nil, nil
 	}
 	return parseLabelValues(raw), nil
 }
 
-func (s *Service) queryEntityInfo(ctx context.Context, convID, label string) (string, float64, error) {
-	raw, err := s.Engine.Query(ctx, SelectEntityInfo(convID, label))
+func (s *Service) queryEntityInfo(ctx context.Context, ontologyID, label string) (string, float64, error) {
+	raw, err := s.graphQuery(ctx, ontologyID, SelectEntityInfo(ontologyID, label))
 	if err != nil {
 		return "", 0, err
 	}
@@ -260,8 +264,8 @@ func (s *Service) queryEntityInfo(ctx context.Context, convID, label string) (st
 }
 
 // queryEntityNeighborhood 命中实体 2 跳邻域（1 跳优先，2 跳补位；每实体限流 ≤8 边）。
-func (s *Service) queryEntityNeighborhood(ctx context.Context, convID, label string) ([]edgeRow, error) {
-	raw, err := s.Engine.Query(ctx, SelectEntityNeighborhood(convID, label))
+func (s *Service) queryEntityNeighborhood(ctx context.Context, ontologyID, label string) ([]edgeRow, error) {
+	raw, err := s.graphQuery(ctx, ontologyID, SelectEntityNeighborhood(ontologyID, label))
 	if err != nil {
 		return nil, err
 	}

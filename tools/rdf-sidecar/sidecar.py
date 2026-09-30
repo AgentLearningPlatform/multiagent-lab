@@ -225,7 +225,9 @@ def export(argv) -> int:
     L.append('@prefix owl: <http://www.w3.org/2002/07/owl#> .')
     L.append('@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .')
     L.append('')
-    for c in spec.get("concepts", []):
+    # REQ-216：空本体 spec（伴生绑定自动创建）concepts/relations/instances 可能为 null——
+    # `or []` 容错（空 spec 导出为仅前缀的合法 TTL，宿主方案可正常 start/load）。
+    for c in (spec.get("concepts") or []):
         u = cu(c["name"])
         L.append(f'<{u}> rdf:type owl:Class ; rdfs:label "{esc(c["name"])}"')
         if c.get("definition"):
@@ -233,7 +235,7 @@ def export(argv) -> int:
         for p in c.get("parents", []):
             L[-1] += f' ;\n    rdfs:subClassOf <{cu(p)}>'
         L[-1] += ' .'
-    for r in spec.get("relations", []):
+    for r in (spec.get("relations") or []):
         u = ru(r["name"])
         L.append(f'<{u}> rdf:type owl:ObjectProperty ; rdfs:label "{esc(r["name"])}"')
         if r.get("definition"):
@@ -243,7 +245,7 @@ def export(argv) -> int:
         if r.get("to"):
             L[-1] += f' ;\n    rdfs:range <{cu(r["to"])}>'
         L[-1] += ' .'
-    for it in spec.get("instances", []):
+    for it in (spec.get("instances") or []):
         u = iu(it["name"])
         L.append(f'<{u}> rdf:type owl:NamedIndividual')
         if it.get("concept"):

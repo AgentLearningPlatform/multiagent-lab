@@ -16,10 +16,13 @@ package evaldata
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,7 +63,8 @@ func TestRecallEval(t *testing.T) {
 		t.Skip("embedding 返回空向量，跳过评估")
 	}
 
-	// ── 引擎拉起（独立数据目录+端口，与运行平面/冒烟隔离）──
+	// ── 引擎拉起（独立数据目录+端口，与运行平面/冒烟隔离）——REQ-216 起评测面=裸 SPARQL
+	// 端点（伴生读写已归一方案引擎，本评测以直连 oxigraph 模拟引擎端点）──
 	dir := filepath.Join("..", "..", "..", "..", "data", "companion-graph-eval")
 	_ = exec.Command("pkill", "-f", "companion-graph-eval").Run()
 	time.Sleep(300 * time.Millisecond)
@@ -68,10 +72,19 @@ func TestRecallEval(t *testing.T) {
 	defer func() {
 		_ = exec.Command("pkill", "-f", "companion-graph-eval").Run()
 	}()
-	engine := companion.NewEngine(bin, dir, 9196)
+	cmd := exec.Command(bin, "serve", "--location", dir, "--bind", "127.0.0.1:9196")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("oxigraph 启动失败: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
+	endpoint := "http://127.0.0.1:9196/query"
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
-	if err := engine.Update(ctx, companion.SeedSchema()); err != nil {
+	waitSPARQL(t, endpoint)
+	if err := sparqlUpdate(ctx, endpoint, companion.SeedSchema()); err != nil {
 		t.Fatalf("种子 schema 失败: %v", err)
 	}
 	now := time.Now()
@@ -84,7 +97,7 @@ func TestRecallEval(t *testing.T) {
 			} else {
 				q = companion.InsertNodeTriples(sess.ID, cid, f.Kind, f.Name, f.Definition, f.Confidence, "evalmsg", now)
 			}
-			if err := engine.Update(ctx, q); err != nil {
+			if err := sparqlUpdate(ctx, endpoint, q); err != nil {
 				t.Fatalf("事实入图失败（%s）: %v", f.Name, err)
 			}
 		}
@@ -98,14 +111,14 @@ func TestRecallEval(t *testing.T) {
 	vecErrCount := 0
 	t.Log("题号 | 词法@5 | 向量@5 | 向量+2跳@5 | 期望实体 | 意图")
 	for _, q := range Questions {
-		raw, err := engine.Query(ctx, companion.SelectLabels(q.Conv))
+		raw, err := sparqlQuery(ctx, endpoint, companion.SelectLabels(q.Conv))
 		if err != nil {
 			t.Fatalf("标签查询失败: %v", err)
 		}
 		labels := companion.EvalParseLabels(raw)
 		lexHits := companion.EvalLexicalRecall(labels, q.Input)
 
-		vecHits, neighbors, verr := evalVector(ctx, emb, engine, q, labels)
+		vecHits, neighbors, verr := evalVector(ctx, emb, endpoint, q, labels)
 		if verr != nil {
 			vecErrCount++
 		}
@@ -152,7 +165,7 @@ func TestRecallEval(t *testing.T) {
 }
 
 // evalVector 向量召回 + 命中实体 2 跳邻域扩展（独立实现，不复用 Service 内部——评测只依赖公开纯函数与 SPARQL 面）。
-func evalVector(ctx context.Context, emb *kb.Embedder, engine *companion.Engine, q Question, labels []string) (hits []string, neighbors map[string][]string, err error) {
+func evalVector(ctx context.Context, emb *kb.Embedder, endpoint string, q Question, labels []string) (hits []string, neighbors map[string][]string, err error) {
 	if len(labels) == 0 {
 		return nil, map[string][]string{}, nil
 	}
@@ -184,13 +197,68 @@ func evalVector(ctx context.Context, emb *kb.Embedder, engine *companion.Engine,
 	neighbors = map[string][]string{}
 	for _, c := range cands {
 		hits = append(hits, c.label)
-		raw, err := engine.Query(ctx, companion.SelectEntityNeighborhood(q.Conv, c.label))
+		raw, err := sparqlQuery(ctx, endpoint, companion.SelectEntityNeighborhood(q.Conv, c.label))
 		if err != nil {
 			continue
 		}
 		neighbors[c.label] = companion.EvalParseNeighbors(raw)
 	}
 	return hits, neighbors, nil
+}
+
+// waitSPARQL 健康等待（评测引擎就绪）。
+func waitSPARQL(t *testing.T, endpoint string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := sparqlUpdate(ctx, endpoint, "SELECT * WHERE {} LIMIT 1")
+		cancel()
+		if err == nil {
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	t.Fatalf("评测引擎健康等待超时（%s）", endpoint)
+}
+
+// sparqlUpdate SPARQL UPDATE（/update 端点）。
+func sparqlUpdate(ctx context.Context, queryEndpoint, sparql string) error {
+	base := strings.TrimSuffix(queryEndpoint, "/query")
+	req, err := http.NewRequestWithContext(ctx, "POST", base+"/update", strings.NewReader(sparql))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/sparql-update")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return fmt.Errorf("update %s: %s", resp.Status, string(b))
+	}
+	return nil
+}
+
+// sparqlQuery SPARQL SELECT（/query 端点）。
+func sparqlQuery(ctx context.Context, endpoint, sparql string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(sparql))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/sparql-query")
+	req.Header.Set("Accept", "application/sparql-results+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("query %s", resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 }
 
 // recallAtK Recall@K：命中实体 ∩ 期望实体 / |期望实体|。

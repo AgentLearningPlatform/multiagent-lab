@@ -23,7 +23,12 @@ type Agent struct {
 	SandboxMemory string   `json:"sandbox_memory,omitempty"`
 	SandboxCPUs   float64  `json:"sandbox_cpus,omitempty"`
 	McpServe      McpServe `json:"mcp_serve"` // REQ-131/M18：对外 MCP 服务化（enabled/token/tool_name）
-	// REQ-170/M28：伴生本体开关（默认关；开启后 Run/Resume 收尾触发伴生 worker 游标抽取）
+	// REQ-216/M47①：伴生本体绑定（可空引用——伴生产物归属容器化；空=未开启）。
+	// REQ-170 bool 开关退役为派生：CompanionOntology 在 scan 时按本字段非空回填（读侧兼容），
+	// 写侧以 companion_ontology_id 为准。
+	CompanionOntologyID string `json:"companion_ontology_id"`
+	// REQ-170/M28：伴生本体开关（REQ-216 起为派生只读——companion_ontology_id 非空即开启；
+	// 保留 JSON 字段供旧消费方零破坏）
 	CompanionOntology bool `json:"companion_ontology"`
 	// REQ-186：内置助手标记（1=平台助手内置行——列表分区展示、不可编辑删除；行为上仍内置隔离）
 	IsBuiltin bool `json:"is_builtin"`

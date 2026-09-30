@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Card, Empty, Popconfirm, Segmented, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
+import { api } from '../../../../api/client'
 import { companionApi } from '../../../../api/companion'
 import type { CompanionCandidate } from '../../../../api/companion'
+import type { Agent } from '../../../../api/types'
+import { useUI } from '../../../../store/ui'
 import LoadErrorAlert from '../../../../components/LoadErrorAlert'
+import OntologyCompanionGraph from './OntologyCompanionGraph'
 
 // ---------------------------------------------------------------------------
-// REQ-170/M28 P2：伴生候选确认流面板（D-O19 第三来源「对话」边界——不入第五栏 KG 检索区）。
-// REQ-195 重构：成长图 3D 唯一化页级，本组件只保留「状态卡 + 候选三桶确认流 + 摘除」。
-// REQ-211/M44：作用域 agent 化——props 收 agentId，状态/候选/摘除均按智能体（跨会话铺平，
-// 行内来源会话标注=provenance）；摘除为 agent 级（DROP agent 图+清该 agent 全部候选游标）。
-// confirm/reject/reset 后经 onGraphChanged 通知页级刷新成长图。
+// REQ-216⑥：本体视角候选集中整理（资产详情页「伴生候选」页签）——绑定该本体的全部
+// agent 候选跨 agent 铺平（与侧板「伴生管理」高频动线双入口同 API，数据一致零成本）。
+// 「确认入图」发生在产物本体上，消除「管理匿名图」的脱节感；页签内含成长图（页首，
+// confirm/reject 后联动刷新）与本体级「清空伴生图」（DROP 子图+清全部绑定 agent 候选游标）。
 // ---------------------------------------------------------------------------
 
 const KIND_META: Record<CompanionCandidate['kind'], { color: string; text: string }> = {
@@ -20,65 +23,67 @@ const KIND_META: Record<CompanionCandidate['kind'], { color: string; text: strin
   event: { color: 'geekblue', text: '事件' },
 }
 
-export default function CompanionPane({
-  agentId,
-  convTitles,
-  onChangedGraph,
-}: {
-  agentId: string | undefined
-  /** 会话 id → 标题（候选行来源会话标注；含项目会话「（项目）」后缀） */
-  convTitles?: Map<string, string>
-  /** confirm/reject/reset 入图状态变化后通知页级刷新成长图（REQ-195） */
-  onChangedGraph?: () => void
-}) {
-  const [status, setStatus] = useState<Awaited<ReturnType<typeof companionApi.status>> | null>(null)
-  const [statusLoading, setStatusLoading] = useState(false)
+export default function OntologyCompanionPane({ ontologyId }: { ontologyId: string }) {
+  const { showToast } = useUI()
+
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [convTitles, setConvTitles] = useState<Map<string, string>>(new Map())
+  const [metaLoading, setMetaLoading] = useState(false)
 
   const [cands, setCands] = useState<CompanionCandidate[] | null>(null)
   const [candsLoading, setCandsLoading] = useState(false)
   const [candsErr, setCandsErr] = useState<string | null>(null)
   const [bucket, setBucket] = useState<'pending' | 'confirmed' | 'rejected'>('pending')
   const [deciding, setDeciding] = useState<string | null>(null)
-  const [resetting, setResetting] = useState(false)
   const [actionErr, setActionErr] = useState<string | null>(null)
+  const [resetting, setResetting] = useState(false)
+  const [graphTick, setGraphTick] = useState(0) // confirm/reject/reset 后刷新页首成长图
 
-  const loadAll = useCallback((aid: string) => {
-    setStatusLoading(true)
+  const loadMeta = useCallback(() => {
+    setMetaLoading(true)
+    Promise.all([
+      companionApi.listOntologyAgents(ontologyId).catch(() => [] as Agent[]),
+      api.listConversations({ scope: 'agent' }).catch(() => []),
+      api.listConversations({ scope: 'project' }).catch(() => []),
+    ])
+      .then(([ags, agentConvs, projectConvs]) => {
+        setAgents(ags)
+        const m = new Map<string, string>()
+        for (const c of [...agentConvs, ...projectConvs]) {
+          m.set(c.id, c.scope === 'project' ? `${c.title || c.id}（项目）` : c.title || c.id)
+        }
+        setConvTitles(m)
+      })
+      .finally(() => setMetaLoading(false))
+  }, [ontologyId])
+
+  const loadCands = useCallback(() => {
     setCandsLoading(true)
     companionApi
-      .status(aid)
-      .then(setStatus)
-      .catch(() => setStatus(null))
-      .finally(() => setStatusLoading(false))
-    companionApi
-      .listCandidates('', '', aid)
+      .listCandidatesByOntology(ontologyId)
       .then((ls) => {
         setCands(ls)
         setCandsErr(null)
       })
       .catch((e: any) => {
         setCands(null)
-        setCandsErr(e?.message ?? '候选列表加载失败')
+        setCandsErr(e?.message ?? '候选加载失败')
       })
       .finally(() => setCandsLoading(false))
-  }, [])
+  }, [ontologyId])
 
   useEffect(() => {
-    if (agentId) loadAll(agentId)
-    else {
-      setStatus(null)
-      setCands(null)
-    }
-  }, [agentId, loadAll])
+    loadMeta()
+    loadCands()
+  }, [loadMeta, loadCands])
 
   const decide = async (id: string, action: 'confirm' | 'reject') => {
-    if (!agentId) return
     setDeciding(id)
     setActionErr(null)
     try {
       await (action === 'confirm' ? companionApi.confirmCandidate(id) : companionApi.rejectCandidate(id))
-      loadAll(agentId)
-      onChangedGraph?.()
+      loadCands()
+      setGraphTick((t) => t + 1)
     } catch (e: any) {
       setActionErr(e?.message ?? '操作失败')
     } finally {
@@ -86,24 +91,40 @@ export default function CompanionPane({
     }
   }
 
-  const doReset = async () => {
-    if (!agentId) return
+  const doResetGraph = async () => {
     setResetting(true)
     setActionErr(null)
     try {
-      await companionApi.resetAgent(agentId)
-      loadAll(agentId)
-      onChangedGraph?.()
+      await companionApi.resetOntology(ontologyId)
+      showToast('已清空该本体的伴生图（绑定智能体候选与游标同步清空；本体资产不受影响）')
+      loadCands()
+      setGraphTick((t) => t + 1)
     } catch (e: any) {
-      setActionErr(e?.message ?? '摘除失败')
+      setActionErr(e?.message ?? '清空失败')
     } finally {
       setResetting(false)
     }
   }
 
-  const rows = (cands ?? []).filter((c) => c.status === bucket)
+  const agentName = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents])
+  const rows = useMemo(
+    () =>
+      (cands ?? [])
+        .filter((c) => c.status === bucket)
+        .slice()
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0)),
+    [cands, bucket],
+  )
+  const pendingTotal = useMemo(() => (cands ?? []).filter((c) => c.status === 'pending').length, [cands])
 
   const columns: ColumnsType<CompanionCandidate> = [
+    {
+      title: '来源智能体',
+      dataIndex: 'agent_id',
+      width: 130,
+      ellipsis: true,
+      render: (v: string) => <Tag color="cyan" style={{ margin: 0 }}>{agentName.get(v) || v.slice(0, 12) + '…'}</Tag>,
+    },
     {
       title: '类型',
       dataIndex: 'kind',
@@ -130,19 +151,18 @@ export default function CompanionPane({
       render: (v: number) => <Tag color={v >= 0.7 ? 'green' : v >= 0.4 ? 'orange' : 'default'} style={{ margin: 0 }}>{v ? v.toFixed(2) : '—'}</Tag>,
     },
     {
-      // REQ-211：跨会话铺平后的来源标注（provenance——会话维度保留处）
       title: '来源会话',
       dataIndex: 'conversation_id',
-      width: 140,
+      width: 130,
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{convTitles?.get(v) || v.slice(0, 10) + '…'}</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{convTitles.get(v) || v.slice(0, 10) + '…'}</Typography.Text>
         </Tooltip>
       ),
     },
     {
-      title: '来源（原文锚点）',
+      title: '原文锚点',
       dataIndex: 'source_excerpt',
       ellipsis: true,
       render: (v, r) =>
@@ -177,70 +197,64 @@ export default function CompanionPane({
 
   return (
     <div>
-      {!agentId ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先在上方选择伴生对象（智能体）" />
+      {agents.length === 0 && !metaLoading ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <span style={{ fontSize: 12 }}>
+              暂无智能体绑定该本体——在「智能体」侧板「伴生本体」配置中选择/创建绑定后，对话候选在此跨智能体确认入图
+            </span>
+          }
+        />
       ) : (
         <>
-          <Card size="small" className="work-card" style={{ marginBottom: 12 }}>
-            {statusLoading ? (
-              <Spin size="small" />
-            ) : status ? (
-              <Space size={16} wrap>
-                <Tag color={status.engine_running ? 'green' : 'default'} style={{ margin: 0 }}>
-                  伴生引擎{status.engine_running ? '运行中' : '未启动'}
-                </Tag>
-                {status.engine_running && status.engine_endpoint && (
-                  <Tooltip title={`端点 ${status.engine_endpoint}${status.engine_detail?.binary ? ` ｜ 二进制 ${status.engine_detail.binary} ｜ 数据 ${status.engine_detail.data_dir}` : ''}`}>
-                    <Tag style={{ margin: 0 }}>{status.engine_endpoint.replace(/^https?:\/\/[^/]+/, '')}</Tag>
-                  </Tooltip>
-                )}
-                <Tag color="blue" style={{ margin: 0 }}>待确认 {status.pending_count}</Tag>
-                <Tooltip title="该智能体已有抽取游标的会话数（跨会话增量抽取，REQ-211 复合游标）">
-                  <Tag style={{ margin: 0 }}>在抽会话 {status.cursor_count}</Tag>
-                </Tooltip>
-                {(status.labels ?? []).slice(0, 12).map((l) => (
-                  <Tag key={l} color="geekblue" style={{ margin: 0 }} icon={<ThunderboltOutlined />}>{l}</Tag>
-                ))}
-                {(status.labels ?? []).length > 12 && <Typography.Text type="secondary" style={{ fontSize: 12 }}>…共 {(status.labels ?? []).length} 个实体</Typography.Text>}
-                {(status.labels ?? []).length === 0 && <Typography.Text type="secondary" style={{ fontSize: 12 }}>图内暂无实体（确认候选后生成）</Typography.Text>}
-              </Space>
-            ) : (
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>伴生管线状态不可用（对话收尾抽取后自动就绪）</Typography.Text>
-            )}
+          <div style={{ marginBottom: 8 }}>
+            <Space size={6} wrap>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>绑定智能体：</Typography.Text>
+              {agents.map((a) => (
+                <Tag key={a.id} color="cyan" style={{ margin: 0 }}>{a.name}</Tag>
+              ))}
+            </Space>
+          </div>
+
+          {/* 成长图（REQ-216⑧：伴生图=该本体可视化形态之一，页签内页首联动刷新） */}
+          <Card size="small" className="work-card" style={{ marginBottom: 12 }} styles={{ body: { paddingTop: 8 } }}>
+            <OntologyCompanionGraph key={graphTick} ontologyId={ontologyId} />
           </Card>
 
           <div className="onto-sec">
-            <span className="onto-sec-title">候选（跨会话铺平 · 人工确认 = 入图门控，REQ-82 草稿必审）</span>
+            <span className="onto-sec-title">候选（跨智能体 · 人工确认 = 入图门控，REQ-82 草稿必审）</span>
             <span className="hit-spacer" />
             <Segmented
               size="small"
               value={bucket}
               onChange={(v) => setBucket(v as 'pending' | 'confirmed' | 'rejected')}
               options={[
-                { value: 'pending', label: '待确认' },
+                { value: 'pending', label: `待确认${pendingTotal > 0 ? ` ${pendingTotal}` : ''}` },
                 { value: 'confirmed', label: '已入图' },
                 { value: 'rejected', label: '已拒绝' },
               ]}
             />
             <Popconfirm
-              title={`摘除该智能体的伴生图？`}
-              description="DROP 该智能体伴生图 + 清空其全部候选与游标（REQ-211 agent 级摘除；含其所有会话与项目协作的沉淀）；对话本身不受影响。"
-              okText="摘除"
+              title="清空该本体的伴生图？"
+              description="DROP 本体伴生子图 + 清空全部绑定智能体的候选与游标（REQ-216 本体级摘除；各智能体伴生随之解绑，需重新绑定）；本体资产本身不受影响。"
+              okText="清空"
               okButtonProps={{ danger: true }}
               cancelText="取消"
-              onConfirm={doReset}
+              onConfirm={doResetGraph}
             >
               <Button size="small" danger icon={<DeleteOutlined />} loading={resetting}>
-                整体摘除
+                清空伴生图
               </Button>
             </Popconfirm>
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => { loadMeta(); loadCands() }} aria-label="刷新伴生候选" />
           </div>
 
           {actionErr && <LoadErrorAlert title="伴生操作失败" message={actionErr} onRetry={() => setActionErr(null)} style={{ marginBottom: 12 }} />}
 
           {candsErr ? (
-            <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={() => agentId && loadAll(agentId)} />
-          ) : candsLoading ? (
+            <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={loadCands} />
+          ) : candsLoading || metaLoading ? (
             <div style={{ padding: '16px 0' }}>
               <Spin />
             </div>
@@ -249,7 +263,7 @@ export default function CompanionPane({
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={
                 bucket === 'pending'
-                  ? '暂无待确认候选——在 Agent 配置开启「伴生本体」并对话一轮后，收尾自动抽取'
+                  ? '暂无待确认候选——与绑定智能体对话一轮后，收尾自动抽取'
                   : '该分组暂无候选'
               }
             />

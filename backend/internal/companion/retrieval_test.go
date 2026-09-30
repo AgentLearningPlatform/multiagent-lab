@@ -55,7 +55,7 @@ func TestRenderCompanionContext(t *testing.T) {
 
 func TestSelectEntityContextSPARQL(t *testing.T) {
 	info := SelectEntityInfo("c1", "阿司匹林")
-	if !strings.Contains(info, "GRAPH <http://eino-lab/graph/agt-c1>") || !strings.Contains(info, "OPTIONAL") {
+	if !strings.Contains(info, "GRAPH <http://eino-lab/graph/ont-c1>") || !strings.Contains(info, "OPTIONAL") {
 		t.Fatalf("SelectEntityInfo 图限定/OPTIONAL 缺失：%s", info)
 	}
 	edges := SelectEntityEdges("c1", "阿司匹林")
@@ -73,17 +73,18 @@ func TestParseLabelValues(t *testing.T) {
 	}
 }
 
-// RetrievalContext 空值防御：nil 会话/空输入/引擎未启动均返回空（nil Service 由编译期保证不可调）。
+// RetrievalContext 空值防御：nil 会话/空输入/未绑定本体均返回空（nil Service 由编译期保证不可调）。
 func TestRetrievalContextGuards(t *testing.T) {
 	st, err := store.Open(t.TempDir() + "/t.db")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	s := NewService(st, nil, nil) // engine 默认构造但未启动（Endpoint()==""）
+	s := NewService(st, nil, nil)
 	conv := &store.Conversation{ID: "c1", Scope: "agent"}
-	agt := &store.Agent{ID: "c1"} // REQ-211：召回作用域=agent 图（测试中 agent id 即图键）
+	// REQ-216：未绑定伴生本体（companion_ontology_id 空）→ 不召回（空返回）
+	agt := &store.Agent{ID: "c1"}
 	if text, ents, err := s.RetrievalContext(t.Context(), conv, agt, "阿司匹林"); err != nil || text != "" || ents != nil {
-		t.Fatalf("引擎未启动应空返回，got %q %v %v", text, ents, err)
+		t.Fatalf("未绑定本体应空返回，got %q %v %v", text, ents, err)
 	}
 }

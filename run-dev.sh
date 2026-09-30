@@ -55,7 +55,7 @@ else
 fi
 if [ -n "${OXIGRAPH_BIN_CMD:-}" ]; then
   export OXIGRAPH_BIN="$OXIGRAPH_BIN_CMD"
-  export COMPANION_OXIGRAPH_BIN="$OXIGRAPH_BIN_CMD"   # REQ-195：伴生图引擎与运行平面共用同一二进制（backend 侧 env 名）
+  # （REQ-216：COMPANION_OXIGRAPH_BIN 随伴生内置引擎退役——伴生读写面归一运行平面方案引擎）
 fi
 
 # 前端构建：dist 缺失、源码比 dist 新（如 git pull 之后）、或 FORCE_BUILD=1 时执行
