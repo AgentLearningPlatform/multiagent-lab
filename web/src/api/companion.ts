@@ -38,10 +38,11 @@ export interface CandidateGroup {
 }
 
 export interface CompanionStatus {
-  conversation_id: string
-  cursor: { conversation_id: string; last_message_id: string; updated_at: string }
-  pending_count: number
+  /** REQ-211：状态按智能体聚合（图/待确认/标签/在抽会话数均为 agent 维度） */
+  agent_id: string
   graph: string
+  pending_count: number
+  cursor_count: number
   engine_running: boolean
   engine_endpoint: string
   /** REQ-195：引擎加载详情（实际二进制/数据目录/端点；后端旧版无此字段=undefined） */
@@ -64,7 +65,7 @@ export interface CompanionGraphEdge {
   created_at?: string
 }
 export interface CompanionGraph {
-  conversation_id: string
+  agent_id: string
   graph: string
   engine_running: boolean
   nodes: CompanionGraphNode[]
@@ -108,8 +109,8 @@ export const companionApi = {
   confirmCandidate: (id: string) =>
     req<{ candidate: CompanionCandidate; graph: string }>(`/api/companion/candidates/${id}/confirm`, { method: 'POST', body: '{}' }),
   rejectCandidate: (id: string) => req<CompanionCandidate>(`/api/companion/candidates/${id}/reject`, { method: 'POST', body: '{}' }),
-  status: (conversationId: string) => req<CompanionStatus>(`/api/companion/status?conversation_id=${encodeURIComponent(conversationId)}`),
-  resetConversation: (conversationId: string) =>
-    req<{ reset: boolean }>(`/api/companion/conversations/${conversationId}/reset`, { method: 'POST', body: '{}' }),
-  graph: (conversationId: string) => req<CompanionGraph>(`/api/companion/graph?conversation_id=${encodeURIComponent(conversationId)}`),
+  status: (agentId: string) => req<CompanionStatus>(`/api/companion/status?agent_id=${encodeURIComponent(agentId)}`),
+  resetAgent: (agentId: string) =>
+    req<{ reset: boolean }>(`/api/companion/agents/${agentId}/reset`, { method: 'POST', body: '{}' }),
+  graph: (agentId: string) => req<CompanionGraph>(`/api/companion/graph?agent_id=${encodeURIComponent(agentId)}`),
 }

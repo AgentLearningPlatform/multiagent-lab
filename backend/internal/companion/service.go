@@ -163,7 +163,7 @@ type Service struct {
 	mu      sync.Mutex // 串行化同会话抽取（收尾事件可能并发到达）
 	running map[string]bool
 
-	// REQ-194②召回增强：进程内标签向量缓存（convID → label → vector；会话图写入时失效）
+	// REQ-194②召回增强：进程内标签向量缓存（REQ-211 起键=agentID；agent 图写入时失效）
 	vecMu    sync.Mutex
 	vecCache map[string]map[string][]float32
 }
@@ -176,13 +176,13 @@ func NewService(st *store.Store, box *secrets.Box, engine *Engine) *Service {
 	return &Service{Store: st, Box: box, Engine: engine, running: map[string]bool{}, vecCache: map[string]map[string][]float32{}}
 }
 
-// invalidateLabelCache 会话图写入后失效标签向量缓存（图标签稳态缓存——避免每轮全量重算）。
-func (s *Service) invalidateLabelCache(convID string) {
+// invalidateLabelCache 伴生图写入后失效标签向量缓存（图标签稳态缓存——避免每轮全量重算）。
+func (s *Service) invalidateLabelCache(agentID string) {
 	if s == nil {
 		return
 	}
 	s.vecMu.Lock()
-	delete(s.vecCache, convID)
+	delete(s.vecCache, agentID)
 	s.vecMu.Unlock()
 }
 
@@ -270,17 +270,18 @@ func extractConnID(agent *store.Agent) string {
 	return ""
 }
 
-// knownEntityLabels 会话伴生图已有实体标签（REQ-194①对齐清单数据源）。
-// 引擎不在位（未启动且无存活实例）→ 空（新会话/读侧不拉起，走原行为）；
+// knownEntityLabels agent 伴生图已有实体标签（REQ-194①对齐清单数据源；REQ-211 起为
+// agent 图全量清单——跨会话同名实体归并，不再按会话重复建）。
+// 引擎不在位（未启动且无存活实例）→ 空（读侧不拉起，走原行为）；
 // 查询失败 → 空+日志（低侵入三原则：失败仅日志，不阻断抽取）。
-func (s *Service) knownEntityLabels(ctx context.Context, convID string) []string {
+func (s *Service) knownEntityLabels(ctx context.Context, agentID string) []string {
 	if s == nil || s.Engine == nil {
 		return nil
 	}
 	if s.Engine.Endpoint() == "" && !s.Engine.AdoptRunning(ctx) {
 		return nil
 	}
-	raw, err := s.Engine.Query(ctx, SelectLabels(convID))
+	raw, err := s.Engine.Query(ctx, SelectLabels(agentID))
 	if err != nil {
 		log.Printf("[companion] 已有实体清单查询失败（按空清单抽取）: %v", err)
 		return nil
@@ -296,7 +297,7 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 	if err != nil {
 		return 0, err
 	}
-	cursor, err := s.Store.GetCompanionCursor(convID)
+	cursor, err := s.Store.GetCompanionCursor(convID, agentID)
 	if err != nil {
 		return 0, err
 	}
@@ -311,8 +312,8 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 	}
 
 	connID := extractConnID(agent)
-	// REQ-194①：已有实体清单（引擎不在位/查询失败=空清单，走原行为）
-	known := s.knownEntityLabels(ctx, convID)
+	// REQ-194①：已有实体清单（REQ-211 起=agent 图全量；引擎不在位/查询失败=空清单，走原行为）
+	known := s.knownEntityLabels(ctx, agentID)
 
 	windows := splitWindows(fresh)
 	if len(windows) > maxWindowsPerRun {
@@ -346,7 +347,7 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 						continue
 					}
 					// bot:autoConfirmed 溯源标记（区分自动入图与人工确认）
-					_ = s.Engine.Update(ctx, MarkAutoConfirmed(convID, c.ID))
+					_ = s.Engine.Update(ctx, MarkAutoConfirmed(agentID, c.ID))
 					log.Printf("[companion] 候选 %s 置信 %.2f ≥ 阈值 %.2f，已自动入图", c.Name, c.Confidence, agent.CompanionAutoThreshold)
 				}
 			}
@@ -355,7 +356,7 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 		known = appendWindowEntities(known, cands)
 		total += len(cands)
 		// 游标推进到本窗末（逐窗推进：失败停在上一成功窗末）
-		if err := s.Store.AdvanceCompanionCursor(convID, win.lastID); err != nil {
+		if err := s.Store.AdvanceCompanionCursor(convID, agentID, win.lastID); err != nil {
 			return total, err
 		}
 	}
@@ -410,7 +411,8 @@ func toCandidates(convID, agentID string, msgs []*store.Message, out *extractOut
 	return cands
 }
 
-// ConfirmCandidate 候选确认 → 入会话图（种子 schema 幂等预置 + INSERT + 矛盾旧边失效化）。
+// ConfirmCandidate 候选确认 → 入 agent 伴生图（REQ-211：图作用域=智能体；来源会话保留在
+// 候选 provenance 与消息溯源 URI）（种子 schema 幂等预置 + INSERT + 矛盾旧边失效化）。
 // REQ-194⑤：同主体+同关系名走确定性失效化（既有路径）；不同关系名的语义冲突交 LLM 二分类
 // （冲突才 invalidAt；不确定双保留 + 候选 note「疑似矛盾待人工」；失败仅日志不阻断入图）。
 func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.CompanionCandidate, error) {
@@ -424,26 +426,26 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 	}
 	if c.Kind == "relation" {
 		// 确定性矛盾：同主体+同关系名+未失效旧边 → invalidAt 标记（失效化而非删除）
-		raw, err := s.Engine.Query(ctx, FindActiveEdge(c.ConversationID, c.Name, c.RelName))
+		raw, err := s.Engine.Query(ctx, FindActiveEdge(c.AgentID, c.Name, c.RelName))
 		if err != nil {
 			return nil, fmt.Errorf("矛盾检测查询失败: %w", err)
 		}
 		if edge := parseEdgeURI(raw); edge != "" {
-			if err := s.Engine.Update(ctx, InvalidateEdge(c.ConversationID, edge, now)); err != nil {
+			if err := s.Engine.Update(ctx, InvalidateEdge(c.AgentID, edge, now)); err != nil {
 				return nil, fmt.Errorf("旧边失效化失败: %w", err)
 			}
 		}
 		// REQ-194⑤：语义矛盾二分类（LLM 增强路径，失败/无连接静默跳过）
 		s.semanticConflictCheck(ctx, c, now)
-		if err := s.Engine.Update(ctx, InsertRelationTriples(c.ConversationID, c.ID, c.RelName, c.Name, c.RelTarget, c.Definition, c.Confidence, c.SourceMessageID, now)); err != nil {
+		if err := s.Engine.Update(ctx, InsertRelationTriples(c.AgentID, c.ID, c.RelName, c.Name, c.RelTarget, c.Definition, c.Confidence, c.SourceMessageID, now)); err != nil {
 			return nil, fmt.Errorf("关系入图失败: %w", err)
 		}
 	} else {
-		if err := s.Engine.Update(ctx, InsertNodeTriples(c.ConversationID, c.ID, c.Kind, c.Name, c.Definition, c.Confidence, c.SourceMessageID, now)); err != nil {
+		if err := s.Engine.Update(ctx, InsertNodeTriples(c.AgentID, c.ID, c.Kind, c.Name, c.Definition, c.Confidence, c.SourceMessageID, now)); err != nil {
 			return nil, fmt.Errorf("入图失败: %w", err)
 		}
 	}
-	s.invalidateLabelCache(c.ConversationID) // REQ-194②：图写入失效标签向量缓存
+	s.invalidateLabelCache(c.AgentID) // REQ-194②：图写入失效标签向量缓存（REQ-211 起按 agent 图）
 	return s.Store.DecideCompanionCandidate(candID, "confirmed")
 }
 
@@ -451,7 +453,7 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 // yes → 被冲突旧边 invalidAt；unsure → 双保留 + 候选 note「疑似矛盾待人工」（审计可查）。
 // 引擎/LLM 失败仅日志（矛盾检测是增强不是门禁，不阻断入图）。
 func (s *Service) semanticConflictCheck(ctx context.Context, c *store.CompanionCandidate, at time.Time) {
-	raw, err := s.Engine.Query(ctx, SelectSubjectActiveEdges(c.ConversationID, c.Name))
+	raw, err := s.Engine.Query(ctx, SelectSubjectActiveEdges(c.AgentID, c.Name))
 	if err != nil {
 		log.Printf("[companion] 同主体活跃边查询失败（跳过语义矛盾检测，候选 %s）: %v", c.ID, err)
 		return
@@ -484,7 +486,7 @@ func (s *Service) semanticConflictCheck(ctx context.Context, c *store.CompanionC
 		if edge == "" {
 			return
 		}
-		if err := s.Engine.Update(ctx, InvalidateEdge(c.ConversationID, edge, at)); err != nil {
+		if err := s.Engine.Update(ctx, InvalidateEdge(c.AgentID, edge, at)); err != nil {
 			log.Printf("[companion] 冲突旧边失效化失败（候选 %s）: %v", c.ID, err)
 			return
 		}
@@ -537,16 +539,17 @@ type GraphEdge struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-// Graph 会话伴生图全量读取（REQ-154 成长可视化数据源；节点=概念/事件实体，边=活跃关系）。
+// Graph agent 伴生图全量读取（REQ-154 成长可视化数据源；REQ-211 作用域=智能体：
+// 节点=概念/事件实体，边=活跃关系，含该 agent 全部会话与项目会话的沉淀）。
 // 引擎不在位（未启动且无存活实例）返回空图——读侧不拉起（与检索同口径）。
-func (s *Service) Graph(ctx context.Context, convID string) (map[string]any, error) {
-	out := map[string]any{"conversation_id": convID, "graph": GraphURI(convID), "nodes": []GraphNode{}, "edges": []GraphEdge{}, "engine_running": false}
+func (s *Service) Graph(ctx context.Context, agentID string) (map[string]any, error) {
+	out := map[string]any{"agent_id": agentID, "graph": GraphURI(agentID), "nodes": []GraphNode{}, "edges": []GraphEdge{}, "engine_running": false}
 	if s.Engine.Endpoint() == "" && !s.Engine.AdoptRunning(ctx) {
 		return out, nil
 	}
 	out["engine_running"] = true
 	nodes := []GraphNode{}
-	raw, err := s.Engine.Query(ctx, SelectNodes(convID))
+	raw, err := s.Engine.Query(ctx, SelectNodes(agentID))
 	if err == nil {
 		var res struct {
 			Results struct {
@@ -565,7 +568,7 @@ func (s *Service) Graph(ctx context.Context, convID string) (map[string]any, err
 		}
 	}
 	edges := []GraphEdge{}
-	raw, err = s.Engine.Query(ctx, SelectEdges(convID))
+	raw, err = s.Engine.Query(ctx, SelectEdges(agentID))
 	if err == nil {
 		var res struct {
 			Results struct {
@@ -584,24 +587,25 @@ func (s *Service) Graph(ctx context.Context, convID string) (map[string]any, err
 	return out, nil
 }
 
-// ResetConversation 会话级整体摘除：DROP GRAPH + 清候选/游标 +（可选）停引擎。
-func (s *Service) ResetConversation(ctx context.Context, convID string) error {
-	if err := s.Engine.Update(ctx, DropGraph(convID)); err != nil {
+// ResetAgent agent 级整体摘除（REQ-211：图作用域=智能体，摘除随之升级——
+// DROP agent 图 + 清该 agent 全部候选与游标；本体模块全量管理面单入口不变）。
+func (s *Service) ResetAgent(ctx context.Context, agentID string) error {
+	if err := s.Engine.Update(ctx, DropGraph(agentID)); err != nil {
 		return err
 	}
-	s.invalidateLabelCache(convID)
-	return s.Store.DeleteConversationCompanionData(convID)
+	s.invalidateLabelCache(agentID)
+	return s.Store.DeleteAgentCompanionData(agentID)
 }
 
-// Status 伴生管线状态（引擎端点/游标/pending 计数/实体标签）。
-func (s *Service) Status(ctx context.Context, convID string) (map[string]any, error) {
-	cursor, _ := s.Store.GetCompanionCursor(convID)
-	pending, _ := s.Store.ListCompanionCandidates(convID, "", "pending")
+// StatusByAgent agent 视角伴生管线状态（REQ-211：引擎/agent 图待确认总数/实体标签/在抽会话数）。
+func (s *Service) StatusByAgent(ctx context.Context, agentID string) (map[string]any, error) {
+	pending, _ := s.Store.ListCompanionCandidates("", agentID, "pending")
+	cursorCount, _ := s.Store.CountCompanionCursors(agentID)
 	st := map[string]any{
-		"conversation_id": convID,
-		"cursor":          cursor,
+		"agent_id":        agentID,
+		"graph":           GraphURI(agentID),
 		"pending_count":   len(pending),
-		"graph":           GraphURI(convID),
+		"cursor_count":    cursorCount,
 		"engine_running":  s.Engine.Endpoint() != "",
 		"engine_endpoint": s.Engine.Endpoint(),
 	}
@@ -614,9 +618,54 @@ func (s *Service) Status(ctx context.Context, convID string) (map[string]any, er
 		}
 	}
 	if s.Engine.Endpoint() != "" {
-		if raw, err := s.Engine.Query(ctx, SelectLabels(convID)); err == nil {
+		if raw, err := s.Engine.Query(ctx, SelectLabels(agentID)); err == nil {
 			st["labels"] = json.RawMessage(extractLabelsJSON(raw))
 		}
 	}
 	return st, nil
+}
+
+// MigrateConvGraphsToAgent REQ-211 存量图迁移（启动幂等一次性）：历史会话图（conv-{id}）
+// 按 agent 聚合 ADD TO agent 图（agt-{agentID}）后 DROP；companion_meta 标记防重复。
+// 引擎不在位（无二进制/起不来）→ 返回错误由调用方日志告警，下次启动重试（迁移前旧会话图
+// 内容暂不可见，候选数据在 SQLite 无损）。SPARQL ADD 对空/不存在源图按空处理，天然幂等。
+func (s *Service) MigrateConvGraphsToAgent(ctx context.Context) error {
+	if s == nil || s.Store == nil || s.Engine == nil {
+		return nil
+	}
+	if done, err := s.Store.GetCompanionMeta("convgraphs_migrated"); err == nil && done == "1" {
+		return nil
+	}
+	sources, err := s.Store.ListCompanionGraphSources()
+	if err != nil {
+		return err
+	}
+	if len(sources) == 0 {
+		_ = s.Store.SetCompanionMeta("convgraphs_migrated", "1")
+		return nil
+	}
+	// 引擎懒启动语义在此让位：迁移是写侧职责，起引擎一次性完成
+	if s.Engine.Endpoint() == "" {
+		if !s.Engine.AdoptRunning(ctx) {
+			if _, err := s.Engine.ensureStarted(ctx); err != nil {
+				return fmt.Errorf("伴生引擎不可用，图迁移推迟（下次启动重试）: %w", err)
+			}
+		}
+	}
+	migrated := 0
+	for _, src := range sources {
+		from, to := LegacyConvGraphURI(src.ConversationID), GraphURI(src.AgentID)
+		if err := s.Engine.Update(ctx, AddGraph(from, to)); err != nil {
+			return fmt.Errorf("会话图并入失败（%s → %s）: %w", from, to, err)
+		}
+		if err := s.Engine.Update(ctx, DropGraphByURI(from)); err != nil {
+			return fmt.Errorf("旧会话图清理失败（%s）: %w", from, err)
+		}
+		migrated++
+	}
+	if err := s.Store.SetCompanionMeta("convgraphs_migrated", "1"); err != nil {
+		return err
+	}
+	log.Printf("[companion] REQ-211 图迁移完成：%d 个会话图已按 agent 聚合（DROP 旧 conv 图）", migrated)
+	return nil
 }

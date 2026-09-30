@@ -52,18 +52,20 @@ type entityHit struct {
 
 // RetrievalContext 实现 chat.CompanionSource（接口反转注入，companion→chat 包环约束）。
 // 返回值：注入文本（空=无命中）、实体明细（retrieval 事件用）、错误（仅引擎通信失败）。
-func (s *Service) RetrievalContext(ctx context.Context, conv *store.Conversation, input string) (string, []map[string]any, error) {
-	if s == nil || s.Engine == nil || conv == nil || strings.TrimSpace(input) == "" {
+func (s *Service) RetrievalContext(ctx context.Context, conv *store.Conversation, agent *store.Agent, input string) (string, []map[string]any, error) {
+	if s == nil || s.Engine == nil || agent == nil || strings.TrimSpace(input) == "" {
 		return "", nil, nil
 	}
-	labels, err := s.queryLabels(ctx, conv.ID)
+	// REQ-211：召回作用域=agent 伴生图（该 agent 全部会话与项目会话知识共享；
+	// agent 会话 conv.AgentID==agent.ID，项目会话为运行 agent——recallCompanion 已按开关门控）
+	labels, err := s.queryLabels(ctx, agent.ID)
 	if err != nil {
 		return "", nil, err
 	}
 	// a) 向量主召回（embedding 未配置/失败 → 静默降级词法 + 日志）
-	vecHits, vecErr := s.vectorRecall(ctx, conv.ID, labels, input)
+	vecHits, vecErr := s.vectorRecall(ctx, agent.ID, labels, input)
 	if vecErr != nil {
-		log.Printf("[companion] 向量召回不可用，降级词法（会话 %s）: %v", conv.ID, vecErr)
+		log.Printf("[companion] 向量召回不可用，降级词法（agent %s）: %v", agent.ID, vecErr)
 	}
 	// b) 词法兜底 + 合并去重（向量优先占坑，词法补位）
 	hits, matchOf := mergeRecall(vecHits, recallEntities(labels, input))
@@ -73,11 +75,11 @@ func (s *Service) RetrievalContext(ctx context.Context, conv *store.Conversation
 	out := make([]entityHit, 0, len(hits))
 	for _, label := range hits {
 		h := entityHit{Label: label, Match: matchOf[label]}
-		def, conf, err := s.queryEntityInfo(ctx, conv.ID, label)
+		def, conf, err := s.queryEntityInfo(ctx, agent.ID, label)
 		if err == nil {
 			h.Definition, h.Confidence = def, conf
 		}
-		if edges, err := s.queryEntityNeighborhood(ctx, conv.ID, label); err == nil {
+		if edges, err := s.queryEntityNeighborhood(ctx, agent.ID, label); err == nil {
 			h.Edges, h.HasEdgeInfo = edges, true
 		}
 		out = append(out, h)
@@ -319,7 +321,7 @@ func renderCompanionContext(hits []entityHit) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("【伴生图检索】以下内容来自本会话对话中确认生成的伴生轻量本体（供参考，非权威知识）：")
+	b.WriteString("【伴生图检索】以下内容来自与本智能体的历史对话（含项目协作）中确认生成的伴生轻量本体（供参考，非权威知识）：")
 	for _, h := range hits {
 		fmt.Fprintf(&b, "\n- 实体「%s」", h.Label)
 		if h.Match != "" {

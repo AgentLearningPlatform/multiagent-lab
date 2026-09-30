@@ -55,7 +55,7 @@ func TestRenderCompanionContext(t *testing.T) {
 
 func TestSelectEntityContextSPARQL(t *testing.T) {
 	info := SelectEntityInfo("c1", "阿司匹林")
-	if !strings.Contains(info, "GRAPH <http://eino-lab/graph/conv-c1>") || !strings.Contains(info, "OPTIONAL") {
+	if !strings.Contains(info, "GRAPH <http://eino-lab/graph/agt-c1>") || !strings.Contains(info, "OPTIONAL") {
 		t.Fatalf("SelectEntityInfo 图限定/OPTIONAL 缺失：%s", info)
 	}
 	edges := SelectEntityEdges("c1", "阿司匹林")
@@ -82,7 +82,8 @@ func TestRetrievalContextGuards(t *testing.T) {
 	defer st.Close()
 	s := NewService(st, nil, nil) // engine 默认构造但未启动（Endpoint()==""）
 	conv := &store.Conversation{ID: "c1", Scope: "agent"}
-	if text, ents, err := s.RetrievalContext(t.Context(), conv, "阿司匹林"); err != nil || text != "" || ents != nil {
+	agt := &store.Agent{ID: "c1"} // REQ-211：召回作用域=agent 图（测试中 agent id 即图键）
+	if text, ents, err := s.RetrievalContext(t.Context(), conv, agt, "阿司匹林"); err != nil || text != "" || ents != nil {
 		t.Fatalf("引擎未启动应空返回，got %q %v %v", text, ents, err)
 	}
 }

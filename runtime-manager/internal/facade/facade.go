@@ -5,6 +5,7 @@
 package facade
 
 import (
+	"sync"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,10 +27,13 @@ type Facade struct {
 	// TraceSparql 翻译透视开关（REQ-94，§4.8.2）：开启时把工具翻译出的 SPARQL
 	// 与执行耗时/结果数落 trace_log，供前端“翻译透视”视图学习用。
 	TraceSparql bool
+	// ownerCache 会话→所属智能体伴生图解析缓存（REQ-211；进程生命周期，会话归属不变量）
+	ownerMu    sync.Mutex
+	ownerCache map[string]string
 }
 
 func New(st *store.Store, endpoint func(string) (string, error)) *Facade {
-	return &Facade{Store: st, Endpoint: endpoint, HTTP: &http.Client{Timeout: 15 * time.Second}, TraceSparql: true}
+	return &Facade{Store: st, Endpoint: endpoint, HTTP: &http.Client{Timeout: 15 * time.Second}, TraceSparql: true, ownerCache: map[string]string{}}
 }
 
 // Mount 挂载到 /mcp（Streamable HTTP，沿用 Q-14）。

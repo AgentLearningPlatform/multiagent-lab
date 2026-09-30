@@ -7,7 +7,9 @@ package facade
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"sort"
@@ -36,6 +38,47 @@ func companionGraphEndpoint() string {
 	return "http://127.0.0.1:9199"
 }
 
+// platformAPIBase 平台 backend 基址（REQ-211：会话→所属 agent 解析用；本地同机默认）。
+func platformAPIBase() string {
+	if v := os.Getenv("PLATFORM_API_URL"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return "http://127.0.0.1:8080"
+}
+
+// companionGraphOwner 会话→所属智能体伴生图（REQ-211：伴生图作用域=agent，会话图退役）。
+// agent 会话经平台解析 conv.AgentID；结果进程内缓存（会话归属不变量）。error=平台不可达/
+// 项目会话无唯一归属（多成员各自伴生图，须 agent_id 直传）。
+func (f *Facade) companionGraphOwner(convID string) (string, error) {
+	f.ownerMu.Lock()
+	if agt, ok := f.ownerCache[convID]; ok {
+		f.ownerMu.Unlock()
+		return agt, nil
+	}
+	f.ownerMu.Unlock()
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(platformAPIBase() + "/api/companion/graph-owner?conversation_id=" + url.QueryEscape(convID))
+	if err != nil {
+		return "", fmt.Errorf("平台不可达（%v）——可改传 agent_id 直查其伴生图", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		AgentID string `json:"agent_id"`
+		Error   string `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%s", body.Error)
+	}
+	if body.AgentID == "" {
+		return "", fmt.Errorf("会话无所属智能体")
+	}
+	f.ownerMu.Lock()
+	f.ownerCache[convID] = body.AgentID
+	f.ownerMu.Unlock()
+	return body.AgentID, nil
+}
+
 // sparqlUpdateKeywords SPARQL 1.1 Update + LOAD 等变更关键字（大小写不敏感）。
 var sparqlUpdateKeywords = map[string]bool{
 	"LOAD": true, "CLEAR": true, "CREATE": true, "DROP": true,
@@ -50,7 +93,8 @@ func (f *Facade) addSparqlQueryTool(s *server.MCPServer) {
 		mcp.WithString("query", mcp.Required(), mcp.Description("SPARQL SELECT 查询全文（可带 PREFIX 声明）")),
 		mcp.WithNumber("limit", mcp.Description("返回行数上限（可选，默认 50，最大 200）")),
 		mcp.WithString("graph", mcp.Description("查询目标（可选）：default=本体运行方案默认图（缺省）；companion=伴生本体图（动态薄本体，跨会话对话知识）")),
-		mcp.WithString("conversation_id", mcp.Description("会话 id（graph=companion 时必填：伴生图按会话 named graph 隔离）")),
+		mcp.WithString("agent_id", mcp.Description("智能体 id（graph=companion 时与 conversation_id 二选一：伴生图按智能体隔离，REQ-211）")),
+		mcp.WithString("conversation_id", mcp.Description("会话 id（graph=companion 时可选：解析为所属智能体的伴生图；项目会话无唯一归属须改传 agent_id）")),
 	), f.handleSparqlQuery())
 }
 
@@ -61,6 +105,7 @@ func (f *Facade) handleSparqlQuery() server.ToolHandlerFunc {
 		q, _ := args["query"].(string)
 		graph, _ := args["graph"].(string)
 		convID, _ := args["conversation_id"].(string)
+		agentID, _ := args["agent_id"].(string)
 		if strings.TrimSpace(q) == "" {
 			return mcp.NewToolResultErrorf("query 必填"), nil
 		}
@@ -70,7 +115,7 @@ func (f *Facade) handleSparqlQuery() server.ToolHandlerFunc {
 		// M28/P2a：伴生图查询——转发到伴生引擎，会话 named graph 经协议参数 default-graph-uri
 		// 限定（零查询改写，词法校验照旧）。本体路由不参与（伴生图不在运行方案实例里）。
 		if graph == "companion" {
-			return f.sparqlCompanion(ctx, oid, convID, q, args), nil
+			return f.sparqlCompanion(ctx, oid, convID, agentID, q, args), nil
 		}
 		if oid == "" {
 			return mcp.NewToolResultErrorf("ontology_id 必填（graph=default 时）"), nil
@@ -97,25 +142,33 @@ func (f *Facade) handleSparqlQuery() server.ToolHandlerFunc {
 	}
 }
 
-// sparqlCompanion 伴生图分支（M28/P2a）：SELECT 白名单照旧 → 转发伴生引擎
-// /query?default-graph-uri=<conv-graph>（oxigraph SPARQL 协议标准参数，实测支持）。
-// 语义账目：ontology_id（若有）仅作提示，路由不走方案实例；透视 ProfileID 记 companion:conv。
-func (f *Facade) sparqlCompanion(ctx context.Context, oid, convID, q string, args map[string]any) *mcp.CallToolResult {
-	if strings.TrimSpace(convID) == "" {
-		return mcp.NewToolResultErrorf("graph=companion 时 conversation_id 必填（伴生图按会话隔离）")
+// sparqlCompanion 伴生图分支（M28/P2a；REQ-211 作用域=智能体）：SELECT 白名单照旧 →
+// 转发伴生引擎 /query?default-graph-uri=<agt-graph>（oxigraph SPARQL 协议标准参数，实测支持）。
+// agent_id 直传优先；conversation_id 经平台 graph-owner 解析为所属智能体（兼容既有调用方）。
+// 语义账目：ontology_id（若有）仅作提示，路由不走方案实例；透视 ProfileID 记 companion:agt。
+func (f *Facade) sparqlCompanion(ctx context.Context, oid, convID, agentID, q string, args map[string]any) *mcp.CallToolResult {
+	if strings.TrimSpace(agentID) == "" && strings.TrimSpace(convID) == "" {
+		return mcp.NewToolResultErrorf("graph=companion 时 agent_id / conversation_id 至少传一（伴生图按智能体隔离，REQ-211）")
 	}
 	if err := vetReadonlySelect(q); err != nil {
 		return mcp.NewToolResultErrorf("QUERY_REJECTED: %v", err)
 	}
+	if strings.TrimSpace(agentID) == "" {
+		owner, err := f.companionGraphOwner(convID)
+		if err != nil {
+			return mcp.NewToolResultErrorf("OWNER_RESOLVE_FAILED: %v", err)
+		}
+		agentID = owner
+	}
 	limit := clampLimit(args["limit"])
 	ctx, cancel := context.WithTimeout(ctx, sparqlQueryTimeout)
 	defer cancel()
-	graphURI := fmt.Sprintf("http://eino-lab/graph/conv-%s", convID)
+	graphURI := fmt.Sprintf("http://eino-lab/graph/agt-%s", agentID)
 	endpoint := companionGraphEndpoint() + "/query?default-graph-uri=" + url.QueryEscape(graphURI)
 	start := time.Now()
 	bindings, err := f.query(ctx, endpoint, q)
 	if f.TraceSparql {
-		tr := &store.Trace{Tool: "sparql_query", ProfileID: "companion:" + convID, OntologyID: oid,
+		tr := &store.Trace{Tool: "sparql_query", ProfileID: "companion:" + agentID, OntologyID: oid,
 			Sparql: q, TookMS: time.Since(start).Milliseconds(), ResultCount: len(bindings), Ok: err == nil}
 		if err != nil {
 			tr.Error = err.Error()

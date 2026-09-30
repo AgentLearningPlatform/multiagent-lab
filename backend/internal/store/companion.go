@@ -32,11 +32,19 @@ type CompanionCandidate struct {
 	Note string `json:"note,omitempty"`
 }
 
-// CompanionCursor 会话抽取游标：已处理到的最后一条 message id（只读续抽）。
+// CompanionCursor 抽取游标（REQ-211/M44 复合键：会话 × agent——多 agent 共用项目会话
+// 时各自追踪抽取位；只读续抽）。
 type CompanionCursor struct {
 	ConversationID string `json:"conversation_id"`
+	AgentID        string `json:"agent_id"`
 	LastMessageID  string `json:"last_message_id"`
 	UpdatedAt      string `json:"updated_at"`
+}
+
+// CompanionGraphSource 图迁移数据源（REQ-211：agent × 会话对——历史候选/游标涉及的图）。
+type CompanionGraphSource struct {
+	AgentID        string `json:"agent_id"`
+	ConversationID string `json:"conversation_id"`
 }
 
 const companionCandidateCols = `id,conversation_id,agent_id,kind,name,rel_name,rel_target,definition,confidence,source_message_id,source_excerpt,status,created_at,decided_at,aligned,note`
@@ -166,7 +174,7 @@ func truncateNote(s string) string {
 	return s
 }
 
-// DeleteConversationCompanionData 会话级整体摘除（低侵入三原则③：清候选 + 清游标；图面 DROP 由伴生模块执行）。
+// DeleteConversationCompanionData 会话级清理（清该会话全部候选与游标；图面 DROP 由伴生模块执行）。
 func (s *Store) DeleteConversationCompanionData(convID string) error {
 	if _, err := s.DB.Exec(`DELETE FROM companion_candidate WHERE conversation_id = ?`, convID); err != nil {
 		return err
@@ -175,14 +183,71 @@ func (s *Store) DeleteConversationCompanionData(convID string) error {
 	return err
 }
 
-// GetCompanionCursor 读会话游标（无记录返回空游标）。
-func (s *Store) GetCompanionCursor(convID string) (*CompanionCursor, error) {
-	row := s.DB.QueryRow(`SELECT conversation_id,last_message_id,updated_at FROM companion_cursor WHERE conversation_id = ?`, convID)
+// DeleteAgentCompanionData agent 级整体摘除数据面（REQ-211：清该 agent 全部候选与游标；
+// agent 图 DROP 由伴生模块执行）。
+func (s *Store) DeleteAgentCompanionData(agentID string) error {
+	if _, err := s.DB.Exec(`DELETE FROM companion_candidate WHERE agent_id = ?`, agentID); err != nil {
+		return err
+	}
+	_, err := s.DB.Exec(`DELETE FROM companion_cursor WHERE agent_id = ?`, agentID)
+	return err
+}
+
+// ListCompanionGraphSources 图迁移数据源（REQ-211 启动迁移）：历史候选/游标涉及的
+// agent × 会话对（agent 图聚合其全部会话图的迁移清单）。
+func (s *Store) ListCompanionGraphSources() ([]CompanionGraphSource, error) {
+	rows, err := s.DB.Query(`
+		SELECT DISTINCT agent_id, conversation_id FROM companion_candidate WHERE agent_id != ''
+		UNION
+		SELECT DISTINCT agent_id, conversation_id FROM companion_cursor WHERE agent_id != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CompanionGraphSource
+	for rows.Next() {
+		var g CompanionGraphSource
+		if err := rows.Scan(&g.AgentID, &g.ConversationID); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// CountCompanionCursors agent 在抽会话数（agent 视角状态卡呈现）。
+func (s *Store) CountCompanionCursors(agentID string) (int, error) {
+	row := s.DB.QueryRow(`SELECT count(*) FROM companion_cursor WHERE agent_id = ? AND last_message_id != ''`, agentID)
+	var n int
+	err := row.Scan(&n)
+	return n, err
+}
+
+// GetCompanionMeta 伴生模块元数据（迁移完成标记等；无记录返回空）。
+func (s *Store) GetCompanionMeta(key string) (string, error) {
+	var v string
+	err := s.DB.QueryRow(`SELECT value FROM companion_meta WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
+// SetCompanionMeta 写伴生模块元数据（幂等 upsert）。
+func (s *Store) SetCompanionMeta(key, value string) error {
+	_, err := s.DB.Exec(`INSERT INTO companion_meta (key,value) VALUES (?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
+
+// GetCompanionCursor 读抽取游标（复合键 会话×agent；无记录返回空游标）。
+func (s *Store) GetCompanionCursor(convID, agentID string) (*CompanionCursor, error) {
+	row := s.DB.QueryRow(`SELECT conversation_id,agent_id,last_message_id,updated_at FROM companion_cursor WHERE conversation_id = ? AND agent_id = ?`, convID, agentID)
 	var c CompanionCursor
 	var last sql.NullString
-	if err := row.Scan(&c.ConversationID, &last, &c.UpdatedAt); err != nil {
+	if err := row.Scan(&c.ConversationID, &c.AgentID, &last, &c.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return &CompanionCursor{ConversationID: convID}, nil
+			return &CompanionCursor{ConversationID: convID, AgentID: agentID}, nil
 		}
 		return nil, err
 	}
@@ -190,10 +255,10 @@ func (s *Store) GetCompanionCursor(convID string) (*CompanionCursor, error) {
 	return &c, nil
 }
 
-// AdvanceCompanionCursor 游标推进（幂等 upsert）。
-func (s *Store) AdvanceCompanionCursor(convID, lastMessageID string) error {
-	_, err := s.DB.Exec(`INSERT INTO companion_cursor (conversation_id,last_message_id,updated_at) VALUES (?,?,?)
-		ON CONFLICT(conversation_id) DO UPDATE SET last_message_id=excluded.last_message_id, updated_at=excluded.updated_at`,
-		convID, lastMessageID, now())
+// AdvanceCompanionCursor 游标推进（复合键幂等 upsert）。
+func (s *Store) AdvanceCompanionCursor(convID, agentID, lastMessageID string) error {
+	_, err := s.DB.Exec(`INSERT INTO companion_cursor (conversation_id,agent_id,last_message_id,updated_at) VALUES (?,?,?,?)
+		ON CONFLICT(conversation_id,agent_id) DO UPDATE SET last_message_id=excluded.last_message_id, updated_at=excluded.updated_at`,
+		convID, agentID, lastMessageID, now())
 	return err
 }

@@ -46,7 +46,7 @@ type Service struct {
 // 实现方按会话伴生图实体标签匹配输入，返回注入文本（空=无命中）与 retrieval 事件明细；
 // 引擎通信失败返回错误（chat 层降级为 run.warning，不阻断）。
 type CompanionSource interface {
-	RetrievalContext(ctx context.Context, conv *store.Conversation, input string) (text string, entities []map[string]any, err error)
+	RetrievalContext(ctx context.Context, conv *store.Conversation, agent *store.Agent, input string) (text string, entities []map[string]any, err error)
 }
 
 // CommunitySource 全局问答社区摘要上下文源接口（KB-5③，M35）。
@@ -1334,7 +1334,7 @@ func (s *Service) recallCompanion(ctx context.Context, conv *store.Conversation,
 	if s.Companion == nil || agent == nil || !agent.CompanionOntology {
 		return histMsgs
 	}
-	text, entities, err := s.Companion.RetrievalContext(ctx, conv, input)
+	text, entities, err := s.Companion.RetrievalContext(ctx, conv, agent, input)
 	if err != nil {
 		s.emitAndRecord(ctx, conv, runID, newEvent("run.warning", runID, map[string]any{"message": "伴生图检索失败，本次回答未注入伴生图内容: " + err.Error()}), emit)
 		return histMsgs

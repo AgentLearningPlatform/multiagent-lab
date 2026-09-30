@@ -97,7 +97,7 @@ func TestSlugAndEscapes(t *testing.T) {
 }
 
 func TestGraphURIs(t *testing.T) {
-	if g := GraphURI("abc"); g != "http://eino-lab/graph/conv-abc" {
+	if g := GraphURI("abc"); g != "http://eino-lab/graph/agt-abc" {
 		t.Fatalf("graph URI 不符: %s", g)
 	}
 	e1 := EntityURI("滚动更新")
@@ -109,7 +109,7 @@ func TestGraphURIs(t *testing.T) {
 
 func TestInsertAndInvalidate(t *testing.T) {
 	ins := InsertNodeTriples("c1", "cand1", "concept", "Pod 扩容", "副本伸缩", 0.86, "m9", testTime())
-	for _, want := range []string{"GRAPH <http://eino-lab/graph/conv-c1>", "a bot:Concept", `rdfs:label "Pod 扩容"`, "prov:wasGeneratedBy", "bot:extractedFrom <http://eino-lab/msg/m9>"} {
+	for _, want := range []string{"GRAPH <http://eino-lab/graph/agt-c1>", "a bot:Concept", `rdfs:label "Pod 扩容"`, "prov:wasGeneratedBy", "bot:extractedFrom <http://eino-lab/msg/m9>"} {
 		if !strings.Contains(ins, want) {
 			t.Fatalf("INSERT 缺少 %q:\n%s", want, ins)
 		}
@@ -121,14 +121,14 @@ func TestInsertAndInvalidate(t *testing.T) {
 		}
 	}
 	find := FindActiveEdge("c1", "Pod 扩容", "引发")
-	if !strings.Contains(find, "FILTER NOT EXISTS") || !strings.Contains(find, "conv-c1") {
+	if !strings.Contains(find, "FILTER NOT EXISTS") || !strings.Contains(find, "agt-c1") {
 		t.Fatalf("矛盾检测查询不符:\n%s", find)
 	}
 	inv := InvalidateEdge("c1", "http://eino-lab/e/edge-cand2", testTime())
 	if !strings.Contains(inv, "bot:invalidAt") {
 		t.Fatalf("失效化不符:\n%s", inv)
 	}
-	if dp := DropGraph("c1"); !strings.Contains(dp, "DROP SILENT GRAPH <http://eino-lab/graph/conv-c1>") {
+	if dp := DropGraph("c1"); !strings.Contains(dp, "DROP SILENT GRAPH <http://eino-lab/graph/agt-c1>") {
 		t.Fatalf("DROP 不符: %s", dp)
 	}
 	seed := SeedSchema()
@@ -270,5 +270,22 @@ func TestEngineResolvedBinary(t *testing.T) {
 	e := NewEngine("", t.TempDir(), 0)
 	if got := e.ResolvedBinary(); got != "" {
 		t.Fatalf("未启动应返回空，got %q", got)
+	}
+}
+
+// TestGraphURIAgentScope REQ-211：图 URI 换轨——agent 图 agt- 前缀 + 旧会话图 URI 保留给迁移。
+func TestGraphURIAgentScope(t *testing.T) {
+	if g := GraphURI("a1"); g != "http://eino-lab/graph/agt-a1" {
+		t.Fatalf("agent 图 URI 不符: %s", g)
+	}
+	if g := LegacyConvGraphURI("c9"); g != "http://eino-lab/graph/conv-c9" {
+		t.Fatalf("旧会话图 URI 不符: %s", g)
+	}
+	add := AddGraph("http://eino-lab/graph/conv-c9", "http://eino-lab/graph/agt-a1")
+	if add != "ADD <http://eino-lab/graph/conv-c9> TO <http://eino-lab/graph/agt-a1>" {
+		t.Fatalf("ADD 生成不符: %s", add)
+	}
+	if dp := DropGraphByURI(LegacyConvGraphURI("c9")); dp != "DROP SILENT GRAPH <http://eino-lab/graph/conv-c9>" {
+		t.Fatalf("迁移 DROP 应按旧 URI 显式清理（GraphURI 已换轨不能复用 DropGraph）: %s", dp)
 	}
 }

@@ -100,7 +100,7 @@ func TestGraphEngineSmoke(t *testing.T) {
 		t.Fatalf("建临时库失败: %v", err)
 	}
 	svc := NewService(stStore, nil, e)
-	stMap, err := svc.Status(ctx, "smoke1")
+	stMap, err := svc.StatusByAgent(ctx, "smoke1") // REQ-211：状态按 agent 图（此处 smoke1 即图键）
 	if err != nil {
 		t.Fatalf("Status 失败: %v", err)
 	}
@@ -178,7 +178,8 @@ func TestRetrievalVectorFallbackSmoke(t *testing.T) {
 	}
 	svc := NewService(st, nil, e) // Box=nil → embedding 必失败 → 降级链
 	conv := &store.Conversation{ID: "s1", Scope: "agent"}
-	text, entities, err := svc.RetrievalContext(ctx, conv, "阿司匹林有什么作用？")
+	agt := &store.Agent{ID: "s1"} // REQ-211：召回作用域=agent 图
+	text, entities, err := svc.RetrievalContext(ctx, conv, agt, "阿司匹林有什么作用？")
 	if err != nil {
 		t.Fatalf("检索失败: %v", err)
 	}
@@ -250,17 +251,17 @@ func TestStoreCompanionRoundTrip(t *testing.T) {
 	if _, err := st.DecideCompanionCandidate(cands[0].ID, "rejected"); err == nil {
 		t.Fatalf("已裁决候选不应二次裁决")
 	}
-	if err := st.AdvanceCompanionCursor("conv-x", "m1"); err != nil {
+	if err := st.AdvanceCompanionCursor("conv-x", "agt-a", "m1"); err != nil {
 		t.Fatalf("游标推进失败: %v", err)
 	}
-	cur, err := st.GetCompanionCursor("conv-x")
+	cur, err := st.GetCompanionCursor("conv-x", "agt-a")
 	if err != nil || cur.LastMessageID != "m1" {
 		t.Fatalf("游标回读不符: %+v %v", cur, err)
 	}
 	if err := st.DeleteConversationCompanionData("conv-x"); err != nil {
 		t.Fatalf("会话摘除失败: %v", err)
 	}
-	if cur2, _ := st.GetCompanionCursor("conv-x"); cur2.LastMessageID != "" {
+	if cur2, _ := st.GetCompanionCursor("conv-x", "agt-a"); cur2.LastMessageID != "" {
 		t.Fatalf("摘除后游标应清空: %+v", cur2)
 	}
 }

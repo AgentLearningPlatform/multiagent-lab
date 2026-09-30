@@ -8,10 +8,10 @@ import LoadErrorAlert from '../../../../components/LoadErrorAlert'
 
 // ---------------------------------------------------------------------------
 // REQ-170/M28 P2：伴生候选确认流面板（D-O19 第三来源「对话」边界——不入第五栏 KG 检索区）。
-// REQ-195 重构：会话选择与成长图 3D 上提页级（CompanionPage 单源驱动）——本组件收
-// convId/convs props，只保留「管线状态卡 + 候选三桶确认流 + 整体摘除」；confirm/reject/
-// reset 后经 onGraphChanged 通知页级刷新成长图。此前组件内自带会话下拉与第二个成长图
-// 入口，与页首图两套状态互不相通（上下重复/显示对象不可切换/入图后图不更新的根因）。
+// REQ-195 重构：成长图 3D 唯一化页级，本组件只保留「状态卡 + 候选三桶确认流 + 摘除」。
+// REQ-211/M44：作用域 agent 化——props 收 agentId，状态/候选/摘除均按智能体（跨会话铺平，
+// 行内来源会话标注=provenance）；摘除为 agent 级（DROP agent 图+清该 agent 全部候选游标）。
+// confirm/reject/reset 后经 onGraphChanged 通知页级刷新成长图。
 // ---------------------------------------------------------------------------
 
 const KIND_META: Record<CompanionCandidate['kind'], { color: string; text: string }> = {
@@ -21,10 +21,13 @@ const KIND_META: Record<CompanionCandidate['kind'], { color: string; text: strin
 }
 
 export default function CompanionPane({
-  convId,
+  agentId,
+  convTitles,
   onChangedGraph,
 }: {
-  convId: string | undefined
+  agentId: string | undefined
+  /** 会话 id → 标题（候选行来源会话标注；含项目会话「（项目）」后缀） */
+  convTitles?: Map<string, string>
   /** confirm/reject/reset 入图状态变化后通知页级刷新成长图（REQ-195） */
   onChangedGraph?: () => void
 }) {
@@ -39,16 +42,16 @@ export default function CompanionPane({
   const [resetting, setResetting] = useState(false)
   const [actionErr, setActionErr] = useState<string | null>(null)
 
-  const loadAll = useCallback((cid: string) => {
+  const loadAll = useCallback((aid: string) => {
     setStatusLoading(true)
     setCandsLoading(true)
     companionApi
-      .status(cid)
+      .status(aid)
       .then(setStatus)
       .catch(() => setStatus(null))
       .finally(() => setStatusLoading(false))
     companionApi
-      .listCandidates(cid)
+      .listCandidates('', '', aid)
       .then((ls) => {
         setCands(ls)
         setCandsErr(null)
@@ -61,20 +64,20 @@ export default function CompanionPane({
   }, [])
 
   useEffect(() => {
-    if (convId) loadAll(convId)
+    if (agentId) loadAll(agentId)
     else {
       setStatus(null)
       setCands(null)
     }
-  }, [convId, loadAll])
+  }, [agentId, loadAll])
 
   const decide = async (id: string, action: 'confirm' | 'reject') => {
-    if (!convId) return
+    if (!agentId) return
     setDeciding(id)
     setActionErr(null)
     try {
       await (action === 'confirm' ? companionApi.confirmCandidate(id) : companionApi.rejectCandidate(id))
-      loadAll(convId)
+      loadAll(agentId)
       onChangedGraph?.()
     } catch (e: any) {
       setActionErr(e?.message ?? '操作失败')
@@ -84,12 +87,12 @@ export default function CompanionPane({
   }
 
   const doReset = async () => {
-    if (!convId) return
+    if (!agentId) return
     setResetting(true)
     setActionErr(null)
     try {
-      await companionApi.resetConversation(convId)
-      loadAll(convId)
+      await companionApi.resetAgent(agentId)
+      loadAll(agentId)
       onChangedGraph?.()
     } catch (e: any) {
       setActionErr(e?.message ?? '摘除失败')
@@ -127,6 +130,18 @@ export default function CompanionPane({
       render: (v: number) => <Tag color={v >= 0.7 ? 'green' : v >= 0.4 ? 'orange' : 'default'} style={{ margin: 0 }}>{v ? v.toFixed(2) : '—'}</Tag>,
     },
     {
+      // REQ-211：跨会话铺平后的来源标注（provenance——会话维度保留处）
+      title: '来源会话',
+      dataIndex: 'conversation_id',
+      width: 140,
+      ellipsis: true,
+      render: (v: string) => (
+        <Tooltip title={v}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{convTitles?.get(v) || v.slice(0, 10) + '…'}</Typography.Text>
+        </Tooltip>
+      ),
+    },
+    {
       title: '来源（原文锚点）',
       dataIndex: 'source_excerpt',
       ellipsis: true,
@@ -162,8 +177,8 @@ export default function CompanionPane({
 
   return (
     <div>
-      {!convId ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先在上方选择伴生对象（会话）" />
+      {!agentId ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先在上方选择伴生对象（智能体）" />
       ) : (
         <>
           <Card size="small" className="work-card" style={{ marginBottom: 12 }}>
@@ -180,8 +195,8 @@ export default function CompanionPane({
                   </Tooltip>
                 )}
                 <Tag color="blue" style={{ margin: 0 }}>待确认 {status.pending_count}</Tag>
-                <Tooltip title={`游标位置：消息 ${status.cursor?.last_message_id || '—'}`}>
-                  <Tag style={{ margin: 0 }}>已抽取至游标 {status.cursor?.last_message_id ? status.cursor.last_message_id.slice(0, 8) + '…' : '—'}</Tag>
+                <Tooltip title="该智能体已有抽取游标的会话数（跨会话增量抽取，REQ-211 复合游标）">
+                  <Tag style={{ margin: 0 }}>在抽会话 {status.cursor_count}</Tag>
                 </Tooltip>
                 {(status.labels ?? []).slice(0, 12).map((l) => (
                   <Tag key={l} color="geekblue" style={{ margin: 0 }} icon={<ThunderboltOutlined />}>{l}</Tag>
@@ -190,12 +205,12 @@ export default function CompanionPane({
                 {(status.labels ?? []).length === 0 && <Typography.Text type="secondary" style={{ fontSize: 12 }}>图内暂无实体（确认候选后生成）</Typography.Text>}
               </Space>
             ) : (
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>伴生管线状态不可用（后端未升级到 M28 或引擎未启动；对话收尾抽取后自动就绪）</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>伴生管线状态不可用（对话收尾抽取后自动就绪）</Typography.Text>
             )}
           </Card>
 
           <div className="onto-sec">
-            <span className="onto-sec-title">候选（人工确认 = 入图门控，REQ-82 草稿必审）</span>
+            <span className="onto-sec-title">候选（跨会话铺平 · 人工确认 = 入图门控，REQ-82 草稿必审）</span>
             <span className="hit-spacer" />
             <Segmented
               size="small"
@@ -208,8 +223,8 @@ export default function CompanionPane({
               ]}
             />
             <Popconfirm
-              title={`摘除该会话伴生图？`}
-              description="DROP 会话图 + 清空候选与游标（产物整体摘除，低侵入三原则③）；对话本身不受影响。"
+              title={`摘除该智能体的伴生图？`}
+              description="DROP 该智能体伴生图 + 清空其全部候选与游标（REQ-211 agent 级摘除；含其所有会话与项目协作的沉淀）；对话本身不受影响。"
               okText="摘除"
               okButtonProps={{ danger: true }}
               cancelText="取消"
@@ -224,7 +239,7 @@ export default function CompanionPane({
           {actionErr && <LoadErrorAlert title="伴生操作失败" message={actionErr} onRetry={() => setActionErr(null)} style={{ marginBottom: 12 }} />}
 
           {candsErr ? (
-            <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={() => convId && loadAll(convId)} />
+            <LoadErrorAlert title="候选列表加载失败" message={candsErr} onRetry={() => agentId && loadAll(agentId)} />
           ) : candsLoading ? (
             <div style={{ padding: '16px 0' }}>
               <Spin />

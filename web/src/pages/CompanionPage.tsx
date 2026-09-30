@@ -10,59 +10,55 @@ import type { CompanionGraph } from '../api/companion'
 import LoadErrorAlert from '../components/LoadErrorAlert'
 
 // ---------------------------------------------------------------------------
-// REQ-180/M-O17：伴生本体独立子模块（第六栏，列于资产与运行之间）。
-// REQ-195 布局重构（开发者报障四问题：上下两个图界面重复 / 没有切换本体所属对象 /
-// 显示界面没有内容 / 引擎加载路径与实际二进制路径不匹配）：
-// ①「伴生对象」选择器上提页级且按所属智能体分组（项目会话独立组）——此前页首图由
-//   首个会话静默驱动无任何切换 UI，与面板内会话下拉两套状态互不相通；
-// ②成长图 3D 唯一化于页首（REQ-154/180「成长图首页化」保留），面板内第二入口退役，
-//   数据页级统一获取下发（confirm/reset 后经回调刷新，入图即刻可见）；
-// ③空态收敛为单层——选中会话无图时页首局部空态卡一句带过，不再整页空态与面板
-//   空态双层堆叠；整页引导空态仅剩「无任何会话」场景。
+// REQ-180/M-O17：伴生本体独立子模块（第六栏）。REQ-195 布局重构（页级选择器+成长图
+// 唯一化+空态单层）。REQ-211/M44：伴生图作用域 agent 化——「伴生对象」从会话升级为
+// 智能体（一 agent 一图：其全部会话与参与的项目会话共享沉淀）；成长图/候选/状态均按
+// 智能体取数，候选行保留来源会话标注（provenance）。
 // ---------------------------------------------------------------------------
 
 export default function CompanionPage() {
   const [agents, setAgents] = useState<Agent[]>([])
-  const [convs, setConvs] = useState<Conversation[]>([])
-  const [convsLoading, setConvsLoading] = useState(false)
-  const [convsErr, setConvsErr] = useState<string | null>(null)
-  const [convId, setConvId] = useState<string | undefined>(undefined)
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [agentsErr, setAgentsErr] = useState<string | null>(null)
+  const [agentId, setAgentId] = useState<string | undefined>(undefined)
+  const [convTitles, setConvTitles] = useState<Map<string, string>>(new Map())
 
   const [graph, setGraph] = useState<CompanionGraph | null>(null)
   const [graphLoading, setGraphLoading] = useState(false)
   const [graphErr, setGraphErr] = useState<string | null>(null)
   const [graphKey, setGraphKey] = useState(0) // confirm/reject/reset 后刷新成长图
 
-  const loadConvs = useCallback(() => {
-    setConvsLoading(true)
+  const loadAgents = useCallback(() => {
+    setAgentsLoading(true)
     Promise.all([
-      api.listAgents().catch(() => [] as Agent[]),
-      api.listConversations({ scope: 'agent' }),
-      api.listConversations({ scope: 'project' }),
+      api.listAgents(),
+      api.listConversations({ scope: 'agent' }).catch(() => []),
+      api.listConversations({ scope: 'project' }).catch(() => []),
     ])
       .then(([ags, agentConvs, projectConvs]) => {
         setAgents(ags)
-        const merged = [
-          ...agentConvs,
-          ...projectConvs.map((p) => ({ ...p, title: `${p.title || p.id}（项目）` })),
-        ]
-        setConvs(merged)
-        setConvsErr(null)
-        setConvId((cur) => cur ?? merged[0]?.id)
+        setAgentsErr(null)
+        setAgentId((cur) => cur ?? ags[0]?.id)
+        // 来源会话标题映射（候选行 provenance 标注用）
+        const m = new Map<string, string>()
+        for (const c of [...(agentConvs as Conversation[]), ...(projectConvs as Conversation[])]) {
+          m.set(c.id, c.scope === 'project' ? `${c.title || c.id}（项目）` : c.title || c.id)
+        }
+        setConvTitles(m)
       })
-      .catch((e: any) => setConvsErr(e?.message ?? '会话列表加载失败'))
-      .finally(() => setConvsLoading(false))
+      .catch((e: any) => setAgentsErr(e?.message ?? '智能体列表加载失败'))
+      .finally(() => setAgentsLoading(false))
   }, [])
 
   useEffect(() => {
-    loadConvs()
-  }, [loadConvs])
+    loadAgents()
+  }, [loadAgents])
 
-  const loadGraph = useCallback((cid: string) => {
+  const loadGraph = useCallback((aid: string) => {
     setGraphLoading(true)
     setGraphErr(null)
     companionApi
-      .graph(cid)
+      .graph(aid)
       .then(setGraph)
       .catch((e: any) => {
         setGraph(null)
@@ -72,26 +68,15 @@ export default function CompanionPage() {
   }, [])
 
   useEffect(() => {
-    if (convId) loadGraph(convId)
+    if (agentId) loadGraph(agentId)
     else {
       setGraph(null)
       setGraphErr(null)
     }
-  }, [convId, graphKey, loadGraph])
+  }, [agentId, graphKey, loadGraph])
 
-  // 所属对象分组选项：agent 会话按所属智能体 OptGroup，项目会话独立组（REQ-187 项目伴生口径）
-  const convOptions = useMemo(() => {
-    const agentName = new Map(agents.map((a) => [a.id, a.name]))
-    const groups = new Map<string, { label: string; value: string }[]>()
-    for (const c of convs) {
-      const g = c.scope === 'project' ? '项目会话' : agentName.get(c.agent_id ?? '') ?? '智能体会话'
-      if (!groups.has(g)) groups.set(g, [])
-      groups.get(g)!.push({ label: c.title || c.id, value: c.id })
-    }
-    return [...groups.entries()].map(([g, options]) => ({ label: g, options }))
-  }, [agents, convs])
-
-  const hasConvs = convs.length > 0
+  const activeAgent = useMemo(() => agents.find((a) => a.id === agentId), [agents, agentId])
+  const hasAgents = agents.length > 0
 
   return (
     <div className="work-main">
@@ -103,20 +88,20 @@ export default function CompanionPage() {
             showIcon
             style={{ marginTop: 8 }}
             message="伴生本体（动态薄本体，M28/REQ-170）"
-            description="Agent 开启「伴生本体」后，对话收尾自动抽取领域知识候选（旁路管线，不改对话主链路）；在此人工确认后写入该会话的伴生图（独立 Oxigraph 引擎，按会话 named graph 隔离，矛盾旧边失效化而非删除）。来源徽标「对话」（D-O19 第三来源，不入 KG 检索区）。"
+            description="Agent 开启「伴生本体」后，对话收尾自动抽取领域知识候选（旁路管线，不改对话主链路）；确认后写入该智能体的伴生图——其全部会话与参与的项目会话共享沉淀（REQ-211，按智能体隔离），对话检索跨会话可召回；矛盾旧边失效化而非删除。来源徽标「对话」（D-O19 第三来源，不入 KG 检索区）。"
           />
         </div>
       </div>
 
-      {convsErr && <LoadErrorAlert title="会话列表加载失败" message={convsErr} onRetry={loadConvs} style={{ marginBottom: 12 }} />}
+      {agentsErr && <LoadErrorAlert title="智能体列表加载失败" message={agentsErr} onRetry={loadAgents} style={{ marginBottom: 12 }} />}
 
-      {!convsErr && !hasConvs && !convsLoading ? (
+      {!agentsErr && !hasAgents && !agentsLoading ? (
         <div className="work-empty" style={{ minHeight: 200 }}>
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               <>
-                <p>暂无 Agent 会话——先创建智能体并开启「伴生本体」开关</p>
+                <p>暂无智能体——先创建智能体并开启「伴生本体」开关</p>
                 <p style={{ fontSize: 12, color: 'var(--ant-color-text-tertiary, #888)' }}>
                   到「智能体」配置侧边栏开启伴生开关 → 对话一轮 → 候选在此确认入图 → 成长图呈现
                 </p>
@@ -127,26 +112,29 @@ export default function CompanionPage() {
       ) : (
         <>
           <div className="onto-sec" style={{ marginTop: 12 }}>
-            <span className="onto-sec-title">伴生对象（会话，伴生图按会话隔离）</span>
+            <span className="onto-sec-title">伴生对象（智能体，伴生图按智能体隔离）</span>
             <span className="hit-spacer" />
             <Select
-              style={{ minWidth: 340 }}
+              style={{ minWidth: 300 }}
               showSearch
               optionFilterProp="label"
-              value={convId}
-              loading={convsLoading}
-              onChange={setConvId}
-              placeholder={convsErr ? '会话列表不可用' : '选择伴生对象（会话）'}
-              notFoundContent={convsLoading ? <Spin size="small" /> : '暂无 Agent 会话'}
-              options={convOptions}
+              value={agentId}
+              loading={agentsLoading}
+              onChange={setAgentId}
+              placeholder={agentsErr ? '智能体列表不可用' : '选择伴生对象（智能体）'}
+              notFoundContent={agentsLoading ? <Spin size="small" /> : '暂无智能体'}
+              options={agents.map((a) => ({
+                value: a.id,
+                label: a.companion_ontology ? `${a.name}（伴生已开）` : a.name,
+              }))}
             />
-            <Button size="small" icon={<ReloadOutlined />} onClick={loadConvs} aria-label="刷新会话列表">
+            <Button size="small" icon={<ReloadOutlined />} onClick={loadAgents} aria-label="刷新智能体列表">
               刷新
             </Button>
           </div>
 
           {graphErr ? (
-            <LoadErrorAlert title="伴生图加载失败" message={graphErr} onRetry={() => convId && loadGraph(convId)} style={{ marginBottom: 12 }} />
+            <LoadErrorAlert title="伴生图加载失败" message={graphErr} onRetry={() => agentId && loadGraph(agentId)} style={{ marginBottom: 12 }} />
           ) : graphLoading ? (
             <div style={{ padding: '24px 0', textAlign: 'center' }}>
               <Spin />
@@ -156,21 +144,23 @@ export default function CompanionPage() {
               <CompanionGraph3D data={graph} />
             </div>
           ) : (
-            convId && (
+            agentId && (
               <div className="work-empty" style={{ minHeight: 120, marginBottom: 12 }}>
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
                     <span style={{ fontSize: 12 }}>
-                      该会话伴生图暂无确认入图内容——下方候选确认流入图后，成长图在此呈现
-                    </span>
-                  }
+                      {activeAgent?.companion_ontology
+                        ? '该智能体伴生图暂无确认入图内容——下方候选确认流入图后，成长图在此呈现'
+                        : '该智能体未开启伴生本体开关——到「智能体」配置侧边栏开启后对话一轮即开始沉淀'}
+                  </span>
+                }
                 />
               </div>
             )
           )}
 
-          <CompanionPane convId={convId} onChangedGraph={() => setGraphKey((k) => k + 1)} />
+          <CompanionPane agentId={agentId} convTitles={convTitles} onChangedGraph={() => setGraphKey((k) => k + 1)} />
         </>
       )}
     </div>

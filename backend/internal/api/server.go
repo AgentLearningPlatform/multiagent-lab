@@ -78,6 +78,11 @@ func (s *Server) ooProxy() http.Handler {
 func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *tool.Registry, kbSvc *kb.Service, onto *ontology.Service, dbPath, docsRoot, researchRoot, knowledgeRoot string) *Server {
 	comp := companion.NewService(st, box, nil)
 	chatSvc.Companion = comp // REQ-170 P2「KG 检索源并入」：伴生图检索源经接口反转注入 chat（companion→chat 包环约束）
+	// REQ-211/M44：存量会话图 → agent 图一次性幂等迁移（companion_meta 标记防重复；
+	// 引擎不在位时日志告警、下次启动重试，不阻塞启动主链路）
+	if err := comp.MigrateConvGraphsToAgent(context.Background()); err != nil {
+		log.Printf("[companion] 图迁移未完成（不影响启动）: %v", err)
+	}
 	chatSvc.Community = &kg.Summarizer{Store: st, Box: box} // KB-5③：全局问答社区摘要源（connID 按库经接口参数传入）
 	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, KnowledgeRoot: knowledgeRoot, Companion: comp, Mux: http.NewServeMux()}
 	s.sched = newScheduler(s)
@@ -130,7 +135,8 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/companion/candidates/{id}/reject", s.rejectCompanionCandidate)
 	m.HandleFunc("GET /api/companion/status", s.companionStatus)
 	m.HandleFunc("GET /api/companion/graph", s.companionGraph)
-	m.HandleFunc("POST /api/companion/conversations/{id}/reset", s.resetCompanionConversation)
+	m.HandleFunc("POST /api/companion/agents/{id}/reset", s.resetCompanionAgent)
+	m.HandleFunc("GET /api/companion/graph-owner", s.companionGraphOwner)
 
 	// Projects
 	m.HandleFunc("GET /api/projects", s.listProjects)

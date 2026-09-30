@@ -88,10 +88,9 @@ export default function AgentCompanionManage({ agent }: { agent: Agent }) {
   const loadAll = useCallback(() => {
     setEngineLoading(true)
     setCandsLoading(true)
-    // agent 视角状态卡：引擎为全局单例（任一会话 status 即真），取最新会话探测；无会话=未启动
-    api
-      .listConversations({ scope: 'agent', agent_id: agent.id })
-      .then((ls) => (ls[0] ? companionApi.status(ls[0].id) : Promise.resolve(null)))
+    // REQ-211：状态端点原生 agent 维度（引擎/pending/在抽会话数），不再借首会话探测
+    companionApi
+      .status(agent.id)
       .then((st) => setEngine(st))
       .catch(() => setEngine(null))
       .finally(() => setEngineLoading(false))
