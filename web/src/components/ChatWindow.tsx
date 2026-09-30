@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Splitter, Switch, Tag, Tooltip, Typography } from 'antd'
-import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, RobotOutlined, SettingOutlined, StopOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BookOutlined, BulbOutlined, ClusterOutlined, RobotOutlined, SettingOutlined, StopOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
 import { api, connDisplayName, resumeConversation, runConversation } from '../api/client'
 import type { ComparePaneConfig } from '../api/client'
-import EventReplayDrawer from './EventReplayDrawer'
+import TraceDrawer from './TraceDrawer'
 import HighlightSpans from './HighlightSpans'
 import { AgentLogo } from './AgentLogo'
 import { groupToolPhases, ToolPhaseBlock, type ToolPhaseGroup } from './ToolPhase'
@@ -1040,10 +1040,24 @@ export default function ChatWindow({
 
   // Bubble.List 数据（消息走 user/ai 角色，事件卡为无边框自定义内容）
   // REQ-174：连续 tool.call/result 归组为「执行过程」块（单行/收起）后再映射
-  const displayItems = useMemo(
-    () => groupToolPhases(withSubDepth(items.filter((it) => !(it.evType && levelGated(it.evType, debugLevel))))),
-    [items, debugLevel],
-  )
+  // REQ-217④ 顺修：granularity/showReasoning 此前已接线（状态与记忆在）但 displayItems 只应用
+  // levelGated——两开关从未生效；现补过程门控（key=工具与运行状态，off=仅消息结论）。
+  const displayItems = useMemo(() => {
+    return groupToolPhases(
+      withSubDepth(
+        items.filter((it) => {
+          if (it.evType && levelGated(it.evType, debugLevel)) return false
+          if (!showReasoning && it.evType === 'reasoning') return false
+          if (it.kind === 'msg' || !it.evType) return true
+          if (granularity === 'off') return false
+          if (granularity === 'key') {
+            return it.evType.startsWith('tool.') || it.evType.startsWith('run.') || it.evType === 'artifact.saved'
+          }
+          return true
+        }),
+      ),
+    )
+  }, [items, debugLevel, granularity, showReasoning])
   const listItems = useMemo(
     () =>
       displayItems.map((it, i) => {
@@ -1123,7 +1137,8 @@ export default function ChatWindow({
     arguments: string
   } | null>(null)
   const [answer, setAnswer] = useState('')
-  const [replayOpen, setReplayOpen] = useState(false)
+    // REQ-217①/M48：调用轨迹面板（重放并入面板——头部「重放」按钮退役，EventReplayDrawer 作面板内动作）
+  const [traceOpen, setTraceOpen] = useState(false)
   useEffect(() => {
     try {
       const st = conversation.interrupt_state ? JSON.parse(conversation.interrupt_state) : null
@@ -1359,7 +1374,8 @@ export default function ChatWindow({
           >
             <Button size="small">导出</Button>
           </Dropdown>
-          <Button size="small" onClick={() => setReplayOpen(true)}>重放</Button>
+          {/* REQ-217①②④/M48：调用轨迹入口（重放/过程展示/调试三档/原始 JSON 收编面板，头部精简） */}
+          <Button size="small" onClick={() => setTraceOpen(true)}>调用轨迹</Button>
           {/* REQ-19e 对比模式：开关 + 2~4 列（运行中锁定；开关与窗格配置按会话记忆） */}
           <Tooltip title="对比模式：一次提问多窗格并行，窗格可分别覆盖模型/知识库/运行方案——学习配置差异对同一问题的影响（SC-10）">
             <span className="cmp-switch" aria-label="对话对比模式开关">
@@ -1380,99 +1396,7 @@ export default function ChatWindow({
               ]}
             />
           )}
-          {/* REQ-135②：对话级过程展示面板（默认收起）——粒度/深度思考/原始 JSON/审批覆盖 */}
-          <Popover
-            trigger={"click"}
-            placement="bottomRight"
-            content={
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 250 }}>
-                <div>
-                  <Typography.Text style={{ fontSize: 12 }}>过程事件粒度</Typography.Text>
-                  <div style={{ marginTop: 4 }}>
-                    <Segmented
-                      size="small"
-                      value={granularity}
-                      onChange={(v) => patchConvCfg({ granularity: v as 'all' | 'key' | 'off' })}
-                      options={[
-                        { value: 'all', label: '全部' },
-                        { value: 'key', label: '关键' },
-                        { value: 'off', label: '精简' },
-                      ]}
-                    />
-                  </div>
-                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                    关键=工具调用与运行状态；精简=仅消息与结论
-                  </Typography.Text>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Typography.Text style={{ fontSize: 12 }}>深度思考过程</Typography.Text>
-                  <Switch size="small" checked={showReasoning} onChange={(v) => patchConvCfg({ showReasoning: v })} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Typography.Text style={{ fontSize: 12 }}>原始事件 JSON</Typography.Text>
-                  <Switch size="small" checked={showRaw} onChange={setShowRaw} />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Typography.Text style={{ fontSize: 12 }}>调试事件入库</Typography.Text>
-                    <Switch size="small" checked={debugPersist} onChange={(v) => patchConvCfg({ debugPersist: v })} />
-                  </div>
-                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                    开启后调试档细节（模型调用链路/装配快照）随运行落库，供历史与回放查看（级别≥详细时产生）
-                  </Typography.Text>
-                  {debugLevel >= 1 && !debugPersist && (
-                    <Alert
-                      type="warning"
-                      showIcon
-                      style={{ marginTop: 6 }}
-                      message="当前级别≥详细，但入库关闭：调试细节不会留存到历史（REQ-149）"
-                    />
-                  )}
-                </div>
-                <div>
-                  <Typography.Text style={{ fontSize: 12 }}>工具调用审批</Typography.Text>
-                  <Select
-                    size="small"
-                    style={{ width: '100%', marginTop: 4 }}
-                    value={conversation.tool_approval === 'on' || conversation.tool_approval === 'off' ? conversation.tool_approval : ''}
-                    onChange={(v) => patchConv({ tool_approval: v as string })}
-                    options={[
-                      { value: '', label: '跟随智能体配置' },
-                      { value: 'on', label: '本对话强制开启审批' },
-                      { value: 'off', label: '本对话关闭审批' },
-                    ]}
-                  />
-                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                    合并顺序：对话级 &gt; 智能体级（REQ-135②）
-                  </Typography.Text>
-                </div>
-              </div>
-            }
-          >
-            <Button size="small">过程展示</Button>
-          </Popover>
-          <Dropdown
-            trigger={["click"]}
-            menu={{
-              selectable: true,
-              selectedKeys: [String(debugLevel)],
-              items: [
-                { key: '0', label: '简洁（默认）' },
-                { key: '1', label: '详细 · 装配快照/分步用量/工具耗时' },
-                { key: '2', label: '调试 · 另附模型输入全文/工具 schema' },
-              ],
-              onClick: ({ key }) => changeDebugLevel(Number(key)),
-            }}
-            disabled={running || !conversation.id}
-          >
-            <Button size="small" icon={<BugOutlined />} style={{ color: debugLevel > 0 ? 'var(--ant-color-primary, #4f46e5)' : undefined }}>
-              调试{debugLevel > 0 ? ' L' + debugLevel : ''}
-            </Button>
-          </Dropdown>
-          <Tooltip title="显示事件原始 JSON">
-            <Switch size="small" checked={showRaw} onChange={setShowRaw} />
-          </Tooltip>
-          {/* REQ-135①：配置入口并入右侧边栏收放按钮（原独立「配置」按钮移除） */}
+          {/* REQ-217④/M48：头部「过程展示」Popover 退役——粒度/深度思考/原始 JSON/调试入库/审批覆盖收编轨迹面板显示与运行治理区（行为配置归会话配置面） */}          {/* REQ-217④/M48：调试三档迁轨迹面板「运行治理」区 */}          {/* REQ-135①：配置入口并入右侧边栏收放按钮（原独立「配置」按钮移除） */}
           {onToggleSidePanel && ((isProjectScope && project) || (!isProjectScope && agent)) && (
             <Tooltip
               title={
@@ -1480,7 +1404,7 @@ export default function ChatWindow({
                   ? '收起侧边栏'
                   : isProjectScope
                     ? '项目侧边栏（文件 / Git / 配置）'
-                    : '智能体侧边栏（配置）'
+                    : '智能体侧边栏（配置 / 模型 / 连接器 / 对外服务 / 文件 / 伴生本体）'
               }
             >
               <Button
@@ -1834,13 +1758,24 @@ export default function ChatWindow({
         </Typography.Text>
       </Modal>
 
-      {replayOpen && (
-        <EventReplayDrawer
+      {/* REQ-217①②/M48：调用轨迹面板（显示设置/运行治理收编；重放为面板内动作） */}
+      {traceOpen && conversation.id && (
+        <TraceDrawer
           conversationId={conversation.id}
           title={conversation.title || subjectName || '对话'}
-          level={debugLevel}
-          open={replayOpen}
-          onClose={() => setReplayOpen(false)}
+          open={traceOpen}
+          onClose={() => setTraceOpen(false)}
+          granularity={granularity}
+          showReasoning={showReasoning}
+          showRaw={showRaw}
+          debugLevel={debugLevel}
+          debugPersist={debugPersist}
+          toolApproval={conversation.tool_approval ?? ''}
+          running={running}
+          patch={patchConvCfg}
+          onShowRaw={setShowRaw}
+          onChangeDebugLevel={changeDebugLevel}
+          onPatchConv={patchConv}
         />
       )}
     </div>

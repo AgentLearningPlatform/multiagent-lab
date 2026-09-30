@@ -214,7 +214,10 @@ export const api = {
   /** REQ-113①：对话导出 Markdown（events=1 附过程事件附录） */
   exportConversation: (id: string, events = false) =>
     reqText(`/api/conversations/${id}/export${events ? '?events=1' : ''}`),
-  listEvents: (id: string) => req<RunEventDTO[]>(`/api/conversations/${id}/events`),
+  listEvents: (id: string, q?: { run_id?: string; type?: string; limit?: number; offset?: number }) => {
+    const qs = q ? Object.entries(q).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&') : ''
+    return req<RunEventDTO[]>(`/api/conversations/${id}/events${qs ? '?' + qs : ''}`)
+  },
   stopConversation: (id: string) => req<{ stopped: boolean }>(`/api/conversations/${id}/stop`, { method: 'POST' }),
 
   // model connections
@@ -462,7 +465,14 @@ export const api = {
   listEngines: () => req<{ engines: EngineStatus[] }>('/api/engines'),
   // ---- M10/10b 沙箱生命周期（per Agent） ----
   sandboxStatus: (id: string) => req<SandboxStatus>(`/api/agents/${encodeURIComponent(id)}/sandbox`),
-  sandboxStart: (id: string) =>
+
+  // REQ-21804/M49: agent file view (safe root = agent.work_dir; single-level list + 1MB text preview)
+  listAgentDirFiles: (agentId: string, path = '') =>
+    req<{ path: string; root: string; entries: { name: string; is_dir: boolean; size: number; mod_time: string }[] }>(
+      `/api/agents/${agentId}/dir-files?path=${encodeURIComponent(path)}`,
+    ),
+  getAgentDirFile: (agentId: string, path: string) =>
+    reqText(`/api/agents/${agentId}/dir-file?path=${encodeURIComponent(path)}`),  sandboxStart: (id: string) =>
     req<{ endpoint: string }>(`/api/agents/${encodeURIComponent(id)}/sandbox/start`, { method: 'POST' }),
   sandboxStop: (id: string) =>
     req<{ stopped: string }>(`/api/agents/${encodeURIComponent(id)}/sandbox/stop`, { method: 'POST' }),

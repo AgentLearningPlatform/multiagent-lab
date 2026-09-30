@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, Card, Checkbox, Collapse, Divider, Empty, Form, FormInstance, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Breadcrumb, Button, Card, Checkbox, Collapse, Divider, Empty, Form, FormInstance, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography } from 'antd'
 import {
   ApiOutlined,
+  CloudOutlined,
+  DoubleLeftOutlined,
+  DoubleRightOutlined,
   ClusterOutlined,
   BranchesOutlined,
   CloseOutlined,
   CopyOutlined,
   ExportOutlined,
+  FileOutlined,
   FolderOutlined,
   ReloadOutlined,
   SettingOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons'
 import { api, connDisplayName } from '../api/client'
 import AIOptimizeButton from './AIOptimizeButton'
@@ -36,6 +41,8 @@ const PANEL_WIDTH_KEY = 'eino.agentpanel.width'
 const DEFAULT_PANEL_WIDTH = 560
 const MIN_PANEL_WIDTH = 320
 const MAX_PANEL_WIDTH = 720
+// REQ-21705/M48: activity bar shu-tiao width (collapsed rail)
+const PANEL_BAR_WIDTH = 44
 
 /** REQ-214/M46：连接器类型徽标（产品层只呈现「连接器」，MCP 为交付驱动之一） */
 const CONNECTOR_KINDS: { value: Connector['kind']; label: string; color: string }[] = [
@@ -71,13 +78,24 @@ export default function AgentSidePanel({
   onClose: () => void
   onChanged?: () => void
 }) {
-  // REQ-193：侧板一级视图（配置 | 伴生本体）——与「智能体配置」同级双入口，刷新记忆；
-  // REQ-213：内置行无伴生视图，记忆值忽略恒回配置
-  const [view, setView] = useState<'config' | 'companion'>(() =>
-    localStorage.getItem(PANEL_VIEW_KEY) === 'companion' && !agent.is_builtin ? 'companion' : 'config',
-  )
-  const switchView = (v: 'config' | 'companion') => {
+  // REQ-218①/M49：activity bar 六入口平级——智能体配置 / 模型 / 连接器 / 对外服务 / 文件 /
+  // 伴生本体（模型/连接器/对外服务自配置视图页签提级；文件为 REQ-218④ work_dir 浏览视图）。
+  // REQ-217⑤/M48：侧板默认收缩为一竖行按钮常驻右侧——点击按钮展开内容、再点同一按钮收起；
+  // 宽度记忆保留（展开时生效）。
+  type PanelView = 'config' | 'model' | 'connectors' | 'serve' | 'files' | 'companion'
+  const [view, setView] = useState<PanelView>(() => {
+    const saved = localStorage.getItem(PANEL_VIEW_KEY) as PanelView | null
+    if (saved === 'companion' && agent.is_builtin) return 'config'
+    return saved ?? 'config'
+  })
+  const [collapsed, setCollapsed] = useState(true) // 默认竖条态（REQ-217⑤「默认收缩」）
+  const switchView = (v: PanelView) => {
+    if (v === view && !collapsed) {
+      setCollapsed(true) // 再点同一按钮 = 收起回竖条态
+      return
+    }
     setView(v)
+    setCollapsed(false)
     localStorage.setItem(PANEL_VIEW_KEY, v)
   }
   // REQ-189：侧板宽度可调（默认上调 364→560；拖拽 320~720；localStorage 记忆；双击复位）
@@ -105,34 +123,87 @@ export default function AgentSidePanel({
     window.addEventListener('mouseup', onUp)
   }
   return (
-    <aside className={`proj-panel${open ? ' open' : ''}`} style={{ width: panelWidth }} data-panel-width={panelWidth}>
-      <div
-        className="proj-panel-resizer"
-        role="separator"
-        aria-label="拖拽调整侧边栏宽度"
-        aria-orientation="vertical"
-        onMouseDown={(e) => startResize(e)}
-        onDoubleClick={() => { setPanelWidth(DEFAULT_PANEL_WIDTH); localStorage.setItem(PANEL_WIDTH_KEY, String(DEFAULT_PANEL_WIDTH)) }}
-      />
+    <aside className={`proj-panel${open ? ' open' : ''}`} style={{ width: collapsed ? PANEL_BAR_WIDTH : panelWidth }} data-panel-width={panelWidth}>
+      {!collapsed && (
+        <div
+          className="proj-panel-resizer"
+          role="separator"
+          aria-label="拖拽调整侧边栏宽度"
+          aria-orientation="vertical"
+          onMouseDown={(e) => startResize(e)}
+          onDoubleClick={() => { setPanelWidth(DEFAULT_PANEL_WIDTH); localStorage.setItem(PANEL_WIDTH_KEY, String(DEFAULT_PANEL_WIDTH)) }}
+        />
+      )}
       <div className="proj-panel-bar" role="tablist" aria-label="智能体侧边栏视图">
+        {/* REQ-218①/M49 六入口平级 + REQ-217⑤/M48 再点收起（竖条态默认） */}
         <Tooltip title="智能体配置" placement="left">
           <button
             type="button"
-            className={`proj-bar-btn${view === 'config' ? ' active' : ''}`}
+            className={`proj-bar-btn${view === 'config' && !collapsed ? ' active' : ''}`}
             aria-label="智能体配置"
-            aria-selected={view === 'config'}
+            aria-selected={view === 'config' && !collapsed}
             role="tab"
             onClick={() => switchView('config')}
           >
             <SettingOutlined />
           </button>
         </Tooltip>
+        <Tooltip title="模型" placement="left">
+          <button
+            type="button"
+            className={`proj-bar-btn${view === 'model' && !collapsed ? ' active' : ''}`}
+            aria-label="模型"
+            aria-selected={view === 'model' && !collapsed}
+            role="tab"
+            onClick={() => switchView('model')}
+          >
+            <CloudOutlined />
+          </button>
+        </Tooltip>
+        <Tooltip title="连接器" placement="left">
+          <button
+            type="button"
+            className={`proj-bar-btn${view === 'connectors' && !collapsed ? ' active' : ''}`}
+            aria-label="连接器"
+            aria-selected={view === 'connectors' && !collapsed}
+            role="tab"
+            onClick={() => switchView('connectors')}
+          >
+            <ApiOutlined />
+          </button>
+        </Tooltip>
+        <Tooltip title="对外服务" placement="left">
+          <button
+            type="button"
+            className={`proj-bar-btn${view === 'serve' && !collapsed ? ' active' : ''}`}
+            aria-label="对外服务"
+            aria-selected={view === 'serve' && !collapsed}
+            role="tab"
+            // REQ-213：内置行不开放对外服务（mcp_serve 锁死）
+            hidden={!!agent.is_builtin}
+            onClick={() => switchView('serve')}
+          >
+            <ShareAltOutlined />
+          </button>
+        </Tooltip>
+        <Tooltip title="文件" placement="left">
+          <button
+            type="button"
+            className={`proj-bar-btn${view === 'files' && !collapsed ? ' active' : ''}`}
+            aria-label="文件"
+            aria-selected={view === 'files' && !collapsed}
+            role="tab"
+            onClick={() => switchView('files')}
+          >
+            <FolderOutlined />
+          </button>
+        </Tooltip>
         <Tooltip title="伴生本体" placement="left">
           <button
             type="button"
-            className={`proj-bar-btn${view === 'companion' ? ' active' : ''}`}
+            className={`proj-bar-btn${view === 'companion' && !collapsed ? ' active' : ''}`}
             aria-label="伴生本体"
-            aria-selected={view === 'companion'}
+            aria-selected={view === 'companion' && !collapsed}
             role="tab"
             // REQ-213：内置助手（平台辅助角色）无伴生诉求，伴生视图入口隐藏
             hidden={!!agent.is_builtin}
@@ -141,27 +212,42 @@ export default function AgentSidePanel({
             <ClusterOutlined />
           </button>
         </Tooltip>
-        <Tooltip title="文件视图（后续扩展）" placement="left">
-          <button type="button" className="proj-bar-btn" aria-label="文件视图（后续扩展）" disabled>
-            <FolderOutlined />
-          </button>
-        </Tooltip>
         <Tooltip title="Git 视图（后续扩展）" placement="left">
           <button type="button" className="proj-bar-btn" aria-label="Git 视图（后续扩展）" disabled>
             <BranchesOutlined />
           </button>
         </Tooltip>
         <span className="proj-bar-spacer" />
-        <Tooltip title="收起侧边栏" placement="left">
-          <button type="button" className="proj-bar-btn" aria-label="收起侧边栏" onClick={onClose}>
+        <Tooltip title={collapsed ? '展开侧边栏' : '收起为竖条'} placement="left">
+          <button
+            type="button"
+            className="proj-bar-btn"
+            aria-label={collapsed ? '展开侧边栏' : '收起为竖条'}
+            onClick={() => (collapsed ? setCollapsed(false) : switchView(view))}
+          >
+            {collapsed ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
+          </button>
+        </Tooltip>
+        <Tooltip title="关闭侧边栏" placement="left">
+          <button type="button" className="proj-bar-btn" aria-label="关闭侧边栏" onClick={onClose}>
             <CloseOutlined />
           </button>
         </Tooltip>
       </div>
 
-      <div className="proj-panel-view">
-        {view === 'companion' ? <AgentCompanionView agent={agent} onChanged={onChanged} /> : <AgentConfigForm agent={agent} onChanged={onChanged} />}
-      </div>
+      {!collapsed && (
+        <div className="proj-panel-view">
+          {view === 'companion' && <AgentCompanionView agent={agent} onChanged={onChanged} />}
+          {view === 'files' && <AgentFilesView agent={agent} onChanged={onChanged} />}
+          {(view === 'config' || view === 'model' || view === 'connectors' || view === 'serve') && (
+            <AgentConfigForm
+              agent={agent}
+              onChanged={onChanged}
+              visibleTabs={view === 'config' ? undefined : [view === 'model' ? 'model' : view]}
+            />
+          )}
+        </div>
+      )}
     </aside>
   )
 }
@@ -434,7 +520,17 @@ function agentFullPayload(agent: Agent, v: Record<string, any>) {
 // 配置视图（REQ-132：四分类页签；字段/校验/提交逻辑不变）
 // ---------------------------------------------------------------------------
 
-function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
+function AgentConfigForm({
+  agent,
+  onChanged,
+  visibleTabs,
+}: {
+  agent: Agent
+  onChanged?: () => void
+  /** REQ-218①/M49：activity bar 提级视图复用本表单（单实例全字段 forceRender，保存载荷不受限）——
+   *  传定时仅渲染指定页签（如 ['model'] / ['connectors'] / ['serve']）；空 = 全部八页签（配置视图）。 */
+  visibleTabs?: string[]
+}) {
   const { showToast, bumpData, setPage } = useUI()
   const [form] = Form.useForm()
   // REQ-213：内置行（平台助手）适配——白名单 8 字段可编辑（instruction/模型/温度/tools/skills/
@@ -573,7 +669,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
       {isBuiltin && <AssistantProposalBanner onChanged={onChanged} />}
       <Form form={form} layout="vertical" initialValues={agent} requiredMark={false} size="small">
         <Tabs
-          defaultActiveKey="basic"
+          defaultActiveKey={visibleTabs?.[0] ?? 'basic'}
           size="small"
           items={[
             {
@@ -868,6 +964,16 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
 
                   {/* REQ-219：work_dir/verify_command/tool_approval 迁 Harness 层页签 */}
 
+                  {/* REQ-218①/M49：外部连接器授权区块提级 activity bar「连接器」独立视图（connectors 页签） */}
+                </>
+              ),
+            },
+            {
+              key: 'connectors',
+              label: '连接器',
+              forceRender: true,
+              children: (
+                <>
                   {sec('外部连接器（REQ-214）')}
                   <div style={{ marginBottom: 8 }}>
                     <ApiOutlined style={{ marginRight: 6 }} />
@@ -928,7 +1034,7 @@ function AgentConfigForm({ agent, onChanged }: { agent: Agent; onChanged?: () =>
               forceRender: true,
               children: <McpServeTab agent={agent} />,
             }]),
-          ]}
+          ].filter((t: { key: string }) => !visibleTabs || visibleTabs.includes(t.key))}
         />
       </Form>
 
@@ -1150,5 +1256,157 @@ function McpServeTab({ agent }: { agent: Agent }) {
         </Typography.Paragraph>
       )}
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 智能体文件视图（REQ-218④/M49）：以 agent.work_dir 为安全根浏览——面包屑 + 单层列表 +
+// 1MB 文本预览（沿项目 FilesView 交互模型）；「设为工作目录」把当前浏览目录持久化为
+// agent.work_dir（全量载荷防清零），装配期 resolveWorkRoot 随新值生效 = 新 Run 文件工具安全根切换。
+// 诚实边界：沙箱容器执行世界与 work_dir 零 volume 绑定（REQ-202 口径，文件原语平台进程内执行）。
+// ---------------------------------------------------------------------------
+
+function AgentFilesView({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
+  const { showToast } = useUI()
+  const [path, setPath] = useState('') // 相对 work_dir 的目录（'' = 根）
+  const [listing, setListing] = useState<{ path: string; root: string; entries: { name: string; is_dir: boolean; size: number; mod_time: string }[] } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ path: string; content: string } | null>(null)
+  const [previewErr, setPreviewErr] = useState<string | null>(null)
+  const [manualDir, setManualDir] = useState('') // 空态手工输入
+  const [setting, setSetting] = useState(false)
+
+  const load = useCallback((p = path) => {
+    setLoading(true)
+    setErr(null)
+    api
+      .listAgentDirFiles(agent.id, p)
+      .then((r) => setListing(r))
+      .catch((e) => {
+        setListing(null)
+        setErr(e.message)
+      })
+      .finally(() => setLoading(false))
+  }, [agent.id, path])
+  useEffect(() => {
+    setPreview(null)
+    setPreviewErr(null)
+    load(path)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id, path])
+
+  // 「设为工作目录」：当前浏览目录（绝对路径；空=work_dir 本身则无意义，按钮置灰）持久化（全量载荷防清零）
+  const root: string = listing?.root || agent.work_dir || ''
+  const absOf = (rel: string) => (rel ? `${root.replace(/\/+$/, '')}/${rel}` : root)
+  const setWorkDir = async (dir: string) => {
+    setSetting(true)
+    try {
+      await api.updateAgent(agent.id, { ...agentFullPayload(agent, { ...agent }), work_dir: dir })
+      showToast(`工作目录已设为：${dir || agent.work_dir}（新 Run 的文件工具安全根即此目录）`)
+      onChanged?.()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setSetting(false)
+    }
+  }
+
+  const openFile = async (name: string) => {
+    const rel = path ? `${path}/${name}` : name
+    setPreviewErr(null)
+    try {
+      const content = await api.getAgentDirFile(agent.id, rel)
+      setPreview({ path: rel, content })
+    } catch (e: any) {
+      setPreview(null)
+      setPreviewErr(`${rel}: ${e.message}`)
+    }
+  }
+
+  if (!agent.work_dir) {
+    // 空 work_dir 引导态：手工输入路径设为工作目录
+    return (
+      <div className="proj-view-body">
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="未设置工作目录——设置后文件工具（grep/glob/read/write）以此为安全根"
+        />
+        <Space.Compact style={{ width: '100%', marginTop: 8 }}>
+          <Input placeholder="输入绝对路径，如 /home/me/project" value={manualDir} onChange={(e) => setManualDir(e.target.value)} />
+          <Button
+            type="primary"
+            loading={setting}
+            onClick={async () => {
+              const d = manualDir.trim()
+              if (!d) return
+              await setWorkDir(d)
+              setPath('')
+            }}
+          >
+            设为工作目录
+          </Button>
+        </Space.Compact>
+        <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+          也可在 Harness 页签填写 work_dir；后端以 fsutil.SafeJoin 限制浏览与文件工具不越出该目录。
+        </Typography.Text>
+      </div>
+    )
+  }
+
+  const crumbs = path ? path.split('/') : []
+  return (
+    <div className="proj-view-body">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        <FolderOutlined />
+        <Breadcrumb
+          items={[
+            { title: <a onClick={() => setPath('')}>{agent.work_dir}</a> },
+            ...crumbs.map((c, i) => ({
+              title: <a onClick={() => setPath(crumbs.slice(0, i + 1).join('/'))}>{c}</a>,
+            })),
+          ]}
+        />
+        <span style={{ flex: 1 }} />
+        <Tooltip title="把当前浏览目录持久化为工作目录（新 Run 文件工具安全根切换）">
+          <Button size="small" disabled={!path} loading={setting} onClick={() => setWorkDir(absOf(path))}>
+            设为工作目录
+          </Button>
+        </Tooltip>
+      </div>
+      {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 8 }} />}
+      {loading ? (
+        <Spin size="small" />
+      ) : listing ? (
+        listing.entries.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="目录为空" />
+        ) : (
+          <ul className="agent-files" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {listing.entries.map((e) => (
+              <li
+                key={e.name}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 6, cursor: 'pointer' }}
+                onClick={() => (e.is_dir ? setPath(path ? `${path}/${e.name}` : e.name) : openFile(e.name))}
+              >
+                {e.is_dir ? <FolderOutlined style={{ color: 'var(--c-ink-2, #8a90a5)' }} /> : <FileOutlined style={{ color: 'var(--c-ink-2, #8a90a5)' }} />}
+                <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+                {!e.is_dir && (
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    {e.size > 1024 * 1024 ? `${(e.size / 1024 / 1024).toFixed(1)}MB` : `${(e.size / 1024).toFixed(1)}KB`}
+                  </Typography.Text>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
+      {previewErr && <Alert type="warning" showIcon message={previewErr} style={{ marginTop: 8 }} />}
+      {preview && (
+        <Card size="small" title={preview.path} style={{ marginTop: 10 }}
+          extra={<Button size="small" type="text" onClick={() => setPreview(null)}>关闭</Button>}>
+          <pre style={{ margin: 0, maxHeight: 320, overflow: 'auto', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{preview.content}</pre>
+        </Card>
+      )}
+    </div>
   )
 }

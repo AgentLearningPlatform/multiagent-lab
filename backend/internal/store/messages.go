@@ -1,6 +1,10 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+)
 
 // 消息与运行事件持久化（历史还原 / 事件时间线）。
 
@@ -98,7 +102,51 @@ func (s *Store) ListEvents(convID string) ([]*RunEvent, error) {
 	return out, rows.Err()
 }
 
-// TouchConversation 刷新对话更新时间。
+// EventQuery 事件查询过滤（REQ-217③：run_id/type/limit/offset；零值字段不参与过滤）。
+type EventQuery struct {
+	RunID  string // 按运行过滤（轨迹面板「重放此运行」/单运行视图）
+	Type   string // 精确类型过滤（tool.call/tool.result/…）
+	Limit  int    // ≤0 = 不限
+	Offset int    // ≥0，配 Limit 分页
+}
+
+// ListEventsQ 过滤版事件查询（升序不变；返回命中总数供分页——limit 生效时 out 可能是总数的前窗）。
+func (s *Store) ListEventsQ(convID string, q EventQuery) ([]*RunEvent, int, error) {
+	where := []string{"conversation_id = ?"}
+	args := []any{convID}
+	if q.RunID != "" {
+		where = append(where, "run_id = ?") // 走 idx_run_event_run（迁移 035）
+		args = append(args, q.RunID)
+	}
+	if q.Type != "" {
+		where = append(where, "type = ?")
+		args = append(args, q.Type)
+	}
+	total := 0
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM run_event WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	sqlq := `SELECT id,conversation_id,run_id,type,data,created_at FROM run_event WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at, id`
+	if q.Limit > 0 {
+		sqlq += fmt.Sprintf(" LIMIT %d OFFSET %d", q.Limit, max(q.Offset, 0))
+	}
+	rows, err := s.DB.Query(sqlq, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []*RunEvent
+	for rows.Next() {
+		var e RunEvent
+		var data sql.NullString
+		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		e.Data = data.String
+		out = append(out, &e)
+	}
+	return out, total, rows.Err()
+}
 func (s *Store) TouchConversation(convID string) error {
 	_, err := s.DB.Exec(`UPDATE conversation SET updated_at = ? WHERE id = ?`, now(), convID)
 	return err

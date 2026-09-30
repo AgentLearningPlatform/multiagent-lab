@@ -18,6 +18,7 @@ export default function EventReplayDrawer({
   conversationId,
   title,
   level = 0,
+  runId,
   open,
   onClose,
 }: {
@@ -25,6 +26,8 @@ export default function EventReplayDrawer({
   title: string
   /** REQ-149：会话当前展示级别（0 简洁 / 1 详细 / 2 调试）——过滤调试细节事件 */
   level?: number
+  /** REQ-217②：轨迹面板「重放此运行」——按 run_id 过滤（空 = 全部，历史口径） */
+  runId?: string
   open: boolean
   onClose: () => void
 } & Pick<DrawerProps, 'open' | 'onClose'>) {
@@ -51,8 +54,11 @@ export default function EventReplayDrawer({
       .finally(() => setLoading(false))
   }, [open, conversationId])
 
-  // REQ-149①：按当前展示级别过滤渲染（简洁档隐藏调试细节事件）
-  const gated = useMemo(() => events.filter((e) => !levelGated(e.type, level)), [events, level])
+  // REQ-149①：按当前展示级别过滤渲染（简洁档隐藏调试细节事件）；REQ-217② runId 过滤
+  const gated = useMemo(
+    () => events.filter((e) => (!runId || e.run_id === runId) && !levelGated(e.type, level)),
+    [events, level, runId],
+  )
   // REQ-149③：诚实标注数据源——原始事件里是否有过调试细节（与过滤无关，取决于入库时的设置）
   const hasDebugRecorded = useMemo(() => events.some((e) => e.type === 'model.step'), [events])
   const truncated = useMemo(() => events.some((e) => e.type === 'model.step' && (e.data ?? '').includes('截断')), [events])

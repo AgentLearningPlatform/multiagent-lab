@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { ReactNode } from 'react'
 import { Alert, Button, Checkbox, Divider, Empty, Form, Input, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import {
   BranchesOutlined,
   CloseOutlined,
+  DoubleLeftOutlined,
+  DoubleRightOutlined,
   FileOutlined,
   FolderOpenOutlined,
   FolderOutlined,
@@ -50,6 +53,14 @@ const WORKFLOW_OPTIONS = [
 
 /** 单文件预览体积上限（与后端 dir-file ≤1MB 对齐） */
 const LARGE_FILE = 1_000_000
+
+// REQ-21803/M49：项目侧板拖拽宽度（与 AgentSidePanel REQ-189 对称；记忆 key eino.projpanel.width）
+const PROJ_PANEL_WIDTH_KEY = 'eino.projpanel.width'
+const PROJ_PANEL_DEFAULT = 364
+const PROJ_PANEL_MIN = 320
+const PROJ_PANEL_MAX = 720
+// REQ-21705/M48：activity bar 竖条态宽度（默认收缩为一竖行按钮常驻右侧）
+const PANEL_BAR_WIDTH = 44
 
 function fmtSize(n?: number): string {
   if (typeof n !== 'number' || n < 0) return ''
@@ -102,17 +113,61 @@ export default function ProjectSidePanel({
   onClose: () => void
   onChanged?: () => void
 }) {
+  // REQ-21803/M49：拖拽宽度（clamp 320~720 + localStorage 记忆 + 双击复位）
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(PROJ_PANEL_WIDTH_KEY))
+    return saved >= PROJ_PANEL_MIN && saved <= PROJ_PANEL_MAX ? saved : PROJ_PANEL_DEFAULT
+  })
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = panelWidth
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(PROJ_PANEL_MAX, Math.max(PROJ_PANEL_MIN, startW + (startX - ev.clientX)))
+      setPanelWidth(w)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setPanelWidth((w) => {
+        localStorage.setItem(PROJ_PANEL_WIDTH_KEY, String(w))
+        return w
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+  // REQ-21705/M48：默认收缩为一竖行按钮常驻右侧；点击按钮展开、再点同一按钮收起
+  const [collapsed, setCollapsed] = useState(true)
+  const switchView = (v: PanelView) => {
+    if (v === view && !collapsed) {
+      setCollapsed(true)
+      return
+    }
+    onViewChange(v)
+    setCollapsed(false)
+  }
   return (
-    <aside className={`proj-panel${open ? ' open' : ''}`}>
+    <aside className={`proj-panel${open ? ' open' : ''}`} style={{ width: collapsed ? PANEL_BAR_WIDTH : panelWidth }}>
+      {!collapsed && (
+        <div
+          className="proj-panel-resizer"
+          role="separator"
+          aria-label="拖拽调整侧边栏宽度"
+          aria-orientation="vertical"
+          onMouseDown={(e) => startResize(e)}
+          onDoubleClick={() => { setPanelWidth(PROJ_PANEL_DEFAULT); localStorage.setItem(PROJ_PANEL_WIDTH_KEY, String(PROJ_PANEL_DEFAULT)) }}
+        />
+      )}
       <div className="proj-panel-bar" role="tablist" aria-label="项目侧边栏视图">
         <Tooltip title="文件视图" placement="left">
           <button
             type="button"
-            className={`proj-bar-btn${view === 'files' ? ' active' : ''}`}
+            className={`proj-bar-btn${view === 'files' && !collapsed ? ' active' : ''}`}
             aria-label="文件视图"
-            aria-selected={view === 'files'}
+            aria-selected={view === 'files' && !collapsed}
             role="tab"
-            onClick={() => onViewChange('files')}
+            onClick={() => switchView('files')}
           >
             <FolderOutlined />
           </button>
@@ -120,11 +175,11 @@ export default function ProjectSidePanel({
         <Tooltip title="Git 视图" placement="left">
           <button
             type="button"
-            className={`proj-bar-btn${view === 'git' ? ' active' : ''}`}
+            className={`proj-bar-btn${view === 'git' && !collapsed ? ' active' : ''}`}
             aria-label="Git 视图"
-            aria-selected={view === 'git'}
+            aria-selected={view === 'git' && !collapsed}
             role="tab"
-            onClick={() => onViewChange('git')}
+            onClick={() => switchView('git')}
           >
             <BranchesOutlined />
           </button>
@@ -132,28 +187,40 @@ export default function ProjectSidePanel({
         <Tooltip title="配置视图" placement="left">
           <button
             type="button"
-            className={`proj-bar-btn${view === 'config' ? ' active' : ''}`}
+            className={`proj-bar-btn${view === 'config' && !collapsed ? ' active' : ''}`}
             aria-label="配置视图"
-            aria-selected={view === 'config'}
+            aria-selected={view === 'config' && !collapsed}
             role="tab"
-            onClick={() => onViewChange('config')}
+            onClick={() => switchView('config')}
           >
             <SettingOutlined />
           </button>
         </Tooltip>
         <span className="proj-bar-spacer" />
-        <Tooltip title="收起侧边栏" placement="left">
-          <button type="button" className="proj-bar-btn" aria-label="收起侧边栏" onClick={onClose}>
+        <Tooltip title={collapsed ? '展开侧边栏' : '收起为竖条'} placement="left">
+          <button
+            type="button"
+            className="proj-bar-btn"
+            aria-label={collapsed ? '展开侧边栏' : '收起为竖条'}
+            onClick={() => (collapsed ? setCollapsed(false) : switchView(view))}
+          >
+            {collapsed ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
+          </button>
+        </Tooltip>
+        <Tooltip title="关闭侧边栏" placement="left">
+          <button type="button" className="proj-bar-btn" aria-label="关闭侧边栏" onClick={onClose}>
             <CloseOutlined />
           </button>
         </Tooltip>
       </div>
 
-      <div className="proj-panel-view">
-        {view === 'files' && <FilesView project={project} onOpenConfig={() => onViewChange('config')} />}
-        {view === 'git' && <GitView project={project} />}
-        {view === 'config' && <ConfigView project={project} agents={agents} onChanged={onChanged} />}
-      </div>
+      {!collapsed && (
+        <div className="proj-panel-view">
+          {view === 'files' && <FilesView project={project} onOpenConfig={() => onViewChange('config')} />}
+          {view === 'git' && <GitView project={project} />}
+          {view === 'config' && <ConfigView project={project} agents={agents} onChanged={onChanged} />}
+        </div>
+      )}
     </aside>
   )
 }

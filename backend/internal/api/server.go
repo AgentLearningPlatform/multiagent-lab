@@ -186,6 +186,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/model-connections/{id}/list-models", s.listConnectionModels)
 	// M10/10b：沙箱生命周期（状态/启动/停止，per Agent）
 	m.HandleFunc("GET /api/agents/{id}/sandbox", s.sandboxStatus)
+	// REQ-218④/M49：智能体文件视图（安全根=agent.work_dir，沿项目 dir-files 先例）
+	m.HandleFunc("GET /api/agents/{id}/dir-files", s.listAgentDirFiles)
+	m.HandleFunc("GET /api/agents/{id}/dir-file", s.getAgentDirFile)
 	m.HandleFunc("POST /api/agents/{id}/sandbox/start", s.sandboxStart)
 	m.HandleFunc("POST /api/agents/{id}/sandbox/stop", s.sandboxStop)
 	// REQ-191/M31：运行环境统一配置（设置页「运行环境」分区；本体引擎执行方式仍走 /api/runtime-config 反代）

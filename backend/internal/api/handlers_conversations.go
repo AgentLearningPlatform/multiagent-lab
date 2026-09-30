@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
@@ -88,8 +90,16 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, msgs)
 }
 
+// listEvents GET /api/conversations/{id}/events?run_id=&type=&limit=&offset=
+// REQ-217③：query 过滤扩展（不带参数=全量裸数组，向后兼容）；X-Total-Count 头恒回命中总数供分页。
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
-	events, err := s.Store.ListEvents(r.PathValue("id"))
+	q := store.EventQuery{
+		RunID:  strings.TrimSpace(r.URL.Query().Get("run_id")),
+		Type:   strings.TrimSpace(r.URL.Query().Get("type")),
+		Limit:  atoiDefault(r.URL.Query().Get("limit"), 0),
+		Offset: atoiDefault(r.URL.Query().Get("offset"), 0),
+	}
+	events, total, err := s.Store.ListEventsQ(r.PathValue("id"), q)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -97,5 +107,6 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []*store.RunEvent{}
 	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, events)
 }
