@@ -2,10 +2,12 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
@@ -97,17 +99,71 @@ func (s *Server) kgQuality(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, q)
 }
 
-// kgMergeSuggestions GET /api/kg/{kbID}/merge-suggestions：系统合并建议（别名消歧粗规则，仅提示）。
+// kgMergeSuggestions GET /api/kg/{kbID}/merge-suggestions：合并建议（M36/KB-7 起为
+// 规则〔名称包含〕+ 向量〔名+描述 embedding 相似〕双臂；向量臂 embedding 不可用时降级并标
+// vector_degraded；双嵌入防误并：类型不同附 type_warning「慎并」，人工确认后才执行合并）。
 func (s *Server) kgMergeSuggestions(w http.ResponseWriter, r *http.Request) {
 	kbID := r.PathValue("kbID")
 	if _, err := s.Store.GetKnowledgeBase(kbID); err != nil {
 		writeErr(w, err)
 		return
 	}
-	list, err := s.Store.KGMergeSuggestions(kbID)
+	out := []kb.MergeSuggestion{}
+	rule, err := s.Store.KGMergeSuggestions(kbID)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"suggestions": list})
+	seen := map[string]bool{}
+	pairKey := func(a, b string) string {
+		if a > b {
+			a, b = b, a
+		}
+		return a + "|" + b
+	}
+	for _, sg := range rule {
+		out = append(out, kb.MergeSuggestion{Keep: sg.Keep, Merge: sg.Merge, Reason: sg.Reason, Strategy: "rule"})
+		seen[pairKey(sg.Keep, sg.Merge)] = true
+	}
+	vectorDegraded := false
+	if vec, verr := s.KB.KGVectorMergeSuggestions(r.Context(), kbID, 10); verr != nil {
+		vectorDegraded = true
+		log.Printf("[api] kb=%s 向量消歧建议降级: %v", kbID, verr)
+	} else {
+		for _, sg := range vec {
+			if seen[pairKey(sg.Keep, sg.Merge)] {
+				continue
+			}
+			seen[pairKey(sg.Keep, sg.Merge)] = true
+			out = append(out, sg)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suggestions": out, "vector_degraded": vectorDegraded})
+}
+
+// kgEntityAlias PUT /api/kg/{kbID}/entity-alias：实体别名人工标注（M36/KB-7②）。
+// body {name, alias}；alias 分号分隔多别名，空串清除；重建/合并时别名自动保留归并。
+func (s *Server) kgEntityAlias(w http.ResponseWriter, r *http.Request) {
+	kbID := r.PathValue("kbID")
+	if _, err := s.Store.GetKnowledgeBase(kbID); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in struct {
+		Name  string `json:"name"`
+		Alias string `json:"alias"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name 必填"})
+		return
+	}
+	if err := s.Store.SetKGEntityAlias(kbID, strings.TrimSpace(in.Name), in.Alias); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": in.Name, "alias": in.Alias})
 }

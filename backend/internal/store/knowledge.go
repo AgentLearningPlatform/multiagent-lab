@@ -24,10 +24,14 @@ type KnowledgeBase struct {
 	KBVector bool `json:"kb_vector"`
 	KBGraph  bool `json:"kb_graph"`
 	// KG 抽取治理配置（M16/REQ-129①）：库级抽取模型连接与提示词覆写（空 = 默认）
-	KGConnID  string `json:"kg_conn_id,omitempty"`
-	KGPrompt  string `json:"kg_prompt,omitempty"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	KGConnID string `json:"kg_conn_id,omitempty"`
+	KGPrompt string `json:"kg_prompt,omitempty"`
+	// M36/KB-6：本体约束抽取挂载（I3 裁定：ontology_id 挂抽取配置侧，本体只读词表注入 prompt；
+	// 空 = 自由抽取）与库级语料预算（0 = 默认 200 chunks，解除原 60 硬截断）。
+	KGOntologyID string `json:"kg_ontology_id,omitempty"`
+	KGMaxChunks  int    `json:"kg_max_chunks,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // KnowledgeDoc 知识文档（索引状态机：pending→indexing→success|failed）。
@@ -74,14 +78,14 @@ type KnowledgeChunk struct {
 	CreatedAt    string `json:"created_at"`
 }
 
-const kbCols = `id,name,description,mode,top_k,min_score,kb_vector,kb_graph,kg_conn_id,kg_prompt,created_at,updated_at`
+const kbCols = `id,name,description,mode,top_k,min_score,kb_vector,kb_graph,kg_conn_id,kg_prompt,kg_ontology_id,kg_max_chunks,created_at,updated_at`
 const kdocCols = `id,kb_id,title,status,chunk_count,error,source,created_at,updated_at`
 const kchunkCols = `id,kb_id,doc_id,seq,content,parent_content,vector,vector_ref,store_backend,created_at`
 
 func scanKB(row interface{ Scan(...any) error }) (*KnowledgeBase, error) {
 	var k KnowledgeBase
 	var kv, kg int
-	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.Mode, &k.TopK, &k.MinScore, &kv, &kg, &k.KGConnID, &k.KGPrompt, &k.CreatedAt, &k.UpdatedAt); err != nil {
+	if err := row.Scan(&k.ID, &k.Name, &k.Description, &k.Mode, &k.TopK, &k.MinScore, &kv, &kg, &k.KGConnID, &k.KGPrompt, &k.KGOntologyID, &k.KGMaxChunks, &k.CreatedAt, &k.UpdatedAt); err != nil {
 		return nil, err
 	}
 	k.KBVector, k.KBGraph = kv != 0, kg != 0
@@ -160,8 +164,8 @@ func (s *Store) CreateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 		k.Mode = "rag"
 	}
 	normalizeKBCapabilities(k)
-	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-		k.ID, k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KBVector, k.KBGraph, k.KGConnID, k.KGPrompt, now(), now())
+	_, err := s.DB.Exec(`INSERT INTO knowledge_base (`+kbCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		k.ID, k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KBVector, k.KBGraph, k.KGConnID, k.KGPrompt, k.KGOntologyID, k.KGMaxChunks, now(), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict
@@ -177,8 +181,8 @@ func (s *Store) UpdateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 		k.Mode = "rag"
 	}
 	normalizeKBCapabilities(k)
-	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,mode=?,top_k=?,min_score=?,kb_vector=?,kb_graph=?,kg_conn_id=?,kg_prompt=?,updated_at=? WHERE id=?`,
-		k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KBVector, k.KBGraph, k.KGConnID, k.KGPrompt, now(), k.ID)
+	res, err := s.DB.Exec(`UPDATE knowledge_base SET name=?,description=?,mode=?,top_k=?,min_score=?,kb_vector=?,kb_graph=?,kg_conn_id=?,kg_prompt=?,kg_ontology_id=?,kg_max_chunks=?,updated_at=? WHERE id=?`,
+		k.Name, k.Description, k.Mode, k.TopK, k.MinScore, k.KBVector, k.KBGraph, k.KGConnID, k.KGPrompt, k.KGOntologyID, k.KGMaxChunks, now(), k.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrConflict

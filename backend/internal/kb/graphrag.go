@@ -75,7 +75,7 @@ type GraphragOpts struct {
 	MaxResults int      `json:"max_results,omitempty"`
 }
 
-// KGClaimDetail 带 chunk 溯源的 claim 明细（定位原文 doc#seq）。
+// KGClaimDetail 带 chunk 溯源的 claim 明细（定位原文 doc#seq；B1 起附出处摘录与句级高亮区间）。
 type KGClaimDetail struct {
 	Subject  string  `json:"subject"`
 	Text     string  `json:"text"`
@@ -83,6 +83,11 @@ type KGClaimDetail struct {
 	DocID    string  `json:"doc_id,omitempty"`
 	ChunkSeq int     `json:"chunk_seq,omitempty"`
 	Score    float64 `json:"score"`
+	// B1 引用溯源：出处摘录（≤240 rune 窗，claim 命中处居中）与命中区间（相对摘录 rune 偏移）。
+	// 空 = 出处 chunk 缺失或 claim 未原样命中（诚实降级，不臆造区间）。
+	ChunkExcerpt string `json:"chunk_excerpt,omitempty"`
+	SpanStart    int    `json:"span_start,omitempty"`
+	SpanEnd      int    `json:"span_end,omitempty"`
 }
 
 // GraphragDetail 增强检索结果：hits 之外携带命中路径上的实体/关系/claims 明细
@@ -239,10 +244,18 @@ func (s *Service) GraphragQueryDetail(ctx context.Context, k *store.KnowledgeBas
 	}
 	claims := make([]KGClaimDetail, 0, len(rawClaims))
 	for _, c := range rawClaims {
-		claims = append(claims, KGClaimDetail{
+		detail := KGClaimDetail{
 			Subject: c.Subject, Text: c.Text, ChunkID: c.ChunkID, DocID: c.DocID, ChunkSeq: c.ChunkSeq,
 			Score: claimScore(scoreByChunk, c.ChunkID),
-		})
+		}
+		// B1：出处摘录 + 句级高亮区间（claim 原样命中出处 chunk 才标，不臆造）
+		if c.ChunkContent != "" {
+			if excerpt, spans := ClaimExcerpt(c.ChunkContent, c.Text, 240); len(spans) > 0 {
+				detail.ChunkExcerpt = excerpt
+				detail.SpanStart, detail.SpanEnd = spans[0].Start, spans[0].End
+			}
+		}
+		claims = append(claims, detail)
 	}
 
 	// ④ hits 组装（与原管线同语义：实体描述在前，claims 随后）

@@ -66,7 +66,20 @@ func main() {
 	}
 	// D-O15/REQ-110：KG 自研抽取器注入（REQ-98 LLM 能力代理主路径 + 规则抽取回退，零外部进程；
 	// KG_LLM_CONN_ID 可选指定模型连接，缺省走默认 chat 连接）
-	kbSvc.SetKGExtractor((&kg.Extractor{Store: st, Box: box, ConnID: getenv("KG_LLM_CONN_ID", "")}).ExtractForDoc)
+	// M36/KB-6③：本体约束抽取词表注入（I3 裁定：构建平面 spec 只读投影；构建平面不可达时降级自由抽取）。
+	ontoSvc := ontology.NewService()
+	kbSvc.SetKGExtractor((&kg.Extractor{
+		Store:  st,
+		Box:    box,
+		ConnID: getenv("KG_LLM_CONN_ID", ""),
+		OntoVocab: func(ctx context.Context, ontologyID string) (*kg.OntoVocab, error) {
+			v, err := ontoSvc.FetchSpecVocab(ctx, ontologyID)
+			if err != nil {
+				return nil, err
+			}
+			return &kg.OntoVocab{Name: v.Name, Concepts: v.Concepts, Relations: v.Relations}, nil
+		},
+	}).ExtractForDoc)
 
 	svc := chat.NewService(st, asm, kbSvc)
 	// REQ-192/M32：平台助手配置单源归一引导——builtin 行 instruction 空时写入当前默认基座

@@ -300,6 +300,10 @@ export interface KnowledgeBase {
   /** M16/REQ-129①：库级 KG 抽取模型连接（空 = 默认 chat）与提示词覆写 */
   kg_conn_id?: string
   kg_prompt?: string
+  /** M36/KB-6③：本体约束抽取挂载（本体侧只读词表注入 prompt 白名单；空 = 自由抽取） */
+  kg_ontology_id?: string
+  /** M36/KB-6①：库级抽取语料预算 chunks（0 = 默认 200） */
+  kg_max_chunks?: number
   doc_count?: number
   chunk_count?: number
   created_at: string
@@ -329,12 +333,15 @@ export interface KBDoc {
   created_at: string
 }
 
-/** 检索试运行命中（§6.9 retrieval 事件 hits 结构） */
+/** 检索试运行命中（§6.9 retrieval 事件 hits 结构；B1 起附命中区间高亮） */
 export interface KBHit {
   doc: string
   seq: number
   score: number
   excerpt: string
+  strategy?: string
+  /** B1 引用溯源：excerpt 内命中区间（rune 偏移，start 含 / end 不含） */
+  spans?: { start: number; end: number }[]
 }
 
 /** 检索响应（M14 ③④：mode = 实际生效的检索路径；degraded = KG 无命中/异常回退向量） */
@@ -635,6 +642,8 @@ export interface KGEntity {
   name: string
   type?: string
   description?: string
+  /** M36/KB-7②：人工别名（分号分隔；检索/搜索命中别名；重建保留） */
+  alias?: string
   created_at?: string
 }
 

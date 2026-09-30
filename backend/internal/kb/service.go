@@ -250,18 +250,26 @@ func (s *Service) vectorArm(ctx context.Context, kb *store.KnowledgeBase, query 
 		if h.ParentContent != "" { // KB-10②：命中子块，召回父块上下文
 			content = h.ParentContent
 		}
-		out = append(out, RetrievalHit{Doc: name, Seq: h.Seq, Score: h.Score, Excerpt: truncateRunes(content, 200), Strategy: h.Strategy})
+		excerpt := truncateRunes(content, 200)
+		// B1 引用溯源：命中区间（相对 excerpt 的 rune 偏移；父块命中时区间在父块全文上计算后裁剪）
+		spans := MatchSpans(content, query)
+		if len([]rune(excerpt)) < len([]rune(content)) {
+			spans = ClipSpans(spans, len([]rune(excerpt)))
+		}
+		out = append(out, RetrievalHit{Doc: name, Seq: h.Seq, Score: h.Score, Excerpt: excerpt, Strategy: h.Strategy, Spans: spans})
 	}
 	return out, nil
 }
 
 // RetrievalHit retrieval 事件 / search-preview 响应条目（§306：hits[{doc,seq,score,excerpt}]）。
 type RetrievalHit struct {
-	Doc     string  `json:"doc"`
-	Seq     int     `json:"seq"`
-	Score   float64 `json:"score"`
-	Excerpt string  `json:"excerpt"`
-	Strategy string `json:"strategy,omitempty"` // KB-10①：vector|lexical|hybrid（只增不改，空 = 历史口径）
+	Doc      string  `json:"doc"`
+	Seq      int     `json:"seq"`
+	Score    float64 `json:"score"`
+	Excerpt  string  `json:"excerpt"`
+	Strategy string  `json:"strategy,omitempty"` // KB-10①：vector|lexical|hybrid（只增不改，空 = 历史口径）
+	// Spans 命中区间（B1 引用溯源：Excerpt 内 rune 偏移；空 = 无词项命中，如实不标）
+	Spans []Span `json:"spans,omitempty"`
 }
 
 // RenderContext 检索结果注入文本（§341：[片段 doc:seq score] 格式）。

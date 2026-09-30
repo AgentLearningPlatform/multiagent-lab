@@ -21,7 +21,9 @@ type KGEntity struct {
 	Name        string `json:"name"`
 	Type        string `json:"type,omitempty"`
 	Description string `json:"description,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
+	// Alias 别名（M36/KB-7②：检索与搜索命中别名；分号分隔多别名；重建同 名 保留）
+	Alias     string `json:"alias,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
 }
 
 // KGRelationship KG 关系（source/target 引用实体 name；type 教学口径用大写短语，如 IS_A/具有/引发）。
@@ -62,14 +64,14 @@ type OntoDecision struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-const kgEntityCols = `id,kb_id,doc_id,name,type,description,created_at`
+const kgEntityCols = `id,kb_id,doc_id,name,type,description,alias,created_at`
 const kgRelCols = `id,kb_id,doc_id,source,target,rel_type,status,created_at`
 const kgClaimCols = `id,kb_id,doc_id,chunk_id,subject,text,status,created_at`
 const decisionCols = `id,subject_kind,subject_id,title,rationale,derived_from,meta_json,created_at`
 
 func scanKGEntity(row interface{ Scan(...any) error }) (*KGEntity, error) {
 	var e KGEntity
-	if err := row.Scan(&e.ID, &e.KBID, &e.DocID, &e.Name, &e.Type, &e.Description, &e.CreatedAt); err != nil {
+	if err := row.Scan(&e.ID, &e.KBID, &e.DocID, &e.Name, &e.Type, &e.Description, &e.Alias, &e.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &e, nil
@@ -101,13 +103,25 @@ func scanDecision(row interface{ Scan(...any) error }) (*OntoDecision, error) {
 
 // ReplaceKGForDoc 事务替换 KG 抽取结果（重索引/重建幂等）：
 //   - docID 非空：只替换该 doc 的行；同 KB 跨 doc 同名实体先清他 doc 同名再插入（实体归一）；
-//   - docID 为空（KB 级重建）：清空该 KB 全部 KG 行后插入。
+//   - docID 为空（KB 级重建）：清空该 KB 全部 KG 行后插入；
+//   - 人工标注的实体别名（M36/KB-7②）随同 名 实体保留（删除前先取别名表）。
 func (s *Store) ReplaceKGForDoc(kbID, docID string, entities []*KGEntity, rels []*KGRelationship, claims []*KGClaim) error {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	// M36/KB-7②：别名表在删除前读取（重建/重索引后同 名 实体别名不丢）
+	aliasAll := map[string]string{}
+	if arows, err := tx.Query(`SELECT name, alias FROM kg_entity WHERE kb_id = ? AND alias != ''`, kbID); err == nil {
+		for arows.Next() {
+			var n, a string
+			if err := arows.Scan(&n, &a); err == nil {
+				aliasAll[n] = a
+			}
+		}
+		arows.Close()
+	}
 	entityWhere, relWhere, claimWhere := `kb_id = ? AND doc_id = ?`, `kb_id = ? AND doc_id = ?`, `kb_id = ? AND doc_id = ?`
 	delArgs := []any{kbID, docID}
 	if docID == "" { // KB 级重建：清空该库全部 KG 行
@@ -130,13 +144,16 @@ func (s *Store) ReplaceKGForDoc(kbID, docID string, entities []*KGEntity, rels [
 			return err
 		}
 	}
-	ie, err := tx.Prepare(`INSERT INTO kg_entity(` + kgEntityCols + `) VALUES (?,?,?,?,?,?,?)`)
+	ie, err := tx.Prepare(`INSERT INTO kg_entity(` + kgEntityCols + `) VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer ie.Close()
 	for _, e := range entities {
-		if _, err := ie.Exec(e.ID, e.KBID, e.DocID, e.Name, e.Type, e.Description, now()); err != nil {
+		if e.Alias == "" { // 调用方未带别名时回填持久化别名（人工标注不因重建丢失）
+			e.Alias = aliasAll[e.Name]
+		}
+		if _, err := ie.Exec(e.ID, e.KBID, e.DocID, e.Name, e.Type, e.Description, e.Alias, now()); err != nil {
 			return err
 		}
 	}
@@ -388,6 +405,8 @@ type KGClaimTrace struct {
 	KGClaim
 	DocID    string `json:"trace_doc_id,omitempty"`
 	ChunkSeq int    `json:"trace_seq,omitempty"`
+	// ChunkContent 出处 chunk 原文（M36/B1：句级溯源高亮用；仅 KGClaimsWithChunks 填充）
+	ChunkContent string `json:"trace_chunk_content,omitempty"`
 }
 
 // KGStats 图谱统计卡数据（REQ-127）。
@@ -453,6 +472,7 @@ func (s *Store) KGStatsForKB(kbID string) (*KGStats, error) {
 }
 
 // KGSearchEntities 实体名模糊搜索（图谱页搜索框；LIKE 转义由调用方保证，%/_ 通配在此转义）。
+// M36/KB-7②：别名一并命中（命中别名的实体照常返回）。
 func (s *Store) KGSearchEntities(kbID, q string, limit int) ([]*KGEntity, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
@@ -460,8 +480,8 @@ func (s *Store) KGSearchEntities(kbID, q string, limit int) ([]*KGEntity, error)
 	q = strings.ReplaceAll(q, "%", "\\%")
 	q = strings.ReplaceAll(q, "_", "\\_")
 	rows, err := s.DB.Query(
-		`SELECT `+kgEntityCols+` FROM kg_entity WHERE kb_id = ? AND name LIKE '%' || ? || '%' ESCAPE '\' ORDER BY name LIMIT ?`,
-		kbID, q, limit)
+		`SELECT `+kgEntityCols+` FROM kg_entity WHERE kb_id = ? AND (name LIKE '%' || ? || '%' ESCAPE '\' OR alias LIKE '%' || ? || '%' ESCAPE '\') ORDER BY name LIMIT ?`,
+		kbID, q, q, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +505,7 @@ func (s *Store) KGClaimsWithChunks(kbID string, subjects []string, limit int) ([
 	if limit <= 0 {
 		limit = 24
 	}
-	q := `SELECT c.id,c.kb_id,c.doc_id,c.chunk_id,c.subject,c.text,c.status,c.created_at, COALESCE(ch.doc_id,''), COALESCE(ch.seq,0)
+	q := `SELECT c.id,c.kb_id,c.doc_id,c.chunk_id,c.subject,c.text,c.status,c.created_at, COALESCE(ch.doc_id,''), COALESCE(ch.seq,0), COALESCE(ch.content,'')
 		FROM kg_claim c
 		LEFT JOIN knowledge_chunk ch ON ch.id = c.chunk_id
 		WHERE c.kb_id = ? AND c.status = 'approved' AND c.subject IN (` +
@@ -505,7 +525,7 @@ func (s *Store) KGClaimsWithChunks(kbID string, subjects []string, limit int) ([
 	for rows.Next() {
 		var t KGClaimTrace
 		var doc sql.NullString
-		if err := rows.Scan(&t.ID, &t.KBID, &t.DocID, &t.ChunkID, &t.Subject, &t.Text, &t.Status, &t.CreatedAt, &doc, &t.ChunkSeq); err != nil {
+		if err := rows.Scan(&t.ID, &t.KBID, &t.DocID, &t.ChunkID, &t.Subject, &t.Text, &t.Status, &t.CreatedAt, &doc, &t.ChunkSeq, &t.ChunkContent); err != nil {
 			return nil, err
 		}
 		if doc.Valid {
@@ -693,11 +713,57 @@ func (s *Store) MergeKGEntities(kbID, keep string, merge []string) (movedRels, m
 		return 0, 0, err
 	}
 	movedClaims += mustCount(res)
+	// M36/KB-7②：被并实体的名字并入 keep 的别名（合并后旧名仍可被检索/搜索命中）
+	var keepAlias string
+	_ = tx.QueryRow(`SELECT alias FROM kg_entity WHERE kb_id=? AND name=?`, kbID, keep).Scan(&keepAlias)
+	for _, m := range merge {
+		var a string
+		_ = tx.QueryRow(`SELECT alias FROM kg_entity WHERE kb_id=? AND name=?`, kbID, m).Scan(&a)
+		keepAlias = joinAlias(keepAlias, m, a)
+	}
+	if _, err = tx.Exec(`UPDATE kg_entity SET alias=? WHERE kb_id=? AND name=?`, keepAlias, kbID, keep); err != nil {
+		return 0, 0, err
+	}
 	// 删除 merge 实体
 	if _, err = tx.Exec(`DELETE FROM kg_entity WHERE kb_id=? AND name IN (`+ph+`)`, base...); err != nil {
 		return 0, 0, err
 	}
 	return movedRels, movedClaims, tx.Commit()
+}
+
+// joinAlias 别名归并：原名 + 原别名追加（分号分隔，去重去空，别名段数上限 8 防膨胀）。
+func joinAlias(existing string, names ...string) string {
+	seen := map[string]bool{}
+	parts := []string{}
+	for _, seg := range strings.Split(existing, ";") {
+		if seg = strings.TrimSpace(seg); seg != "" && !seen[seg] {
+			seen[seg] = true
+			parts = append(parts, seg)
+		}
+	}
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" && !seen[n] {
+			seen[n] = true
+			parts = append(parts, n)
+		}
+	}
+	if len(parts) > 8 {
+		parts = parts[:8]
+	}
+	return strings.Join(parts, ";")
+}
+
+// SetKGEntityAlias 设置实体别名（KB-7② 人工入口；空串清除）。
+func (s *Store) SetKGEntityAlias(kbID, name, alias string) error {
+	alias = joinAlias("", strings.Split(alias, ";")...) // 归一：去空白段、段数上限
+	res, err := s.DB.Exec(`UPDATE kg_entity SET alias=? WHERE kb_id=? AND name=?`, alias, kbID, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // mustCount 取 RowsAffected 的计数值（忽略 error——教学口径，删除/更新失败由上游 err 把守）。

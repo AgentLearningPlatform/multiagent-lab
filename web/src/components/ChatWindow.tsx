@@ -8,6 +8,7 @@ import XMarkdown from '@ant-design/x-markdown'
 import { api, connDisplayName, resumeConversation, runConversation } from '../api/client'
 import type { ComparePaneConfig } from '../api/client'
 import EventReplayDrawer from './EventReplayDrawer'
+import HighlightSpans from './HighlightSpans'
 import { AgentLogo } from './AgentLogo'
 import { groupToolPhases, ToolPhaseBlock, type ToolPhaseGroup } from './ToolPhase'
 import type {
@@ -979,7 +980,10 @@ export default function ChatWindow({
                           <span className="retrieval-seq">#{h.seq}</span>
                           <span className="retrieval-score">{typeof h.score === 'number' ? h.score.toFixed(3) : '—'}</span>
                         </div>
-                        <div className="retrieval-excerpt">{h.excerpt}</div>
+                        {/* B1 引用溯源：excerpt 命中区间句级高亮（spans 缺失如实不标） */}
+                        <div className="retrieval-excerpt">
+                          <HighlightSpans text={h.excerpt} spans={h.spans} />
+                        </div>
                       </li>
                     ))}
                   </ul>

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, Select, Space, Spin, Statistic, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Input, Select, Space, Spin, Statistic, Tag, Tooltip, Typography } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { Background, Controls, ReactFlow } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { api } from '../api/client'
 import { useUI } from '../store/ui'
+import HighlightSpans, { locateText } from './HighlightSpans'
 
 /**
  * GraphRAG 库「图谱」视图（M16 阶段一：REQ-127 图谱浏览与统计 + REQ-128 聚焦检索前端）：
@@ -48,6 +49,8 @@ interface KGClaimT {
   chunk_id?: string
   trace_doc_id?: string
   trace_seq?: number
+  /** M36/B1：出处 chunk 原文（句级高亮用；缺失 = 溯源降级，仅 doc#seq 标注） */
+  trace_chunk_content?: string
 }
 
 const TYPE_COLOR: Record<string, string> = {
@@ -60,6 +63,7 @@ const TYPE_COLOR: Record<string, string> = {
 export default function KGGraphView({ kbID }: { kbID: string }) {
   const { showToast } = useUI()
   const [stats, setStats] = useState<KGStats | null>(null)
+  const [rebuilding, setRebuilding] = useState(false)
   const [q, setQ] = useState('')
   const [results, setResults] = useState<KGEntityLite[]>([])
   const [searching, setSearching] = useState(false)
@@ -77,6 +81,24 @@ export default function KGGraphView({ kbID }: { kbID: string }) {
       .catch((e) => showToast(e.message, 'err'))
   }, [kbID, showToast])
   useEffect(loadStats, [loadStats])
+
+  // M36/KB-13：KG 重建治理入口收敛知识库侧（消费与审计页只保留展示，P2 原则「展示位≠管理入口」）
+  const rebuildKG = async () => {
+    setRebuilding(true)
+    try {
+      const r = await api.chunksToKG(kbID)
+      const g = r.graphrag
+      showToast(
+        g.degraded ? `重建降级：${g.error ?? '未知原因'}` : `KG 已重建：实体 ${g.entities ?? 0} · 关系 ${g.relationships ?? 0}（${g.method ?? 'llm'}）`,
+        g.degraded ? 'err' : 'ok',
+      )
+      loadStats()
+    } catch (e: any) {
+      showToast(e?.message ?? '重建失败', 'err')
+    } finally {
+      setRebuilding(false)
+    }
+  }
 
   const search = async () => {
     if (!q.trim()) return
@@ -143,7 +165,14 @@ export default function KGGraphView({ kbID }: { kbID: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <Card size="small" title="图谱统计（REQ-127）" extra={<Button size="small" onClick={loadStats}>刷新</Button>}>
+      <Card size="small" title="图谱统计（REQ-127）"
+        extra={
+          <Space size={6}>
+            <Button size="small" loading={rebuilding} onClick={rebuildKG}>重建 KG</Button>
+            <Button size="small" onClick={loadStats}>刷新</Button>
+          </Space>
+        }
+      >
         {stats ? (
           <>
             <Space size={24} wrap>
@@ -207,19 +236,24 @@ export default function KGGraphView({ kbID }: { kbID: string }) {
         ) : null}
         {claims.length > 0 && (
           <div style={{ marginTop: 10 }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>Claims（chunk 溯源）：</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>Claims（chunk 溯源；命中原文句级高亮）：</Typography.Text>
             <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-              {claims.slice(0, 12).map((c, i) => (
-                <li key={i} style={{ fontSize: 12, marginBottom: 4 }}>
-                  <Tag style={{ marginInlineEnd: 6 }}>{c.subject}</Tag>
-                  {c.text}
-                  {c.trace_doc_id && (
-                    <Tag color="cyan" style={{ marginInlineStart: 6 }}>
-                      溯源 doc#{c.trace_seq ?? '—'}
-                    </Tag>
-                  )}
-                </li>
-              ))}
+              {claims.slice(0, 12).map((c, i) => {
+                const spans = c.trace_chunk_content ? locateText(c.trace_chunk_content, c.text) : undefined
+                return (
+                  <li key={i} style={{ fontSize: 12, marginBottom: 4 }}>
+                    <Tag style={{ marginInlineEnd: 6 }}>{c.subject}</Tag>
+                    {c.text}
+                    {c.trace_chunk_content && (
+                      <Tooltip title={<span style={{ fontSize: 12 }}><HighlightSpans text={c.trace_chunk_content} spans={spans} /></span>}>
+                        <Tag color="cyan" style={{ marginInlineStart: 6 }}>
+                          溯源 doc#{c.trace_seq ?? '—'}{spans ? ' · 句级' : ''}
+                        </Tag>
+                      </Tooltip>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )}
@@ -235,10 +269,16 @@ export default function KGGraphView({ kbID }: { kbID: string }) {
 export function KGGovernancePanel({ kbID }: { kbID: string }) {
   const { showToast } = useUI()
   const [q, setQ] = useState<Awaited<ReturnType<typeof api.kgQuality>> | null>(null)
-  const [sugs, setSugs] = useState<{ keep: string; merge: string; reason: string }[]>([])
+  const [sugs, setSugs] = useState<{ keep: string; merge: string; reason: string; strategy?: string; similarity?: number; type_warning?: string }[]>([])
+  const [vecDegraded, setVecDegraded] = useState(false)
   const [rejected, setRejected] = useState<{ rels: KGRelLite[]; claims: KGClaimT[] }>({ rels: [], claims: [] })
   const [approved, setApproved] = useState<{ rels: KGRelLite[]; claims: KGClaimT[] }>({ rels: [], claims: [] })
   const [loading, setLoading] = useState(true)
+  // M36/KB-7②：别名人工标注（选择实体 + 别名输入；重建/合并自动保留归并）
+  const [aliasEntity, setAliasEntity] = useState<string | undefined>(undefined)
+  const [aliasText, setAliasText] = useState('')
+  const [entityOpts, setEntityOpts] = useState<{ name: string; alias?: string }[]>([])
+  const [savingAlias, setSavingAlias] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -246,6 +286,8 @@ export function KGGovernancePanel({ kbID }: { kbID: string }) {
       .then(([quality, sugg, read]) => {
         setQ(quality)
         setSugs(sugg.suggestions ?? [])
+        setVecDegraded(!!sugg.vector_degraded)
+        setEntityOpts((read.entities ?? []).map((e: any) => ({ name: e.name, alias: e.alias })))
         // 审核队列：从全量子图中筛 rejected（kgRead 返回全量含 rejected）
         const allRels = (read.relationships ?? []) as (KGRelLite & { status?: string; id: string })[]
         const allClaims = (read.claims ?? []) as (KGClaimT & { status?: string; id: string })[]
@@ -262,6 +304,23 @@ export function KGGovernancePanel({ kbID }: { kbID: string }) {
       .finally(() => setLoading(false))
   }, [kbID, showToast])
   useEffect(load, [load])
+
+  const saveAlias = async () => {
+    if (!aliasEntity) {
+      showToast('先选择实体', 'err')
+      return
+    }
+    setSavingAlias(true)
+    try {
+      await api.kgEntityAlias(kbID, aliasEntity, aliasText.trim())
+      showToast(aliasText.trim() ? '别名已保存（检索/搜索命中别名）' : '别名已清除')
+      load()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setSavingAlias(false)
+    }
+  }
 
   const review = async (kind: 'relationship' | 'claim', id: string, status: 'approved' | 'rejected') => {
     try {
@@ -314,19 +373,56 @@ export function KGGovernancePanel({ kbID }: { kbID: string }) {
         <Spin size="small" />
       )}
 
-      <Typography.Text strong style={{ fontSize: 12 }}>合并建议（别名消歧，人工确认后执行）</Typography.Text>
+      <Typography.Text strong style={{ fontSize: 12 }}>合并建议（规则 + 向量双臂，人工确认后执行）</Typography.Text>
+      {vecDegraded && (
+        <Alert type="warning" showIcon style={{ margin: '4px 0' }}
+          message="向量消歧建议降级：embedding 未配置或不可用，当前仅名称包含规则建议（M36/KB-7）" />
+      )}
       {sugs.length === 0 ? (
         <div style={{ margin: '4px 0 10px' }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>暂无建议</Typography.Text></div>
       ) : (
         <ul style={{ margin: '4px 0 10px', paddingLeft: 18 }}>
           {sugs.map((sg, i) => (
             <li key={i} style={{ fontSize: 12, marginBottom: 4 }}>
+              <Tag color={sg.strategy === 'vector' ? 'geekblue' : 'default'} style={{ marginInlineEnd: 6 }}>
+                {sg.strategy === 'vector' ? `向量 ${sg.similarity?.toFixed(3) ?? ''}` : '规则'}
+              </Tag>
               {sg.reason}
+              {sg.type_warning && (
+                <Tag color="orange" style={{ marginInlineStart: 4 }}>{sg.type_warning}</Tag>
+              )}
               <Button size="small" type="link" onClick={() => merge(sg.keep, sg.merge)}>执行合并</Button>
             </li>
           ))}
         </ul>
       )}
+
+      <Typography.Text strong style={{ fontSize: 12 }}>别名标注（KB-7②：检索/搜索命中别名；重建与合并自动保留）</Typography.Text>
+      <div style={{ display: 'flex', gap: 8, margin: '4px 0 10px', flexWrap: 'wrap' }}>
+        <Select
+          showSearch
+          optionFilterProp="label"
+          value={aliasEntity}
+          onChange={(v) => {
+            setAliasEntity(v)
+            setAliasText(entityOpts.find((e) => e.name === v)?.alias ?? '')
+          }}
+          placeholder="选择实体…"
+          style={{ width: 220 }}
+          options={entityOpts.map((e) => ({
+            value: e.name,
+            label: e.alias ? `${e.name}（${e.alias}）` : e.name,
+          }))}
+        />
+        <Input
+          value={aliasText}
+          onChange={(e) => setAliasText(e.target.value)}
+          placeholder="别名（分号分隔多个；留空清除）"
+          style={{ width: 240 }}
+          onPressEnter={saveAlias}
+        />
+        <Button size="small" loading={savingAlias} onClick={saveAlias}>保存别名</Button>
+      </div>
 
       <Typography.Text strong style={{ fontSize: 12 }}>审核队列（rejected 不参与检索）</Typography.Text>
       {rejected.rels.length === 0 && rejected.claims.length === 0 ? (

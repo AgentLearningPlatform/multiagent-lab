@@ -3,7 +3,7 @@ import { Alert, Button, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { api } from '../../api/client'
 import type { OntoBuildSelectableKB } from '../../api/types'
-import AuditGraphTab, { RebuildButton } from './components/audit/AuditGraphTab'
+import AuditGraphTab from './components/audit/AuditGraphTab'
 import AuditQueryTab from './components/audit/AuditQueryTab'
 import AuditDecisionTab from './components/audit/AuditDecisionTab'
 import AuditHomeTab from './components/audit/AuditHomeTab'
@@ -115,7 +115,10 @@ export default function AuditPage() {
                   <span>chunk <b>{cur.chunk_count}</b></span>
                   <span>实体 <b>{cur.kg_entities}</b></span>
                   <span>关系 <b>{cur.kg_relationships}</b></span>
-                  <RebuildButton kbId={cur.id} onDone={loadKbs} />
+                  {/* M36/KB-13：重建入口收敛知识库侧（观测台只读定位，P2「展示位≠管理入口」） */}
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    数据来源：知识库「{cur.name}」· 治理在知识库模块
+                  </Typography.Text>
                 </Space>
               }
             />
@@ -126,7 +129,7 @@ export default function AuditPage() {
           activeKey={tab}
           onChange={setTab}
           items={[
-            { key: 'graph', label: 'KG 图谱', children: <AuditGraphTab kbId={kbId} /> },
+            { key: 'graph', label: 'KG 图谱', children: <AuditGraphTab kbId={kbId} kbName={cur?.name} /> },
             { key: 'query', label: 'KG 检索', children: <AuditQueryTab kbId={kbId} /> },
             { key: 'audit', label: '决策审计', children: <AuditDecisionTab kbId={kbId} /> },
             { key: 'home', label: '学习引导', children: <AuditHomeTab /> },

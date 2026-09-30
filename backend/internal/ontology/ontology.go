@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	einotool "github.com/cloudwego/eino/components/tool"
@@ -110,6 +111,66 @@ func (s *Service) Reachable(ctx context.Context) bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode < 500
+}
+
+// OntoVocab 本体约束抽取的只读词表投影（M36/KB-6③，I3 裁定：本体侧只暴露只读词表 API，
+// 不反向依赖知识库——「运行期单向 本体→KB」的兑现点）。
+type OntoVocab struct {
+	Name      string   `json:"name"`
+	Concepts  []string `json:"concepts"`  // 概念标签优先、名兜底（≤120，超出截断）
+	Relations []string `json:"relations"` // 关系标签优先、名兜底（≤60）
+}
+
+// FetchSpecVocab 拉构建平面本体 spec 并投影为抽取词表（GET /api/ontologies/{id}/spec）。
+func (s *Service) FetchSpecVocab(ctx context.Context, ontologyID string) (*OntoVocab, error) {
+	u := fmt.Sprintf("%s/api/ontologies/%s/spec", s.BuildURL, url.PathEscape(ontologyID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("构建平面不可达（%s）: %w", s.BuildURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("spec 接口返回 %d", resp.StatusCode)
+	}
+	var spec struct {
+		Name     string `json:"name"`
+		Concepts []struct {
+			Name  string `json:"name"`
+			Label string `json:"label"`
+		} `json:"concepts"`
+		Relations []struct {
+			Name  string `json:"name"`
+			Label string `json:"label"`
+		} `json:"relations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&spec); err != nil {
+		return nil, fmt.Errorf("spec 响应解析失败: %w", err)
+	}
+	out := &OntoVocab{Name: spec.Name, Concepts: []string{}, Relations: []string{}}
+	seenC := map[string]bool{}
+	for _, c := range spec.Concepts {
+		for _, v := range []string{c.Label, c.Name} {
+			if v = strings.TrimSpace(v); v != "" && !seenC[v] {
+				seenC[v] = true
+				out.Concepts = append(out.Concepts, v)
+			}
+		}
+	}
+	seenR := map[string]bool{}
+	for _, r := range spec.Relations {
+		for _, v := range []string{r.Label, r.Name} {
+			if v = strings.TrimSpace(v); v != "" && !seenR[v] {
+				seenR[v] = true
+				out.Relations = append(out.Relations, v)
+			}
+		}
+	}
+	return out, nil
 }
 
 // BuildProxy 构建平面反代：/api/ontologies* → BUILD_SVC_URL（§6.10-2，同源透传免跨域）。

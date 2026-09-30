@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Skeleton, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Skeleton, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ExportOutlined, ReloadOutlined } from '@ant-design/icons'
 import LoadErrorAlert from '../../../../components/LoadErrorAlert'
-import { api, ApiError } from '../../../../api/client'
+import { api } from '../../../../api/client'
 import type { KGClaim, KGEntity, KGReadResult, KGRelationship } from '../../../../api/types'
 import { useUI } from '../../../../store/ui'
 
@@ -11,38 +11,12 @@ import { useUI } from '../../../../store/ui'
 // 消费与审计 · KG 图谱页签（消费链路：实体 / 关系 / claim 溯源）
 // A4（REQ-145/M22）：claim 溯源表开 AntD 6 Table virtual 虚拟滚动（一库可达上千
 // claim，1000+ 行滚动不卡）+ 分页统一 pageSize 10（与 TraceTable 对齐）。
+// M36/KB-13（I1 裁定）：本页收敛为「观测台只读展示」——数据来源标注 + 治理跳转；
+// 原「重建 KG」按钮退役（治理入口收敛知识库模块图谱视图，P2 原则「展示位≠管理入口」）。
 // ---------------------------------------------------------------------------
 
-/** 重建 KG（显式重抽；LLM 主路径失败自动回退规则抽取） */
-export function RebuildButton({ kbId, onDone }: { kbId: string; onDone?: () => void }) {
-  const { showToast } = useUI()
-  const [busy, setBusy] = useState(false)
-  const doRebuild = async () => {
-    setBusy(true)
-    try {
-      const r = await api.chunksToKG(kbId)
-      const g = r.graphrag
-      showToast(
-        g.degraded
-          ? `重建降级：${g.error ?? '未知原因'}`
-          : `KG 已重建：实体 ${g.entities ?? 0} · 关系 ${g.relationships ?? 0}（${g.method ?? 'llm'}）`,
-        g.degraded ? 'err' : 'ok',
-      )
-      onDone?.()
-    } catch (e: any) {
-      showToast(e instanceof ApiError ? e.message : (e?.message ?? '重建失败'), 'err')
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Button size="small" icon={<ExportOutlined />} loading={busy} disabled={busy} onClick={doRebuild}>
-      重建 KG
-    </Button>
-  )
-}
-
-export default function AuditGraphTab({ kbId }: { kbId?: string }) {
+export default function AuditGraphTab({ kbId, kbName }: { kbId?: string; kbName?: string }) {
+  const { setPage } = useUI()
   const [data, setData] = useState<KGReadResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -109,6 +83,28 @@ export default function AuditGraphTab({ kbId }: { kbId?: string }) {
 
   return (
     <div className="sema-home">
+      {/* M36/KB-13（D-O19 I1 裁定）：KG 展示位标注数据来源=知识库，观测台只读定位——
+          「承载不等于拥有，展示不等于管理」；治理/重建/审核入口收敛知识库模块图谱视图 */}
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message={
+          <Space size={8} wrap>
+            <span>数据来源：知识库「{kbName || kbId}」（观测台只读展示；治理与重建入口在知识库模块）</span>
+            <Button
+              size="small"
+              type="link"
+              onClick={() => {
+                localStorage.setItem('eino.kb.focus', kbId)
+                setPage('knowledge')
+              }}
+            >
+              前往知识库治理 <ExportOutlined />
+            </Button>
+          </Space>
+        }
+      />
       <Card
         size="small"
         className="work-card sema-card"

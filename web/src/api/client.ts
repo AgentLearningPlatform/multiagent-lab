@@ -291,7 +291,22 @@ export const api = {
     req<{ method_dist: Record<string, number>; orphan_entity: number; top_rel_types: { type: string; count: number }[]; rejected_rels: number; rejected_claims: number; entities: number; relationships: number }>(
       `/api/kg/${kbId}/quality`),
   kgMergeSuggestions: (kbId: string) =>
-    req<{ suggestions: { keep: string; merge: string; reason: string }[] }>(`/api/kg/${kbId}/merge-suggestions`),
+    req<{
+      suggestions: {
+        keep: string
+        merge: string
+        reason: string
+        /** M36/KB-7：rule（名称包含）| vector（embedding 相似）；空 = 历史口径 */
+        strategy?: string
+        similarity?: number
+        /** 双嵌入防误并：类型不同时附「慎并」提示 */
+        type_warning?: string
+      }[]
+      vector_degraded?: boolean
+    }>(`/api/kg/${kbId}/merge-suggestions`),
+  /** M36/KB-7②：实体别名人工标注（分号分隔多别名；空串清除；重建/合并自动保留归并） */
+  kgEntityAlias: (kbId: string, name: string, alias: string) =>
+    req<{ ok: boolean }>(`/api/kg/${kbId}/entity-alias`, { method: 'PUT', body: JSON.stringify({ name, alias }) }),
   // M16 阶段二（REQ-130）：社区摘要与全局问答
   kgCommunitiesRebuild: (kbId: string) =>
     req<{ ok: boolean; communities: number }>(`/api/kg/${kbId}/communities/rebuild`, { method: 'POST' }),

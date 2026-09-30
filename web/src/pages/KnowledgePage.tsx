@@ -29,6 +29,7 @@ import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import EmptyGuide from '../components/EmptyGuide'
 import LoadErrorAlert from '../components/LoadErrorAlert'
+import HighlightSpans from '../components/HighlightSpans'
 import KGGraphView, { KGGovernancePanel, KGGlobalPanel } from '../components/KGGraphView'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
@@ -90,6 +91,10 @@ export default function KnowledgePage() {
   const [kbVec, setKbVec] = useState(true)
   const [kbGraphOn, setKbGraphOn] = useState(false)
   const [conns, setConns] = useState<{ id: string; name: string; model_name: string }[]>([])
+  // M36/KB-6：本体约束抽取挂载与库级语料预算
+  const [kgOntoID, setKgOntoID] = useState<string | null>(null)
+  const [kgMaxChunks, setKgMaxChunks] = useState<number | null>(null)
+  const [ontos, setOntos] = useState<{ id: string; name: string }[]>([])
 
   const active = useMemo(() => kbs.find((k) => k.id === activeId) ?? null, [kbs, activeId])
   const hasReady = docs.some((d) => d.status === 'success')
@@ -121,6 +126,11 @@ export default function KnowledgePage() {
     api.listConnections().then((cs) => setConns(cs.filter((c) => c.conn_type === 'chat')))
       .catch(() => setConns([]))
   }, [])
+  // M36/KB-6③：本体约束候选（构建平面资产列表；不可达静默降级=仅无挂载可选）
+  useEffect(() => {
+    api.listOntologies().then((os) => setOntos(os ?? []))
+      .catch(() => setOntos([]))
+  }, [])
 
   // M14 ⑤：双子页签切换 → 选中该模式下的第一个库（当前库不属该模式时）
   useEffect(() => {
@@ -130,6 +140,20 @@ export default function KnowledgePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeTab])
+
+  // M36/KB-13：跨模块聚焦 handoff——消费与审计页「前往知识库治理」经 localStorage 指定选中库
+  useEffect(() => {
+    if (!kbs.length) return
+    const focus = localStorage.getItem('eino.kb.focus')
+    if (!focus) return
+    const kb = kbs.find((k) => k.id === focus)
+    localStorage.removeItem('eino.kb.focus')
+    if (kb) {
+      setModeTab(modeOf(kb))
+      setActiveId(kb.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kbs])
 
   // 切换库：重置检索态，载入文档，并以库当前检索参数预填配置
   useEffect(() => {
@@ -146,6 +170,8 @@ export default function KnowledgePage() {
     setMinScore(kb?.min_score ?? 0)
     setKgConnID(kb?.kg_conn_id ?? '')
     setKgPrompt(kb?.kg_prompt ?? '')
+    setKgOntoID(kb?.kg_ontology_id ?? '')
+    setKgMaxChunks(kb?.kg_max_chunks ?? 0)
     // KB-11：能力开关随选中库回显（缺省按 mode 派生口径）
     setKbVec(kb ? kb.kb_vector ?? kb.mode !== 'graphrag' : true)
     setKbGraphOn(kb ? kb.kb_graph ?? kb.mode === 'graphrag' : false)
@@ -164,6 +190,8 @@ export default function KnowledgePage() {
         min_score: minScore ?? active.min_score,
         kg_conn_id: kgConnID ?? active.kg_conn_id ?? '',
         kg_prompt: kgPrompt ?? active.kg_prompt ?? '',
+        kg_ontology_id: kgOntoID ?? active.kg_ontology_id ?? '',
+        kg_max_chunks: kgMaxChunks ?? active.kg_max_chunks ?? 0,
         kb_vector: kbVec, // KB-11：能力开关（全关由后端按 mode 派生兜底）
         kb_graph: kbGraphOn,
       })
@@ -509,16 +537,41 @@ export default function KnowledgePage() {
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                       KG 抽取配置（REQ-129①）：抽取模型与提示词按库覆写；留空 = 跟随全局默认
                     </Typography.Text>
-                    <Select
-                      showSearch
-                      optionFilterProp="label"
-                      value={kgConnID || undefined}
-                      onChange={(v) => setKgConnID(v || '')}
-                      allowClear
-                      placeholder="抽取模型连接（默认 chat 连接）"
-                      style={{ width: 320 }}
-                      options={conns.map((c) => ({ value: c.id, label: c.name + ' · ' + c.model_name }))}
-                    />
+                    <Space size={8} wrap>
+                      <Select
+                        showSearch
+                        optionFilterProp="label"
+                        value={kgConnID || undefined}
+                        onChange={(v) => setKgConnID(v || '')}
+                        allowClear
+                        placeholder="抽取模型连接（默认 chat 连接）"
+                        style={{ width: 320 }}
+                        options={conns.map((c) => ({ value: c.id, label: c.name + ' · ' + c.model_name }))}
+                      />
+                      <InputNumber
+                        min={0}
+                        max={2000}
+                        value={kgMaxChunks ?? 0}
+                        onChange={(v) => setKgMaxChunks(typeof v === 'number' ? v : 0)}
+                        style={{ width: 180 }}
+                        addonAfter="chunks 预算"
+                      />
+                    </Space>
+                    <Space size={8} wrap align="center">
+                      <Select
+                        showSearch
+                        optionFilterProp="label"
+                        value={kgOntoID || undefined}
+                        onChange={(v) => setKgOntoID(v || '')}
+                        allowClear
+                        placeholder="本体约束抽取（选择挂载本体，可清除）"
+                        style={{ width: 320 }}
+                        options={ontos.map((o) => ({ value: o.id, label: o.name }))}
+                      />
+                      <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                        挂载后抽取 prompt 注入该本体概念/关系词表白名单（本体→KB 出向，差异化能力）；重建 KG 生效
+                      </Typography.Text>
+                    </Space>
                     <Input.TextArea
                       value={kgPrompt ?? ''}
                       onChange={(e) => setKgPrompt(e.target.value)}
@@ -625,7 +678,9 @@ export default function KnowledgePage() {
                               score {fmtScore(h.score)}
                             </Tag>
                           </div>
-                          <div className="hit-excerpt">{h.excerpt}</div>
+                          <div className="hit-excerpt">
+                            <HighlightSpans text={h.excerpt} spans={h.spans} />
+                          </div>
                         </div>
                       )
                     })}

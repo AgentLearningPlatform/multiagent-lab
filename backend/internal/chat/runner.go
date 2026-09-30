@@ -1315,7 +1315,11 @@ func (s *Service) recallKB(ctx context.Context, conv *store.Conversation, agent 
 	case len(hits) > 0:
 		hd := make([]map[string]any, 0, len(hits))
 		for _, h := range hits {
-			hd = append(hd, map[string]any{"doc": h.Doc, "seq": h.Seq, "score": h.Score, "excerpt": h.Excerpt})
+			entry := map[string]any{"doc": h.Doc, "seq": h.Seq, "score": h.Score, "excerpt": h.Excerpt}
+			if len(h.Spans) > 0 { // B1 引用溯源：命中区间（excerpt 内 rune 偏移，前端句级高亮）
+				entry["spans"] = h.Spans
+			}
+			hd = append(hd, entry)
 		}
 		data := map[string]any{"kb_id": kbcfg.ID, "mode": mode, "hits": hd} // M14 ④：retrieval 事件带 mode
 		if degraded {
