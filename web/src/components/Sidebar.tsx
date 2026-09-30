@@ -101,6 +101,17 @@ export default function Sidebar({
     else onSelectProject(id)
   }
 
+  // REQ-211：跨智能体直接点选会话——点击会话若归属智能体与当前选中不同，与 setCurrentConv
+  // 同批原子切换选中智能体（React 18 自动批处理：AgentsPage 归位守卫 effect 读到的是切换后
+  // 的归属，不再清空会话）；项目模式无跨实体切换语义，直接激活会话。
+  const openConversation = (convId: string) => {
+    if (mode === 'agent') {
+      const conv = conversations.find((c) => c.id === convId)
+      if (conv?.agent_id && conv.agent_id !== activeAgentId) onSelectAgent(conv.agent_id)
+    }
+    setCurrentConv(convId)
+  }
+
   // 点击节点头部：展开/收起；展开时同时选中该节点
   const toggleNode = (id: string) => {
     const next = !open[id]
@@ -212,7 +223,7 @@ export default function Sidebar({
                     <Conversations
                       items={n.convs.map((c) => ({ key: c.id, label: c.title || '未命名对话' }))}
                       activeKey={currentConvId ?? undefined}
-                      onActiveChange={setCurrentConv}
+                      onActiveChange={openConversation}
                       menu={(c) => ({
                         items: [
                           { key: 'rename', label: '重命名', icon: <EditOutlined /> },
