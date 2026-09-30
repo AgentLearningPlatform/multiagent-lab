@@ -7,15 +7,15 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
-// usageStats 使用统计（GET /api/stats/usage?group_by=model|agent|project&from=YYYY-MM-DD&to=YYYY-MM-DD）。
+// usageStats 使用统计（GET /api/stats/usage?group_by=model|agent|project|conversation&from=YYYY-MM-DD&to=YYYY-MM-DD）。
 // from/to 可选、闭区间；契约：{"rows":[{key,label,calls,prompt_tokens,completion_tokens,total_tokens}]}。
 func (s *Server) usageStats(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	groupBy := q.Get("group_by")
 	switch groupBy {
-	case "model", "agent", "project":
+	case "model", "agent", "project", "conversation": // REQ-204/M39 C6：成本护栏对话维度
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "group_by must be model|agent|project"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "group_by must be model|agent|project|conversation"})
 		return
 	}
 

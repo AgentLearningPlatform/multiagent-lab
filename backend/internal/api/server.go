@@ -39,6 +39,7 @@ type Server struct {
 	ResearchRoot  string             // REQ-150：research/ 立项依据层根目录（只读查看，2026-09-25 扩展）
 	KnowledgeRoot string             // REQ-161：platform-knowledge/ 平台知识根目录（只读查看，2026-09-25 扩展）
 	Companion     *companion.Service // REQ-170/M28：伴生本体旁路管线（Run/Resume 收尾触发，低侵入）
+	sched         *scheduler         // REQ-204/M39 C5：对话级定时续跑（进程内，重启失效——诚实边界）
 	RuntimeEnv    *RuntimeEnv        // REQ-191/M31：运行环境统一配置（DB 覆盖 env，动态沙箱后端解析）
 	Mux           *http.ServeMux
 	mcpMu         sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
@@ -79,6 +80,7 @@ func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *
 	chatSvc.Companion = comp // REQ-170 P2「KG 检索源并入」：伴生图检索源经接口反转注入 chat（companion→chat 包环约束）
 	chatSvc.Community = &kg.Summarizer{Store: st, Box: box} // KB-5③：全局问答社区摘要源（connID 按库经接口参数传入）
 	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, KnowledgeRoot: knowledgeRoot, Companion: comp, Mux: http.NewServeMux()}
+	s.sched = newScheduler(s)
 	s.routes()
 	return s
 }
@@ -189,6 +191,11 @@ func (s *Server) routes() {
 	// 使用统计（按 model|agent|project 聚合 run_event）
 	m.HandleFunc("GET /api/stats/storage", s.storageOverview) // REQ-113②：数据量概览
 	m.HandleFunc("GET /api/stats/usage", s.usageStats)
+	// REQ-204/M39：进度产物人类侧导出 + 对话级定时续跑（进程内调度器，重启失效）
+	m.HandleFunc("GET /api/conversations/{id}/todo.md", s.exportTodo)
+	m.HandleFunc("POST /api/conversations/{id}/schedule", s.createSchedule)
+	m.HandleFunc("DELETE /api/conversations/{id}/schedule", s.deleteSchedule)
+	m.HandleFunc("GET /api/schedules", s.listSchedules)
 
 	// 工具注册表（REQ-24 工具勾选）
 	m.HandleFunc("GET /api/tools", s.listTools)

@@ -31,6 +31,7 @@ type runStartedMeta struct {
 	model     string
 	agentName string
 	convID    string
+	convTitle string
 }
 
 // runUsage run.finished 事件解析出的 token 用量（缺省为 0）。
@@ -46,8 +47,8 @@ type runUsage struct {
 // project 维度经 conversation_id → project.name 归属；无项目会话的运行被排除。
 // rng 为空（From/To 均为空）时不做时间过滤。
 func (s *Store) UsageStats(groupBy string, rng UsageRange) ([]UsageRow, error) {
-	if groupBy != "model" && groupBy != "agent" && groupBy != "project" {
-		return nil, &HTTPError{Status: 400, Msg: "group_by must be model|agent|project"}
+	if groupBy != "model" && groupBy != "agent" && groupBy != "project" && groupBy != "conversation" {
+		return nil, &HTTPError{Status: 400, Msg: "group_by must be model|agent|project|conversation"}
 	}
 	started, err := s.loadRunStarted(rng)
 	if err != nil {
@@ -58,13 +59,27 @@ func (s *Store) UsageStats(groupBy string, rng UsageRange) ([]UsageRow, error) {
 		return nil, err
 	}
 
-	// project 维度：conversation_id -> 项目名（仅该维度需要）
+	// project/conversation 维度：会话归属（项目名/标题）
 	var convProject map[string]string
 	if groupBy == "project" {
 		convProject, err = s.loadConversationProjects()
 		if err != nil {
 			return nil, err
 		}
+	}
+	convTitles := map[string]string{}
+	if groupBy == "conversation" {
+		rows, err := s.DB.Query(`SELECT id, title FROM conversation`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id, title string
+			if err := rows.Scan(&id, &title); err == nil {
+				convTitles[id] = title
+			}
+		}
+		rows.Close()
 	}
 
 	agg := map[string]*UsageRow{}
@@ -85,6 +100,8 @@ func (s *Store) UsageStats(groupBy string, rng UsageRange) ([]UsageRow, error) {
 				continue // 会话无项目 → project 维度排除
 			}
 			key, label = name, name
+		case "conversation": // REQ-204/M39 C6：成本护栏对话维度（REQ-49 扩展）
+			key, label = st.convID, convTitles[st.convID]
 		}
 		row := agg[key]
 		if row == nil {

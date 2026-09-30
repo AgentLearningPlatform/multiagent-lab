@@ -128,6 +128,7 @@ type RunResult struct {
 	AssistantMessageID string `json:"assistant_message_id,omitempty"`
 	Stopped            bool   `json:"stopped,omitempty"`
 	Error              string `json:"error,omitempty"`
+	VerifyFailed       bool   `json:"verify_failed,omitempty"` // REQ-202 ③：verify_on_stop 背压触发
 }
 
 // Run 执行一次对话运行：持久化用户消息 → 装配（M4：单 Agent / 项目多 Agent）→ 流式执行 → 翻译事件 → 持久化。
@@ -348,6 +349,28 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 		// M11 收尾：挂起等待答复（区别于 completed / stopped）
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("interrupted")), emit)
 	default:
+		// REQ-202 ③ verify_on_stop 背压：验证命令失败不标记 completed（verify_failed + 事件透出输出）
+		if agent != nil && agent.VerifyCommand != "" {
+			dir := ""
+			if a := s.Assembler; a != nil {
+				pid := ""
+				if conv.ProjectID != nil {
+					pid = *conv.ProjectID
+				}
+				dir = a.resolveWorkRoot(assembleScope{ProjectID: pid}, agent)
+			}
+			if out, verr := RunVerification(runCtx, agent.VerifyCommand, dir); verr != nil {
+				s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{
+					"message": "verify_on_stop 验证未通过，本次运行不标记完成: " + verr.Error(),
+					"output":  truncateRunes(out, 1500),
+				}), emit)
+				fin := finishData("verify_failed")
+				s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, fin), emit)
+				res.VerifyFailed = true
+				res.Error = "verify_failed: " + verr.Error()
+				return res, nil
+			}
+		}
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
 		// REQ-210/M37 随轮兑现：运行时不变量检查（01 §9 搭车件）——completed 收尾时工具调用/结果计数
 		// 必须配对（"模型可见即已记录"），不一致以 run.warning 诚实透出（dangling 调用已被历史重建
@@ -1232,6 +1255,14 @@ func (s *Service) AssembleSummary(ctx context.Context, agent *store.Agent) (stri
 		return "", err
 	}
 	return rt.ModelLabel, nil
+}
+
+// Running 会话是否有活跃 Run（REQ-204/M39 C5 调度器跳过判断用）。
+func (s *Service) Running(convID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.cancels[convID]
+	return ok
 }
 
 // RecallProvider 上下文准入 Provider（REQ-201 A4）：按对话/智能体/本轮输入检索外部知识并注入 System 消息；

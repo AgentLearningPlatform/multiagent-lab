@@ -103,3 +103,31 @@ func (s *Store) TouchConversation(convID string) error {
 	_, err := s.DB.Exec(`UPDATE conversation SET updated_at = ? WHERE id = ?`, now(), convID)
 	return err
 }
+
+// ---- REQ-204/M39 C1：中断检查点持久化 ----
+
+// SetCheckpoint 保存中断检查点（gob blob，按 checkpointID 幂等覆盖）。
+func (s *Store) SetCheckpoint(id string, blob []byte) error {
+	_, err := s.DB.Exec(`INSERT INTO checkpoint (id,blob,created_at) VALUES (?,?,?)
+		ON CONFLICT(id) DO UPDATE SET blob=excluded.blob, created_at=excluded.created_at`, id, blob, now())
+	return err
+}
+
+// GetCheckpoint 取检查点（不存在返回 ok=false）。
+func (s *Store) GetCheckpoint(id string) ([]byte, bool, error) {
+	var b []byte
+	err := s.DB.QueryRow(`SELECT blob FROM checkpoint WHERE id = ?`, id).Scan(&b)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return b, true, nil
+}
+
+// DeleteCheckpoint 删除检查点（恢复完成/放弃挂起时清理）。
+func (s *Store) DeleteCheckpoint(id string) error {
+	_, err := s.DB.Exec(`DELETE FROM checkpoint WHERE id = ?`, id)
+	return err
+}

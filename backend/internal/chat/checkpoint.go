@@ -6,6 +6,8 @@ package chat
 import (
 	"context"
 	"sync"
+
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
 // CheckPoints 会话中断检查点存储抽象（ADK core.CheckPointStore + 可选删除）。
@@ -44,4 +46,26 @@ func (s *memCheckPointStore) Delete(_ context.Context, id string) error {
 	defer s.mu.Unlock()
 	delete(s.m, id)
 	return nil
+}
+
+// NewStoreCheckPointStore REQ-204/M39 C1：SQLite 持久化检查点（backend 重启后挂起中断可恢复——
+// 消除「重启即丢」诚实边界；checkpoint 表 blob 为 ADK gob 快照）。
+func NewStoreCheckPointStore(st *store.Store) CheckPoints {
+	return &storeCheckPointStore{st: st}
+}
+
+type storeCheckPointStore struct {
+	st *store.Store
+}
+
+func (s *storeCheckPointStore) Get(ctx context.Context, id string) ([]byte, bool, error) {
+	return s.st.GetCheckpoint(id)
+}
+
+func (s *storeCheckPointStore) Set(_ context.Context, id string, cp []byte) error {
+	return s.st.SetCheckpoint(id, cp)
+}
+
+func (s *storeCheckPointStore) Delete(_ context.Context, id string) error {
+	return s.st.DeleteCheckpoint(id)
 }

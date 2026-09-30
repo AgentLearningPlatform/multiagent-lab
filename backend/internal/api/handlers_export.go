@@ -3,6 +3,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -135,4 +136,43 @@ func (s *Server) storageOverview(w http.ResponseWriter, r *http.Request) {
 		"conversations": convRows,
 		"projects":      projRows,
 	})
+}
+
+// exportTodo REQ-204/M39 C2：任务清单 Markdown 导出（进度产物人类侧；机器侧=conversation.todo_json/todo_write）。
+// GET /api/conversations/{id}/todo.md
+func (s *Server) exportTodo(w http.ResponseWriter, r *http.Request) {
+	convID := r.PathValue("id")
+	conv, err := s.Store.GetConversation(convID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=todo-%s.md", convID[:8]))
+	fmt.Fprintf(w, "# 任务清单 · %s\n\n", conv.Title)
+	if conv.TodoJSON == "" {
+		fmt.Fprintf(w, "> 该会话尚未建立任务清单（模型经 todo_write 工具写入后可导出）。\n")
+		return
+	}
+	var items []struct {
+		Title  string `json:"title"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(conv.TodoJSON), &items); err != nil {
+		fmt.Fprintf(w, "> 清单解析失败：%v\n", err)
+		return
+	}
+	done, prog := 0, 0
+	fmt.Fprintf(w, "| # | 任务 | 状态 |\n| --- | --- | --- |\n")
+	for i, it := range items {
+		mark := map[string]string{"done": "✅ 已完成", "in_progress": "🔄 进行中", "pending": "⬜ 待办"}[it.Status]
+		if it.Status == "done" {
+			done++
+		}
+		if it.Status == "in_progress" {
+			prog++
+		}
+		fmt.Fprintf(w, "| %d | %s | %s |\n", i+1, it.Title, mark)
+	}
+	fmt.Fprintf(w, "\n> 进度：%d/%d 完成，%d 进行中（导出于 %s；失败尝试与已知局限见会话过程事件）\n", done, len(items), prog, time.Now().UTC().Format("2006-01-02 15:04"))
 }
