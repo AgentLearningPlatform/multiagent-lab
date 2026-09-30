@@ -14,7 +14,7 @@ import AgentSidePanel from '../components/AgentSidePanel'
  * REQ-103：智能体配置改为右侧边栏配置视图（原 AgentModal 编辑表单迁入）；AgentModal 仅用于新建。
  */
 export default function AgentsPage() {
-  const { currentConvId, setCurrentConv, dataVersion, bumpData, showToast, setPage } = useUI()
+  const { currentConvId, setCurrentConv, dataVersion, bumpData, showToast } = useUI()
   const [agents, setAgents] = useState<Agent[]>([])
   const [convs, setConvs] = useState<Conversation[]>([])
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
@@ -56,13 +56,8 @@ export default function AgentsPage() {
 
   /** 智能体节点 ⚙ → 右侧边栏配置视图（侧边栏若未开则同时打开） */
   const configureAgent = (agentId: string) => {
-    // REQ-186：内置助手配置面锁定；REQ-192/M32②：配置入口——跳设置页「平台助手」分区
-    //（读写穿透内置行单源，改模型/温度后对话即时生效）
-    if (agents.find((a) => a.id === agentId)?.is_builtin) {
-      localStorage.setItem('eino.settings.section', 'assistant')
-      setPage('settings')
-      return
-    }
+    // REQ-213：内置助手与普通智能体统一——配置入口同为配置侧板（身份字段只读、
+    // 基座工具禁用、提案横幅内置行呈现）；REQ-192 的「跳设置页」路径退役。
     setActiveAgentId(agentId)
     setSidePanelOpen(true)
   }

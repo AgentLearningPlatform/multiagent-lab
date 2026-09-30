@@ -81,6 +81,28 @@ func (s *Server) getAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+// builtinToolsUnion REQ-213② 内置工具面基座并集：用户勾选 ∪ 内置必装八工具（L0 五只读
+// + L1 平台知识/提案三件）——L0/L1 为「授权更多」的基座不可摘除；幂等保序（内置在前）。
+func builtinToolsUnion(submitted []string) []string {
+	required := []string{"doc_read", "list_model_connections", "list_agents", "list_kbs",
+		"get_assistant_config", "sync_platform_kb", "search_platform_kb", "propose_assistant_config"}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(submitted)+len(required))
+	for _, t := range required {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	for _, t := range submitted {
+		if t != "" && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	var a store.Agent
 	if err := decodeJSON(r, &a); err != nil {
@@ -88,9 +110,11 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = r.PathValue("id")
-	// REQ-186：内置助手行不可删除；REQ-192/M32②：编辑改**字段白名单**——instruction（空=保持，
-	// 默认基座由 assistant/config 面与启动引导维护）/model_conn_id/temperature 放行，
-	// 身份（name/description/logo）与能力字段（tools/skills/mcp/沙箱/伴生）及 is_builtin 锁死。
+	// REQ-186：内置助手行不可删除；REQ-192/M32②+REQ-213：编辑走**字段白名单**——
+	// instruction/model_conn_id/temperature + tools/skills/mcp_servers/max_tokens/max_iteration
+	// 放行（能力面与普通智能体统一，REQ-213②）；tools 经 builtinToolsUnion 做基座并集保护
+	// （L0/L1 八工具不可摘除=「授权更多」）；身份（name/description/logo）与角色字段
+	// （is_builtin/runtime_backend/tool_approval/mcp_serve/沙箱/伴生）仍锁死。
 	if prev, perr := s.Store.GetAgent(a.ID); perr == nil && prev != nil && prev.IsBuiltin {
 		merged := *prev
 		if v := strings.TrimSpace(a.Instruction); v != "" {
@@ -103,6 +127,16 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			merged.Temperature = a.Temperature
+		}
+		// REQ-213② 能力字段放行（tools 基座并集保护：用户勾选 ∪ 内置必装）
+		merged.Tools = builtinToolsUnion(a.Tools)
+		merged.Skills = a.Skills
+		merged.MCPServers = a.MCPServers
+		if a.MaxTokens != nil {
+			merged.MaxTokens = a.MaxTokens
+		}
+		if a.MaxIteration > 0 {
+			merged.MaxIteration = a.MaxIteration
 		}
 		updated, err := s.Store.UpdateAgent(&merged)
 		if err != nil {

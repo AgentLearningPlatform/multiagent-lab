@@ -611,6 +611,21 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 	for i, bt := range tb.Tools {
 		tb.Tools[i] = normalizeEmptyArgsTool(bt)
 	}
+	// 8) REQ-213③ 装配期 gating：propose_assistant_config 为内置助手专属（apply 写内置行配置）——
+	// 非 builtin 行即使勾选/技能携带/MCP 同名也剔除并告警（治理收口，透明如实）。
+	if !ag.IsBuiltin {
+		const assistantOnly = "propose_assistant_config"
+		kept := tb.Tools[:0]
+		for _, bt := range tb.Tools {
+			if info, ierr := bt.Info(ctx); ierr == nil && info != nil && info.Name == assistantOnly {
+				delete(tb.SourceOf, assistantOnly)
+				tb.Warnings = append(tb.Warnings, "工具 "+assistantOnly+" 为平台助手专属，已从本次装配剔除")
+				continue
+			}
+			kept = append(kept, bt)
+		}
+		tb.Tools = kept
+	}
 	return tb, nil
 }
 

@@ -211,7 +211,8 @@ export default function Sidebar({
                 </button>
                 <span className="side-node-ops">
                   <Button type="text" size="small" icon={<PlusOutlined />} title={n.builtin ? '与平台助手开始对话' : '新建对话'} onClick={() => onNewConversation(n.key)} />
-                  {!n.builtin && <Button type="text" size="small" icon={<SettingOutlined />} title="配置" onClick={() => configure(n.key)} />}
+                  {/* REQ-213：内置助手配置入口归一——同普通智能体打开配置侧板（原 REQ-186「无配置入口」退役） */}
+                  <Button type="text" size="small" icon={<SettingOutlined />} title={n.builtin ? '配置平台助手' : '配置'} onClick={() => configure(n.key)} />
                 </span>
               </div>
 

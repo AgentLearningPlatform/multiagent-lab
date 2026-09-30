@@ -25,6 +25,9 @@ type AssistantDeps struct {
 	DocsRoot      string
 	ResearchRoot  string
 	KnowledgeRoot string
+	// DefaultPrompt REQ-213：内置提示词基座（api.AssistantDefaultPrompt 注入）——
+	// get_assistant_config 以「行内 instruction == 基座」判「未微调」（assistant_config 表退役后单源读行）。
+	DefaultPrompt string
 }
 
 // RegisterAssistantTools 注册 L0 只读工具：doc_read / list_model_connections / list_agents /
@@ -190,21 +193,35 @@ func assistantListKBs(deps AssistantDeps) *tool.Entry {
 }
 
 // assistantGetConfig L0：平台助手自身配置（模型覆盖/温度/提示词是否微调）。
+// REQ-213：读 agent 内置行单源（assistant_config 表已退役，REQ-192 遗留收口——原实现读旧表恒空值）。
 func assistantGetConfig(deps AssistantDeps) *tool.Entry {
 	return &tool.Entry{
 		ID: "get_assistant_config", Name: "get_assistant_config",
 		Description: "查询平台助手自身的配置（模型覆盖/温度/提示词是否微调，只读）", Source: tool.SourceBuiltin,
 		New: func(ctx context.Context) (einotool.BaseTool, error) {
 			fn := func(ctx context.Context, _ struct{}) (string, error) {
-				cfg, err := deps.Store.GetAssistantConfig()
+				a, err := deps.Store.GetAgent("builtin-assistant")
 				if err != nil {
 					return "", err
 				}
-				out := map[string]any{"model_conn_id": cfg.ModelConnID, "temperature": cfg.Temperature, "prompt_tuned": strings.TrimSpace(cfg.SystemPrompt) != ""}
+				tuned := strings.TrimSpace(a.Instruction) != "" && a.Instruction != deps.DefaultPrompt
+				out := map[string]any{
+					"model_conn_id": derefAgentStr(a.ModelConnID),
+					"temperature":   a.Temperature,
+					"prompt_tuned":  tuned,
+				}
 				b, _ := json.MarshalIndent(out, "", "  ")
 				return string(b), nil
 			}
 			return utils.InferTool("get_assistant_config", "查询平台助手自身的配置（模型覆盖/温度/提示词是否微调）", fn)
 		},
 	}
+}
+
+// derefAgentStr nil 安全解引用（chat 包本地版，避免引 api）。
+func derefAgentStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
