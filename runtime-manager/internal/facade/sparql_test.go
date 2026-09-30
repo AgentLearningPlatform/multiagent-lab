@@ -315,3 +315,87 @@ func TestHandleSparqlQueryCompanion(t *testing.T) {
 		t.Fatalf("伴生分支也应拒绝变更查询: %v / %v", err, res)
 	}
 }
+
+// TestHandleListConcepts REQ-215：概念清单运行时按需拉取——
+// 全量/limit 截断（诚实标注 truncated）/硬上限/缺参/未挂载本体路由失败。
+func TestHandleListConcepts(t *testing.T) {
+	sparqlSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(b), "rdf:type owl:Class ; rdfs:label ?label") {
+			t.Errorf("翻译 SPARQL 应查询 owl:Class 标签，实际: %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/sparql-results+json")
+		io.WriteString(w, `{"head":{"vars":["label"]},"results":{"bindings":[
+			{"label":{"type":"literal","value":"部署"}},
+			{"label":{"type":"literal","value":"服务"}},
+			{"label":{"type":"literal","value":"服务"}},
+			{"label":{"type":"literal","value":"计算节点"}}]}}`)
+	}))
+	defer sparqlSrv.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), filepath.Join("..", "..", "migrations"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	now := time.Now().Format(time.RFC3339)
+	p := &store.Profile{ID: "p1", Name: "n", Engine: "oxigraph", OntologyIDs: []string{"t"},
+		Config: "{}", Status: "created", CreatedAt: now, UpdatedAt: now}
+	if err := st.Create(p); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	if err := st.SetStatus("p1", "running", "", ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	f := New(st, func(string) (string, error) { return sparqlSrv.URL, nil })
+	h := f.handleListConcepts()
+
+	newReq := func(args map[string]any) mcp.CallToolRequest {
+		req := mcp.CallToolRequest{}
+		req.Params.Name = "list_concepts"
+		req.Params.Arguments = args
+		return req
+	}
+	var out struct {
+		OntologyID string   `json:"ontology_id"`
+		Count      int      `json:"count"`
+		Concepts   []string `json:"concepts"`
+		Truncated  bool     `json:"truncated"`
+	}
+
+	// 1) 全量：重复 label 去重（DISTINCT 兜底 + 进程内 seen）
+	res, err := h(context.Background(), newReq(map[string]any{"ontology_id": "t"}))
+	if err != nil || res.IsError {
+		t.Fatalf("全量查询失败: %v / %v", err, res)
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].(mcp.TextContent).Text), &out); err != nil {
+		t.Fatalf("结果解析: %v", err)
+	}
+	if out.Count != 3 || len(out.Concepts) != 3 || out.Truncated ||
+		out.Concepts[0] != "部署" || out.Concepts[2] != "计算节点" {
+		t.Fatalf("全量结果不符: %+v", out)
+	}
+
+	// 2) limit=2：截断 + truncated=true
+	res, err = h(context.Background(), newReq(map[string]any{"ontology_id": "t", "limit": float64(2)}))
+	if err != nil || res.IsError {
+		t.Fatalf("limit 查询失败: %v / %v", err, res)
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].(mcp.TextContent).Text), &out); err != nil {
+		t.Fatalf("结果解析: %v", err)
+	}
+	if out.Count != 2 || !out.Truncated {
+		t.Fatalf("limit 截断不符: %+v", out)
+	}
+
+	// 3) 缺 ontology_id → 参数错误；未挂载本体 → 路由失败
+	res, err = h(context.Background(), newReq(map[string]any{}))
+	if err != nil || !res.IsError {
+		t.Fatalf("缺参应报错: %v / %v", err, res)
+	}
+	res, err = h(context.Background(), newReq(map[string]any{"ontology_id": "missing"}))
+	if err != nil || !res.IsError || !strings.Contains(res.Content[0].(mcp.TextContent).Text, "ONTOLOGY_SERVICE_UNAVAILABLE") {
+		t.Fatalf("未挂载本体应路由失败: %v / %v", err, res)
+	}
+}

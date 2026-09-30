@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Avatar, Alert, Button, Checkbox, Collapse, Dropdown, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Splitter, Switch, Tag, Tooltip, Typography } from 'antd'
-import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, RobotOutlined, SettingOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BookOutlined, BugOutlined, BulbOutlined, ClusterOutlined, RobotOutlined, SettingOutlined, StopOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 import { Bubble, Sender, ThoughtChain, Welcome } from '@ant-design/x'
 import type { BubbleListProps } from '@ant-design/x'
 import XMarkdown from '@ant-design/x-markdown'
@@ -704,7 +704,9 @@ export default function ChatWindow({
     : (conversation.enable_kb ? `知识检索已开启${kbBound ? `（${kbBound.name}）` : ''}` : '开启知识检索')
   const ontoHint = ontoDisabled
     ? (profilesErr ? '本体运行方案列表暂不可用' : '暂无 running 状态的本体运行方案，请先在本体页启动')
-    : (conversation.ontology_enabled ? `本体增强已开启${ontoBound ? `（${ontoBound.name}）` : ''}` : '开启本体增强')
+    : (conversation.ontology_enabled
+      ? `本体增强已开启${ontoBound ? `（${ontoBound.name}）` : ''}；点击可换方案或关闭`
+      : '开启本体增强')
   const skillsHint = skillsDisabled
     ? '该智能体未挂载技能，请在智能体属性中配置'
     : (skillsOn ? `技能已启用（${agentSkills.length} 个）` : '技能已停用')
@@ -725,7 +727,7 @@ export default function ChatWindow({
       setPicker('onto')
       return
     }
-    // 已开启：打开方案选择器（换方案保持开启；Esc/点外关闭）——2026-09-28 修复「已开启后无法换方案」
+    // 已开启：打开方案选择器（换方案保持开启；关闭走选择器底部动作——REQ-215）
     setPicker('onto')
   }
   const toggleSkills = () => {
@@ -1785,6 +1787,12 @@ export default function ChatWindow({
                       runningProfiles.map((p) => ({ id: p.id, name: p.name, meta: p.engine })),
                       conversation.runtime_profile_id,
                       (id) => patchConv({ runtime_profile_id: id, ontology_enabled: true }),
+                      // REQ-215：已开启时提供关闭通路（知识库 chip 可直接开关，本体 chip 点击=管理入口）
+                      conversation.ontology_enabled ? {
+                        icon: <StopOutlined style={{ color: 'var(--c-ink-2)', marginRight: 6 }} />,
+                        label: '关闭本体增强（保留方案绑定）',
+                        onClick: () => patchConv({ ontology_enabled: false }),
+                      } : undefined,
                     )}
                   >
                     <span className="chip-slot">{ontoChip}</span>

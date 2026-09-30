@@ -19,11 +19,11 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/importer"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/llmcreate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/ontochat"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/ontoextend"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/pipeline"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/qualitygate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/repo"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/seed"
-	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/ontoextend"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/toolchain"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/vocabsearch"
 )
@@ -739,22 +739,11 @@ func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal([]byte(raw), &sp)
 
 	var b strings.Builder
+	// REQ-215：紧凑口径——只给身份+规模+工具用法，不枚举概念/关系全量清单。
+	// 概念发现职责移交 facade 工具 list_concepts 运行时按需拉取（本体消费=工具查询，非预载 TBox 进系统提示词）。
 	fmt.Fprintf(&b, "可用本体【%s】(ontology_id=%s, v%d)：%s\n", o.Name, o.ID, o.Version, o.Description)
-	b.WriteString("概念：")
-	for i, c := range sp.Concepts {
-		if i > 0 {
-			b.WriteString("、")
-		}
-		b.WriteString(c.Name)
-	}
-	b.WriteString("\n关系：")
-	for i, rel := range sp.Relations {
-		if i > 0 {
-			b.WriteString("、")
-		}
-		fmt.Fprintf(&b, "%s(%s→%s)", rel.Name, rel.From, rel.To)
-	}
-	fmt.Fprintf(&b, "\n实例共 %d 个。查询工具使用：get_concept/get_instance 按名称精确查，list_instances 列出某概念全部实例，neighbors 查实例关系邻居，sparql_query 可执行自定义只读 SPARQL SELECT 查询（开放性问题如「哪些概念没有任何注释」，入参 query + 可选 limit，仅允许 SELECT 禁变更操作；graph=companion 时传 agent_id（或 conversation_id 自动解析所属智能体）可查询该智能体的伴生本体图——对话中沉淀的动态知识，全部会话与项目协作共享（跨会话记忆查询，REQ-211））。所有工具入参 ontology_id 固定为 %s。", len(sp.Instances), o.ID)
+	fmt.Fprintf(&b, "规模：概念 %d 个、关系 %d 个、实例 %d 个。\n", len(sp.Concepts), len(sp.Relations), len(sp.Instances))
+	b.WriteString("查询工具使用：先用 list_concepts 获取概念名清单（指引不再预列概念），再 get_concept/get_instance 按名称精确查，list_instances 列出某概念全部实例，neighbors 查实例关系邻居，sparql_query 可执行自定义只读 SPARQL SELECT 查询（开放性问题如「哪些概念没有任何注释」，入参 query + 可选 limit，仅允许 SELECT 禁变更操作；graph=companion 时传 agent_id（或 conversation_id 自动解析所属智能体）可查询该智能体的伴生本体图——对话中沉淀的动态知识，全部会话与项目协作共享（跨会话记忆查询，REQ-211））。所有工具入参 ontology_id 固定为 " + o.ID + "。")
 	writeJSON(w, http.StatusOK, map[string]string{"ontology_id": o.ID, "guide": b.String()})
 }
 

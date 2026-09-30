@@ -1,16 +1,16 @@
 // Package facade 统一 MCP facade（方案 04 §4.4）：
-// tools/list 固定返回 5 个 onto_* 工具（Q-14 契约 4→5，REQ-151 增 sparql_query）；
+// tools/list 固定返回 6 个 onto_* 工具（Q-14 契约 4→5→6：REQ-151 增 sparql_query，REQ-215 增 list_concepts）；
 // tools/call 按 ontology_id 路由到所属 running 方案，将工具语义翻译为 SPARQL 在
 // Oxigraph 执行。Agent 侧无感运行时差异。
 package facade
 
 import (
-	"sync"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -73,6 +73,13 @@ func (f *Facade) addTools(s *server.MCPServer) {
 		oid("ontology_id", "本体仓库 id"),
 		oid("name", "实例名"),
 	), f.handleNeighbors())
+
+	// REQ-215：指引不再预列概念全量清单（防 instruction 膨胀），概念发现运行时按需拉取。
+	s.AddTool(mcp.NewTool("list_concepts",
+		mcp.WithDescription("列出本体中全部概念（类）名。指引只给本体身份与规模，概念清单用本工具按需获取。"),
+		oid("ontology_id", "本体仓库 id"),
+		mcp.WithNumber("limit", mcp.Description("可选：最多返回的概念名个数（缺省全部，硬上限 500 防工具结果过大）")),
+	), f.handleListConcepts())
 
 	f.addSparqlQueryTool(s)
 }
@@ -171,7 +178,8 @@ func jsonResult(v any) *mcp.CallToolResult {
 	return mcp.NewToolResultText(string(b))
 }
 
-// ---- 4 固定工具 handler（第 5 工具 sparql_query 见 sparql.go；oxigraph 翻译：get_concept/get_instance→SELECT、list_instances→rdf:type、neighbors→属性路径）----
+// ---- 4 固定工具 handler（第 5 工具 sparql_query 见 sparql.go；第 6 工具 list_concepts 见 handleListConcepts；
+// oxigraph 翻译：get_concept/get_instance→SELECT、list_instances→rdf:type、neighbors→属性路径）----
 
 func (f *Facade) handleConcept() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -313,5 +321,61 @@ func (f *Facade) handleNeighbors() server.ToolHandlerFunc {
 			neighbors = append(neighbors, map[string]string{"rel": nameFromURI(pu), "target": nameFromURI(lit(b["o"]))})
 		}
 		return jsonResult(map[string]any{"name": name, "neighbors": neighbors}), nil
+	}
+}
+
+// handleListConcepts REQ-215 第 6 工具：概念名清单运行时按需拉取
+// （guide 紧凑化后指引不含概念枚举，模型先 list_concepts 探明概念再按名查询）。
+func (f *Facade) handleListConcepts() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, _ := req.Params.Arguments.(map[string]any)
+		oid, _ := args["ontology_id"].(string)
+		if oid == "" {
+			return mcp.NewToolResultErrorf("ontology_id 必填"), nil
+		}
+		p, ep, errRes := f.route(oid)
+		if errRes != nil {
+			return errRes, nil
+		}
+		q := `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+SELECT DISTINCT ?label WHERE { ?c rdf:type owl:Class ; rdfs:label ?label } ORDER BY ?label`
+		bindings, err := f.exec(ctx, "list_concepts", oid, p.ID, ep, q)
+		if err != nil {
+			return mcp.NewToolResultErrorf("查询失败: %v", err), nil
+		}
+		all := []string{}
+		seen := map[string]bool{}
+		for _, b := range bindings {
+			if b["label"] == nil {
+				continue
+			}
+			n := lit(b["label"])
+			if !seen[n] {
+				seen[n] = true
+				all = append(all, n)
+			}
+		}
+		limit := 0
+		if v, ok := args["limit"].(float64); ok && v > 0 {
+			limit = int(v)
+		}
+		names := all
+		truncated := false
+		const hardCap = 500
+		if (limit > 0 && len(names) > limit) || len(names) > hardCap {
+			cut := limit
+			if cut <= 0 || cut > hardCap {
+				cut = hardCap
+			}
+			names = names[:cut]
+			truncated = true
+		}
+		out := map[string]any{"ontology_id": oid, "count": len(names), "concepts": names}
+		if truncated {
+			out["truncated"] = true
+		}
+		return jsonResult(out), nil
 	}
 }
