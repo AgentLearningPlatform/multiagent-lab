@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Input, Popconfirm, Result, Space, Splitter, Tag, Tooltip, Typography } from 'antd'
-import { BranchesOutlined, DeleteOutlined, EditOutlined, ImportOutlined } from '@ant-design/icons'
+import { BranchesOutlined, DeleteOutlined, EditOutlined, ImportOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
 import { companionApi } from '../../api/companion'
 import type { Ontology, OntologyReferences, RuntimeProfile, Spec } from '../../api/types'
@@ -19,6 +19,7 @@ import QualityCardPane from './components/assets/QualityCardPane'
 import ImportMergeWizard from './components/assets/ImportMergeWizard'
 import ReferencesPane from './components/assets/ReferencesPane'
 import EmptyGuide from '../../components/EmptyGuide'
+import Maximizeable from '../../components/Maximizeable'
 
 // ---------------------------------------------------------------------------
 // 本体资产（AssetsPage，REQ-104 ③）：全部已构建本体统一管理
@@ -34,36 +35,38 @@ import EmptyGuide from '../../components/EmptyGuide'
 // （running 方案引用服务端拦截 409、前端禁用；stopped/KB 引用警示放行——聚合源 GET /{id}/references）。
 // ---------------------------------------------------------------------------
 
-/** 详情工作区分区（三簇；57 号 F1 分组口径） */
-const SECTION_GROUPS: { title: string; items: { key: string; label: string }[] }[] = [
-  {
-    title: '内容与编辑',
-    items: [
-      { key: 'spec', label: 'Spec 编辑' },
-      { key: 'graph-edit', label: '图形编辑' },
-      { key: 'ingest', label: 'CSV 灌装' },
-    ],
-  },
-  {
-    title: '质量与演进',
-    items: [
-      { key: 'validate', label: '校验' },
-      { key: 'quality', label: '质量卡' },
-      { key: 'versions', label: '版本与源码' },
-      { key: 'evolution', label: '进化' },
-    ],
-  },
-  {
-    title: '消费与引用',
-    items: [
-      { key: 'graph', label: '可视化' },
-      { key: 'companion', label: '伴生候选' },
-      { key: 'references', label: '被引用' },
-      { key: 'artifacts', label: '产物' },
-      { key: 'export', label: 'TTL 导出' },
-    ],
-  },
-]
+/** 详情工作区分区（三簇；57 号 F1 分组口径）。REQ-240 优化④：伴生分区仅伴生型本体注入。 */
+function sectionGroups(isCompanion: boolean): { title: string; items: { key: string; label: string }[] }[] {
+  return [
+    {
+      title: '内容与编辑',
+      items: [
+        { key: 'spec', label: 'Spec 编辑' },
+        { key: 'graph-edit', label: '图形编辑' },
+        { key: 'ingest', label: 'CSV 灌装' },
+      ],
+    },
+    {
+      title: '质量与演进',
+      items: [
+        { key: 'validate', label: '校验' },
+        { key: 'quality', label: '质量卡' },
+        { key: 'versions', label: '版本与源码' },
+        { key: 'evolution', label: '进化' },
+      ],
+    },
+    {
+      title: '消费与引用',
+      items: [
+        { key: 'graph', label: '可视化' },
+        ...(isCompanion ? [{ key: 'companion', label: '伴生候选' }] : []),
+        { key: 'references', label: '被引用' },
+        { key: 'artifacts', label: '产物' },
+        { key: 'export', label: 'TTL 导出' },
+      ],
+    },
+  ]
+}
 
 export default function AssetsPage() {
   const { showToast } = useUI()
@@ -207,20 +210,56 @@ export default function AssetsPage() {
     setSpecTick((t) => t + 1)
   }
 
-  return (
-    <Splitter className="main sidebar-splitter">
-      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.assets.width')) || 260} min={200} max={420} className="sidebar-panel">
-        <aside className="sidebar">
-          <div className="side-head">
-            <span className="side-title">本体资产</span>
+  // REQ-240 前端优化①：资产列表栏可收起为图标列（44px；localStorage 记忆）——默认宽 260→220 为详情让空间
+  const [listCollapsed, setListCollapsed] = useState(() => localStorage.getItem('eino.assets.collapsed') === '1')
+  const toggleList = () => {
+    setListCollapsed((v) => {
+      localStorage.setItem('eino.assets.collapsed', v ? '0' : '1')
+      return !v
+    })
+  }
+  const groups = sectionGroups(!!active && boundIds.has(active.id))
+
+  const listAside = (collapsed: boolean) =>
+    collapsed ? (
+      <aside className="sidebar" style={{ width: 44, flex: '0 0 44px', maxWidth: 44, alignItems: 'center', padding: '8px 0', gap: 4 }} aria-label="本体列表（已收起）">
+        <Button type="text" size="small" icon={<MenuUnfoldOutlined />} aria-label="展开本体列表" onClick={toggleList} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, overflowY: 'auto' }}>
+          {ontos.slice(0, 14).map((o) => (
+            <Tooltip key={o.id} title={o.name} placement="right">
+              <button
+                type="button"
+                aria-label={`选中 ${o.name}`}
+                onClick={() => setActiveId(o.id)}
+                style={{
+                  width: 28, height: 28, borderRadius: '50%', border: o.id === activeId ? '2px solid var(--c-brand)' : '1px solid var(--c-border)',
+                  background: 'var(--c-bg-soft)', color: 'var(--c-ink-2)', fontSize: 12, cursor: 'pointer', lineHeight: 1,
+                }}
+              >
+                {(o.name || '？').slice(0, 1)}
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+      </aside>
+    ) : (
+      <aside className="sidebar">
+        <div className="side-head">
+          <span className="side-title">本体资产</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span className="side-count">{ontos.length}</span>
-          </div>
-          <div className="ref-menu" style={{ paddingBottom: 12 }}>
-            <AssetList ontos={ontos} profiles={profiles} activeId={activeId} onSelect={setActiveId} validations={validations} />
-          </div>
-        </aside>
-      </Splitter.Panel>
-      <Splitter.Panel className="content-panel">
+            <Button type="text" size="small" icon={<MenuFoldOutlined />} aria-label="收起本体列表" onClick={toggleList} />
+          </span>
+        </div>
+        <div className="ref-menu" style={{ paddingBottom: 12 }}>
+          <AssetList ontos={ontos} profiles={profiles} activeId={activeId} onSelect={setActiveId} validations={validations} />
+        </div>
+      </aside>
+    )
+
+
+  const renderBody = () => (
+    <>
       {listErr ? (
         <div className="work-empty">
           <Result
@@ -384,9 +423,9 @@ export default function AssetsPage() {
               {/* 左锚点分区导航（REQ-183 同款范式：sticky + 常显标签；三簇分组） */}
               <nav
                 aria-label="资产详情分区导航"
-                style={{ width: 172, flexShrink: 0, position: 'sticky', top: 8, display: 'flex', flexDirection: 'column', gap: 10 }}
+                style={{ width: 132, flexShrink: 0, position: 'sticky', top: 8, display: 'flex', flexDirection: 'column', gap: 10 }}
               >
-                {SECTION_GROUPS.map((g) => (
+                {groups.map((g) => (
                   <div key={g.title} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <span style={{ fontSize: 11, color: 'var(--c-ink-3)', padding: '0 4px' }}>{g.title}</span>
                     {g.items.map((it) => (
@@ -437,11 +476,15 @@ export default function AssetsPage() {
                 {secKey === 'quality' && <QualityCardPane ontologyId={active.id} />}
                 {secKey === 'versions' && <SourceView ontologyId={active.id} currentVersion={active.version} spec={spec} />}
                 {secKey === 'artifacts' && <ArtifactsPane ontologyId={active.id} />}
-                {secKey === 'graph' && <VizTabs spec={spec} ontologyId={active.id} />}
+                {secKey === 'graph' && <VizTabs spec={spec} ontologyId={active.id} isCompanion={boundIds.has(active.id)} />}
                 {secKey === 'evolution' && <EvolutionPane key={active.id} ontologyId={active.id} />}
                 {secKey === 'companion' && <OntologyCompanionPane key={active.id} ontologyId={active.id} />}
                 {secKey === 'references' && <ReferencesPane key={active.id} ontologyId={active.id} />}
-                {secKey === 'graph-edit' && <GraphEditor ontologyId={active.id} spec={spec} onSpecSaved={refreshAfterSave} />}
+                {secKey === 'graph-edit' && (
+                  <Maximizeable label="最大化编辑">
+                    <GraphEditor ontologyId={active.id} spec={spec} onSpecSaved={refreshAfterSave} />
+                  </Maximizeable>
+                )}
                 {secKey === 'export' && <ExportPane ontology={active} />}
                 {secKey === 'ingest' && (
                   <CsvIngestPane ontologyId={active.id} spec={spec} onIngested={() => refreshAfterSave()} />
@@ -462,7 +505,24 @@ export default function AssetsPage() {
           }}
         />
       )}
+    </>
+  )
+
+  if (listCollapsed) {
+    return (
+      <div className="main" style={{ display: 'flex', minHeight: 0, flex: 1 }}>
+        {listAside(true)}
+        <div className="content-panel" style={{ flex: 1, minWidth: 0 }}>{renderBody()}</div>
+      </div>
+    )
+  }
+
+  return (
+    <Splitter className="main sidebar-splitter">
+      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.assets.width')) || 220} min={180} max={420} className="sidebar-panel">
+        {listAside(false)}
       </Splitter.Panel>
+      <Splitter.Panel className="content-panel">{renderBody()}</Splitter.Panel>
     </Splitter>
   )
 }

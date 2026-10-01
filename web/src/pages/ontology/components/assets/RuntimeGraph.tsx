@@ -10,6 +10,8 @@ import Graph3D from '../Graph3D'
 // （REQ-175 渐进通道同语义：浏览对象是运行中的本体）。薄实现：经 facade 同口径工作台
 // 端点拉 owl:Class+rdfs:subClassOf+rdf:type 计数 → 组装派生 spec → 复用 Graph3D 全套
 // 三维渲染/搜索/图例（实例不拉全量，以 label 计数后缀呈现；全量实例经 3D 渐进通道）。
+// REQ-240 前端优化⑤：「运行态实渲」独立形态并入「三维浏览」数据源切换——本文件降级为
+// useRuntimeSpec 数据 hook 供给（原独立 Segmented 形态退役，消除与三维浏览的体验重复）。
 // ---------------------------------------------------------------------------
 
 /** 单条 SPARQL 查询（工作台反代端点，JSON 绑定结果） */
@@ -33,6 +35,86 @@ async function runQ(profileId: string, query: string): Promise<Record<string, st
 
 /** IRI 尾段名（urn:o:{oid}:{name} / http://…/{name}） */
 const localName = (iri: string) => decodeURIComponent(iri).split(/[#:]/).pop() ?? iri
+
+export type RuntimeSpecState = {
+  profiles: RuntimeProfile[]
+  profileId: string | null
+  setProfileId: (id: string | null) => void
+  spec: Spec | null
+  err: string | null
+  loading: boolean
+  reload: () => void
+}
+
+/** REQ-240⑤：运行态派生 spec 拉取 hook（running 方案选择+SPARQL TBox/实例计数→派生 spec）。 */
+export function useRuntimeSpec(ontologyId: string): RuntimeSpecState {
+  const [profiles, setProfiles] = useState<RuntimeProfile[]>([])
+  const [profileId, setProfileId] = useState<string | null>(null)
+  const [spec, setSpec] = useState<Spec | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    api
+      .listRuntimeProfiles()
+      .then((ps) => {
+        const running = ps.filter((p) => p.status === 'running' && p.ontology_ids?.includes(ontologyId))
+        setProfiles(running)
+        setProfileId((cur) => (cur && running.some((p) => p.id === cur) ? cur : running[0]?.id ?? null))
+      })
+      .catch(() => setProfiles([]))
+  }, [ontologyId])
+
+  const load = () => {
+    if (!profileId) return
+    setLoading(true)
+    setErr(null)
+    ;(async () => {
+      const classQ = `PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?c ?label ?parent WHERE { ?c a owl:Class . OPTIONAL { ?c rdfs:label ?label } OPTIONAL { ?c rdfs:subClassOf ?parent } }`
+      const countQ = `PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT ?c (COUNT(?i) AS ?n) WHERE { ?c a owl:Class . ?i a ?c } GROUP BY ?c`
+      const [cls, cnts] = await Promise.all([runQ(profileId, classQ), runQ(profileId, countQ)])
+      const counts = new Map(cnts.map((r) => [r.c, Number(r.n) || 0]))
+      const byIri = new Map<string, { name: string; label?: string; parents: string[] }>()
+      for (const r of cls) {
+        const name = localName(r.c)
+        const cur = byIri.get(r.c) ?? { name, label: undefined, parents: [] }
+        if (r.label) cur.label = r.label
+        if (r.parent && r.parent !== r.c) cur.parents.push(localName(r.parent))
+        byIri.set(r.c, cur)
+      }
+      const derived: Spec = {
+        name: '运行态实渲',
+        description: '',
+        concepts: [...byIri.values()].map((c) => {
+          const cnt = [...counts.entries()].find(([iri]) => localName(iri) === c.name)?.[1] ?? 0
+          return {
+            name: c.name,
+            label: cnt > 0 ? `${c.label || c.name} (${cnt})` : c.label || c.name,
+            definition: '',
+            parents: [...new Set(c.parents)],
+          }
+        }),
+        relations: [],
+        instances: [],
+      }
+      setSpec(derived)
+    })()
+      .catch((e: any) => setErr(e?.message ?? '加载失败'))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => {
+    setSpec(null)
+    if (profileId) load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId])
+
+  return { profiles, profileId, setProfileId, spec, err, loading, reload: load }
+}
+
 
 export default function RuntimeGraph({ ontologyId }: { ontologyId: string }) {
   const [profiles, setProfiles] = useState<RuntimeProfile[]>([])

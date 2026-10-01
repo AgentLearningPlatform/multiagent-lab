@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Splitter, Tooltip } from 'antd'
+import { Button, Splitter, Tooltip } from 'antd'
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import {
   ApartmentOutlined,
   AuditOutlined,
@@ -45,6 +46,14 @@ export function readSidebarKey(): SidebarKey {
 
 export default function OntologyModule() {
   const [sidebarKey, setSidebarKey] = useState<SidebarKey>(readSidebarKey)
+  // REQ-240 前端优化①：模块左栏可收起为图标列（48px，只剩栏位图标；localStorage 记忆）
+  const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem('eino.onto.nav.collapsed') === '1')
+  const toggleNav = () => {
+    setNavCollapsed((v) => {
+      localStorage.setItem('eino.onto.nav.collapsed', v ? '0' : '1')
+      return !v
+    })
+  }
 
   useEffect(() => {
     const sync = () => setSidebarKey(readSidebarKey())
@@ -70,6 +79,43 @@ export default function OntologyModule() {
       <RuntimePage />
     )
 
+  // 收起态：图标列（48px）+ 内容区，不用 Splitter（重展开时恢复）
+  if (navCollapsed) {
+    return (
+      <div className="main" style={{ display: 'flex', minHeight: 0, flex: 1 }}>
+        <aside
+          className="sidebar"
+          style={{ width: 48, flex: '0 0 48px', maxWidth: 48, alignItems: 'center', padding: '8px 0', gap: 2 }}
+          aria-label="本体模块导航（已收起）"
+        >
+          <Button
+            type="text"
+            size="small"
+            icon={<MenuUnfoldOutlined />}
+            aria-label="展开模块导航"
+            onClick={toggleNav}
+            style={{ marginBottom: 6 }}
+          />
+          {NAV.map((n) => (
+            <Tooltip key={n.key} title={n.label} placement="right" mouseEnterDelay={0.3}>
+              <button
+                type="button"
+                className={`onto-nav-item${sidebarKey === n.key ? ' active' : ''}`}
+                aria-current={sidebarKey === n.key ? 'page' : undefined}
+                aria-label={n.label}
+                onClick={() => select(n.key)}
+                style={{ width: 40, justifyContent: 'center', padding: '8px 0' }}
+              >
+                <span className="onto-nav-icon">{n.icon}</span>
+              </button>
+            </Tooltip>
+          ))}
+        </aside>
+        <div className="content-panel" style={{ flex: 1, minWidth: 0 }}>{body}</div>
+      </div>
+    )
+  }
+
   return (
     // REQ-237（57 号 F4）：左栏宽度并入全站单一约定（同 key/默认/边界，写入回填——原只读他页 key 且默认 240 互踩）
     <Splitter className="main sidebar-splitter" onResizeEnd={sidebarRemember}>
@@ -82,6 +128,7 @@ export default function OntologyModule() {
         <aside className="sidebar">
           <div className="side-head">
             <span className="side-title">本体模块</span>
+            <Button type="text" size="small" icon={<MenuFoldOutlined />} aria-label="收起模块导航" onClick={toggleNav} />
           </div>
           <div className="onto-nav">
             {NAV.map((n) => (
