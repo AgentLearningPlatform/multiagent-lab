@@ -22,6 +22,8 @@ const TYPE_GROUPS = [
   { value: 'model', label: '模型步骤', types: ['model.step'] },
   { value: 'warning', label: '警告', types: ['run.warning'] },
   { value: 'approval', label: '审批挂起', types: ['run.interrupted'] },
+  // REQ-224/M52（51 号 W1）：harness 事件域（结构化审计）
+  { value: 'harness', label: 'Harness 审计', types: ['approval.granted', 'approval.denied', 'hook.denied', 'verify.completed', 'verify.failed', 'connector.degraded'] },
   { value: 'subagent', label: '子智能体', types: ['subagent.enter', 'subagent.exit'] },
   { value: 'retrieval', label: '知识召回', types: ['retrieval'] },
   { value: 'artifact', label: '产物', types: ['artifact.saved'] },
@@ -234,6 +236,16 @@ export default function TraceDrawer({
           onChange={setTypeGroups}
           options={TYPE_GROUPS.map((g) => ({ value: g.value, label: g.label }))}
         />
+        {/* REQ-224/M52（51 号 W1）：harness 视角预置过滤器——治理面一键聚焦 */}
+        <Space size={4} wrap style={{ marginBottom: 4 }}>
+          <a
+            style={{ fontSize: 11 }}
+            onClick={() => setTypeGroups(['harness', 'approval', 'warning'])}
+          >
+            harness 视角
+          </a>
+          <a style={{ fontSize: 11 }} onClick={() => setTypeGroups([])}>全部</a>
+        </Space>
         <Space size={6} wrap>
           <Select
             size="small"
@@ -305,11 +317,26 @@ function RunBlock({
   }, [expandAll, run.events])
   const fin = run.finished
   const finState = fin ? safeParse(fin.data) : undefined
+  // REQ-231④：生效审批策略（run.started 透出 tool_approval {mode, source}——治 P-H2 生效不可见）
+  const approvalChip = (() => {
+    const started = run.events.find((e) => e.type === 'run.started')
+    const ap = started ? safeParse(started.data)?.tool_approval : undefined
+    if (!ap || !ap.mode) return null
+    const label = ap.mode === 'danger' ? '危险工具审批' : ap.mode === 'all' ? '全部审批' : String(ap.mode)
+    return (
+      <Tooltip title={`生效来源：${ap.source === 'conversation' ? '会话级覆盖' : '智能体级策略'}`}>
+        <Tag color={ap.mode === 'all' ? 'purple' : 'gold'} style={{ margin: 0, fontSize: 10 }}>
+          审批·{label}{ap.source === 'conversation' ? '（会话覆盖）' : ''}
+        </Tag>
+      </Tooltip>
+    )
+  })()
   return (
     <div style={{ marginBottom: 14, border: '1px solid var(--c-border, #e3e6f0)', borderRadius: 8, overflow: 'hidden' }}>
       <div style={{ background: 'var(--c-bg-soft, #f6f7fb)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Typography.Text strong style={{ fontSize: 12 }}>运行 {index + 1}</Typography.Text>
         <Typography.Text type="secondary" style={{ fontSize: 11 }}>{fmtTime(run.startedAt)}</Typography.Text>
+        {approvalChip}
         {fin && (
           <Tag color={fin.type === 'run.error' ? 'red' : (finState?.reason === 'verify_failed' ? 'orange' : 'green')} style={{ margin: 0, fontSize: 10 }}>
             {fin.type === 'run.error' ? '出错' : finState?.reason ? String(finState.reason) : '完成'}

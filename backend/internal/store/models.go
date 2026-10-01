@@ -155,7 +155,14 @@ type RunEvent struct {
 	Type           string `json:"type"`
 	Data           string `json:"data,omitempty"` // JSON 字符串
 	CreatedAt      string `json:"created_at"`
+	// SchemaVersion 事件契约版本（REQ-224/M52，只增不改）：1=存量（M0~M51），2=结构化审计事件
+	// （approval.granted|denied/hook.denied/verify.completed|failed/connector.degraded）+
+	// tool.result 截断标记 + message.delta 门控落库。零值=存量行兼容读。
+	SchemaVersion int `json:"schema_version,omitempty"`
 }
+
+// EventSchemaVersion 当前事件契约版本（写入侧盖戳；消费方按版本兼容读）。
+const EventSchemaVersion = 2
 
 // ModelConnection 模型连接（chat / embedding）。
 type ModelConnection struct {

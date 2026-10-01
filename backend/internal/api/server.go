@@ -39,7 +39,7 @@ type Server struct {
 	ResearchRoot  string             // REQ-150：research/ 立项依据层根目录（只读查看，2026-09-25 扩展）
 	KnowledgeRoot string             // REQ-161：platform-knowledge/ 平台知识根目录（只读查看，2026-09-25 扩展）
 	Companion     *companion.Service // REQ-170/M28：伴生本体旁路管线（Run/Resume 收尾触发，低侵入）
-	sched         *scheduler         // REQ-204/M39 C5：对话级定时续跑（进程内，重启失效——诚实边界）
+	sched         *scheduler         // REQ-204/M39 C5：对话级定时续跑（REQ-224 起调度状态落库，重启 LoadSchedules 续装）
 	RuntimeEnv    *RuntimeEnv        // REQ-191/M31：运行环境统一配置（DB 覆盖 env，动态沙箱后端解析）
 	Mux           *http.ServeMux
 	mcpMu         sync.Mutex   // REQ-131/M18：/mcp 工具表缓存锁
@@ -87,6 +87,7 @@ func NewServer(st *store.Store, box *secrets.Box, chatSvc *chat.Service, tools *
 	chatSvc.Community = &kg.Summarizer{Store: st, Box: box} // KB-5③：全局问答社区摘要源（connID 按库经接口参数传入）
 	s := &Server{Store: st, Box: box, Chat: chatSvc, Tools: tools, KB: kbSvc, Ontology: onto, OntoBuild: ontobuild.NewService(st, box, kbSvc), DBPath: dbPath, DocsRoot: docsRoot, ResearchRoot: researchRoot, KnowledgeRoot: knowledgeRoot, Companion: comp, Mux: http.NewServeMux()}
 	s.sched = newScheduler(s)
+	s.sched.load() // REQ-224/M52：重启按 DB 活跃行重新装配定时器
 	s.routes()
 	return s
 }

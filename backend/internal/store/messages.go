@@ -44,7 +44,7 @@ func (s *Store) ListMessages(convID string) ([]*Message, error) {
 // ListToolEvents 返回对话的工具调用/结果事件（REQ-201 A1：tool 轮次由 run_event 派生重建，
 // 零 schema 变更——历史重建恢复 assistant ToolCalls 与 tool 结果消息）。
 func (s *Store) ListToolEvents(convID string) ([]*RunEvent, error) {
-	rows, err := s.DB.Query(`SELECT id,conversation_id,run_id,type,data,created_at FROM run_event WHERE conversation_id = ? AND type IN ('tool.call','tool.result') ORDER BY created_at, id`, convID)
+	rows, err := s.DB.Query(`SELECT id,conversation_id,run_id,type,data,created_at,COALESCE(schema_version,1) FROM run_event WHERE conversation_id = ? AND type IN ('tool.call','tool.result') ORDER BY created_at, id`, convID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (s *Store) ListToolEvents(convID string) ([]*RunEvent, error) {
 	for rows.Next() {
 		var e RunEvent
 		var data sql.NullString
-		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt, &e.SchemaVersion); err != nil {
 			return nil, err
 		}
 		e.Data = data.String
@@ -74,8 +74,12 @@ func (s *Store) InsertEvent(e *RunEvent) (*RunEvent, error) {
 	if e.ID == "" {
 		e.ID = NewID()
 	}
-	_, err := s.DB.Exec(`INSERT INTO run_event (id,conversation_id,run_id,type,data,created_at) VALUES (?,?,?,?,?,?)`,
-		e.ID, e.ConversationID, e.RunID, e.Type, e.Data, now())
+	sv := e.SchemaVersion
+	if sv == 0 {
+		sv = 1 // 存量兼容：调用方未显式盖版本按旧契约计
+	}
+	_, err := s.DB.Exec(`INSERT INTO run_event (id,conversation_id,run_id,type,data,created_at,schema_version) VALUES (?,?,?,?,?,?,?)`,
+		e.ID, e.ConversationID, e.RunID, e.Type, e.Data, now(), sv)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +88,7 @@ func (s *Store) InsertEvent(e *RunEvent) (*RunEvent, error) {
 
 // ListEvents 按时间升序返回对话全部运行事件（历史还原事件时间线）。
 func (s *Store) ListEvents(convID string) ([]*RunEvent, error) {
-	rows, err := s.DB.Query(`SELECT id,conversation_id,run_id,type,data,created_at FROM run_event WHERE conversation_id = ? ORDER BY created_at, id`, convID)
+	rows, err := s.DB.Query(`SELECT id,conversation_id,run_id,type,data,created_at,COALESCE(schema_version,1) FROM run_event WHERE conversation_id = ? ORDER BY created_at, id`, convID)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +97,7 @@ func (s *Store) ListEvents(convID string) ([]*RunEvent, error) {
 	for rows.Next() {
 		var e RunEvent
 		var data sql.NullString
-		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt, &e.SchemaVersion); err != nil {
 			return nil, err
 		}
 		e.Data = data.String
@@ -126,7 +130,7 @@ func (s *Store) ListEventsQ(convID string, q EventQuery) ([]*RunEvent, int, erro
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM run_event WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	sqlq := `SELECT id,conversation_id,run_id,type,data,created_at FROM run_event WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at, id`
+	sqlq := `SELECT id,conversation_id,run_id,type,data,created_at,COALESCE(schema_version,1) FROM run_event WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at, id`
 	if q.Limit > 0 {
 		sqlq += fmt.Sprintf(" LIMIT %d OFFSET %d", q.Limit, max(q.Offset, 0))
 	}
@@ -139,7 +143,7 @@ func (s *Store) ListEventsQ(convID string, q EventQuery) ([]*RunEvent, int, erro
 	for rows.Next() {
 		var e RunEvent
 		var data sql.NullString
-		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.ConversationID, &e.RunID, &e.Type, &data, &e.CreatedAt, &e.SchemaVersion); err != nil {
 			return nil, 0, err
 		}
 		e.Data = data.String
