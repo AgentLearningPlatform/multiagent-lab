@@ -23,6 +23,7 @@ import (
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/pipeline"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/qualitygate"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/repo"
+	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/evolution"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/seed"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/toolchain"
 	"github.com/xiaoyao/eino-multiagent-lab/ontology-service/internal/vocabsearch"
@@ -36,6 +37,7 @@ type Server struct {
 
 	ontoChatDB *ontochat.Store     // 惰性初始化（rest_ontochat.go）
 	pipelineDB *pipeline.Store     // 惰性初始化（rest_pipeline.go）
+	evoDB      *evolution.Store    // REQ-207/M43：进化候选（惰性初始化）
 	vocab      *vocabsearch.Client // REQ-171 P1：LOV 词表搜索（惰性初始化；LOV_API_BASE 可注入测试桩）
 }
 
@@ -66,6 +68,15 @@ func (s *Server) Mount(m *http.ServeMux) {
 
 	// 质量门禁与词表搜索（REQ-171 P1，26 号方案 §9 P1 底座 A + LOV 薄层；路径沿用方案原文 /api/ontology/ 前缀）
 	m.HandleFunc("POST /api/ontology/quality/check", s.qualityCheck)
+	// REQ-207/M43（52 号 E5④）：生成异步化（ai-draft 202+轮询）
+	m.HandleFunc("POST /api/ontologies/ai-draft-async", s.aiDraftAsync)
+	m.HandleFunc("GET /api/ai-draft-jobs/{id}", s.aiDraftJob)
+	// REQ-207/M43 本体自进化（候选 vN-cK 状态机：诊断→补丁→配对门控→人工采纳）
+	m.HandleFunc("GET /api/ontologies/{id}/evolution/candidates", s.listEvolutionCandidates)
+	m.HandleFunc("POST /api/ontologies/{id}/evolution/candidates", s.proposeEvolutionCandidate)
+	m.HandleFunc("POST /api/ontologies/{id}/evolution/candidates/{cid}/gate", s.gateEvolutionCandidate)
+	m.HandleFunc("POST /api/ontologies/{id}/evolution/candidates/{cid}/accept", s.acceptEvolutionCandidate)
+	m.HandleFunc("POST /api/ontologies/{id}/evolution/candidates/{cid}/reject", s.rejectEvolutionCandidate)
 	m.HandleFunc("GET /api/ontology/quality/report", s.qualityReport)
 	m.HandleFunc("POST /api/ontology/toolchain/{tool}", s.toolchain)
 	m.HandleFunc("GET /api/ontology/vocabularies/search", s.vocabSearch)

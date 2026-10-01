@@ -13,6 +13,7 @@ import SpecEditorPane from './components/assets/SpecEditorPane'
 import { ArtifactsPane, ExportPane, ValidatePane } from './components/assets/AssetPanes'
 import { RenameModal, VizTabs } from './components/assets/AssetExtras'
 import OntologyCompanionPane from './components/companion/OntologyCompanionPane'
+import EvolutionPane from './components/assets/EvolutionPane'
 import AssetList from './components/assets/AssetList'
 import QualityCardPane from './components/assets/QualityCardPane'
 import ImportMergeWizard from './components/assets/ImportMergeWizard'
@@ -393,6 +394,11 @@ export default function AssetsPage() {
                   key: 'graph',
                   label: '可视化',
                   children: <VizTabs spec={spec} ontologyId={active.id} />,
+                },
+                {
+                  key: 'evolution',
+                  label: '进化',
+                  children: <EvolutionPane key={active.id} ontologyId={active.id} />,
                 },
                 {
                   key: 'companion',

@@ -548,3 +548,5 @@ scripts/         # sync_plugin_core.py（core 同步到两个插件）
 ---
 
 *本报告基于公开论文与开源仓库整理。所有数据均来自论文正文、README 或架构文档原文；论文正文在 §6.2 主结果后被截断，故 BI-Agent 的敏感性分析、错误分析与局限性章节内容未能获取，相关部分已明确标注为不可得。*
+
+> **交付注记（2026-10-01）**：§5.1 设计已随 REQ-207/M43 交付——四步循环（诊断→归因→补丁→配对门控）+候选 vN-cK 状态机（proposed→accepted/rejected 留档）+Evidence 锚定+轮次预算（MaxRoundsPerPass=3）+ontoeval 双信号基准（种子 5+真实 3）+进化页签（三桶+门控徽标+采纳强制门控通过）；一期人触发定案维持（无自动循环/无 worker）。真机链：propose→gate 98.95→accept 升正式 v3 ReplicaSet 入 spec；破坏性补丁 gate 不过→accept 409。落地=ontology-service/internal/evolution+rest_evolution.go+迁移 039。
