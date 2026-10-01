@@ -3,8 +3,8 @@
 package store
 
 import (
-	"strings"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 

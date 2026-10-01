@@ -106,6 +106,9 @@ func (s *Server) routes() {
 	})))
 	m.HandleFunc("GET /api/agents/{id}/mcp-serve", s.getAgentMcpServe)
 	m.HandleFunc("POST /api/agents/{id}/mcp-serve/reset", s.resetAgentMcpToken)
+	// REQ-231⑤⑥（51 号 W3）：装配预览与 hooks 清单（Harness 页签数据面）
+	m.HandleFunc("GET /api/agents/{id}/tool-preview", s.agentToolPreview)
+	m.HandleFunc("GET /api/hooks", s.listHooks)
 
 	m.HandleFunc("GET /api/agents", s.listAgents)
 	// M10 §6.3：沙箱配置下发（内部端点，一次性 token）
@@ -279,6 +282,8 @@ func (s *Server) routes() {
 		m.Handle("/api/ontologies/", s.Ontology.BuildProxy())
 		// REQ-216 增量②b：本体删除伴生拦截（精确路由压过反代前缀——绑定者 409 保护+删除后快照清理）
 		m.HandleFunc("DELETE /api/ontologies/{id}", s.deleteOntologyGuard)
+		// REQ-233②/M60：本体「被引用」三源聚合（运行方案挂载/KB 词表/伴生绑定，删除确认预检同源）
+		m.HandleFunc("GET /api/ontologies/{id}/references", s.ontologyReferences)
 		// REQ-103 模式 A：OntoChat 会话/turn/save 全在构建平面 /api/ontochat/*（bugfix：此前漏注册反代，
 		// 同源请求命中主后端 404 文本，前端 JSON.parse 报 "Unexpected non-whitespace character after JSON"）
 		m.Handle("/api/ontochat", s.Ontology.BuildProxy())

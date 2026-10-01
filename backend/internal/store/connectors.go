@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 )
+
 // 连接器类型（阶段一 mcp；阶段二 kubernetes/ssh）。
 const (
 	ConnectorKindMCP        = "mcp"

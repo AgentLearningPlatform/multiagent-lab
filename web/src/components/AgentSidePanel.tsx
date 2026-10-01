@@ -541,6 +541,8 @@ function agentFullPayload(agent: Agent, v: Record<string, any>) {
     work_dir: (v.work_dir ?? '').trim(), // REQ-202/M38：文件原语安全根（Harness 层）
     verify_command: (v.verify_command ?? '').trim(), // REQ-202/M38：verify_on_stop 背压（Harness 层）
     tool_approval: v.tool_approval ?? '', // REQ-219 顺修：表单项此前存在但未入载荷（审批开关保存不生效）
+    approval_exempt: v.approval_exempt ?? [], // REQ-231②：审批豁免清单
+    approval_timeout_hours: v.approval_timeout_hours ?? 0, // REQ-231③：挂起超时
     logo_url: (v.logo_url ?? '').trim(), // REQ-137
     tools: v.tools ?? [],
     // 后端 PUT 为 full-replace：保留当前挂载，避免未编辑字段被清空
@@ -587,6 +589,10 @@ function AgentConfigForm({
   const [toolsErr, setToolsErr] = useState(false)
   const [skills, setSkills] = useState<Skill[]>([]) // REQ-164：技能勾选候选（注册表来源，仅启用项）
   const [backends, setBackends] = useState<InferenceBackendStatus[]>([]) // M13：推理后端探测清单
+  // REQ-231⑤⑥：运行时工具预览 + hooks 注册真相（后端读取——前端静态文案退役）
+  const [previewTools, setPreviewTools] = useState<{ name: string; source: string }[]>([])
+  const [previewNotes, setPreviewNotes] = useState<string[]>([])
+  const [hooksInfo, setHooksInfo] = useState<{ name: string; active: boolean; description: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   // REQ-214/M46：连接器授权候选（设置页「连接器」分区为管理面，侧板只做勾选授权）
@@ -595,11 +601,19 @@ function AgentConfigForm({
   useEffect(() => {
     form.setFieldsValue({
       ...agent,
+      approval_exempt: agent.approval_exempt ?? [], // REQ-231②③：审批面新字段初始化
+      approval_timeout_hours: agent.approval_timeout_hours ?? 0,
       // REQ-131：对外服务开关/工具名平铺为表单字段（token 不进表单，走专用端点管理）
       mcp_serve_enabled: agent.mcp_serve?.enabled ?? false,
       mcp_serve_tool_name: agent.mcp_serve?.tool_name ?? '',
     })
     api.listConnections().then(setAllConns).catch(() => {})
+    // REQ-231⑤⑥：工具预览与 hooks 清单（agent 变更即取；后端读取——前端静态文案退役）
+    api.agentToolPreview(agent.id).then((r) => {
+      setPreviewTools(r.tools ?? [])
+      setPreviewNotes(r.notes ?? [])
+    }).catch(() => {})
+    api.listHooks().then((r) => setHooksInfo(r.hooks ?? [])).catch(() => {})
     // M5：工具注册表（失败降级为空 + 提示，不阻塞保存）
     api
       .listTools()
@@ -883,25 +897,48 @@ function AgentConfigForm({
                   >
                     <Input allowClear disabled={isBuiltin} placeholder="如 go build ./...（空=不验证）" />
                   </Form.Item>
-                  {sec('工具调用人工审批（REQ-217④ 迁侧板落点）')}
+                  {sec('工具调用人工审批（REQ-231/M58 三档精细化）')}
                   <Form.Item
                     name="tool_approval"
                     label="审批策略"
                     initialValue=""
-                    extra={isBuiltin ? '内置助手不开放审批策略配置' : '开启后，本智能体每次调用工具前都会挂起等待你批准或拒绝（REQ-14 恢复语义 / 危险操作审批）；开启审批后，对外 MCP 服务（server 模式）的调用将被默认拒绝。对话头部的会话级开关可覆盖本策略'}
+                    extra={isBuiltin ? '内置助手不开放审批策略配置' : 'danger=仅危险工具（写类内置 write_file/save_file/todo_write、http_fetch、连接器/MCP 写操作；read-only 免审）；all=全部工具。开启审批后对外 MCP 服务（server 模式）调用默认拒绝。对话级开关可覆盖本策略（生效策略随 run 事件透出）'}
                   >
                     <Select
                       disabled={isBuiltin}
                       options={[
                         { value: '', label: '关闭（直接执行）' },
+                        { value: 'danger', label: '危险工具审批（写类/出网/连接器写）' },
                         { value: 'all', label: '全部工具调用前审批' },
                       ]}
                     />
                   </Form.Item>
-                  {sec('防护 hooks（进程内确定性层，只读）')}
+                  <Form.Item
+                    name="approval_exempt"
+                    label="审批豁免清单（可选，REQ-231②）"
+                    extra="danger/all 档下勾选的工具直接放行不挂起（个工具覆盖档位；恢复重入的旧挂起不受影响）"
+                  >
+                    <Select
+                      mode="multiple"
+                      allowClear
+                      disabled={isBuiltin}
+                      placeholder="从运行时工具清单选择豁免项"
+                      options={previewTools.map((t) => ({ value: t.name, label: `${t.name}（${t.source}）` }))}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="approval_timeout_hours"
+                    label="审批挂起超时（小时，可选，REQ-231③）"
+                    extra="0=不限（默认）；恢复运行时挂起超过该时长将自动拒绝并告知模型超时语义（治长期挂起遗忘）"
+                  >
+                    <InputNumber min={0} max={168} step={1} style={{ width: '100%' }} disabled={isBuiltin} placeholder="0（不限）" />
+                  </Form.Item>
+                  <ToolPreviewCard agentId={agent.id} approval={Form.useWatch('tool_approval', form) ?? ''} notes={previewNotes} />
+                  {sec('防护 hooks（进程内确定性层，只读——清单来自后端 /api/hooks）')}
                   <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                    · fetchGuard（启用）：http_fetch 执行前内网/环回地址预检（SSRF 粗防），拒绝时结构化回执回喂模型、调用不执行；
-                    <br />· cmdGuard（预置未启用）：危险命令模式表随 run_command 三前置（沙箱+绑定目录+审批，REQ-202 B1「缺一不上」）放开后生效；
+                    {hooksInfo.length > 0
+                      ? hooksInfo.map((h) => `· ${h.name}（${h.active ? '启用' : '预置未启用'}）：${h.description}`).join(' ｜ ')
+                      : 'hook 清单加载中…（/api/hooks）'}
                     <br />· hook 纪律：只放行/拒绝、不改写参数与结果——确定性检查不进模型上下文决策。
                   </Typography.Text>
                 </>
@@ -1451,6 +1488,53 @@ function AgentFilesView({ agent, onChanged }: { agent: Agent; onChanged?: () => 
           extra={<Button size="small" type="text" onClick={() => setPreview(null)}>关闭</Button>}>
           <pre style={{ margin: 0, maxHeight: 320, overflow: 'auto', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{preview.content}</pre>
         </Card>
+      )}
+    </div>
+  )
+}
+
+
+// ---------------------------------------------------------------------------
+// REQ-231⑤（51 号 W3）：运行时工具预览卡——「这个智能体运行时实际会拿到哪些工具」
+// 的确定性呈现（后端四源合并结果+遮蔽告警；治 P-H4 仅 debug 快照可见）。危险工具
+// 高亮 + 审批策略摘要（与 /api/hooks 卡同面板）。
+// ---------------------------------------------------------------------------
+function ToolPreviewCard({ agentId, approval, notes: notesProp }: { agentId: string; approval: string; notes?: string[] }) {
+  const [tools, setTools] = useState<{ name: string; source: string }[]>([])
+  const [danger, setDanger] = useState<string[]>([])
+  const [notes, setNotes] = useState<string[]>(notesProp ?? [])
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    api
+      .agentToolPreview(agentId)
+      .then((r) => {
+        setTools(r.tools ?? [])
+        setNotes(r.notes ?? [])
+        // danger 清单由后端审批策略口径推导（同 IsDangerousTool）——前端按 source 近似标注：
+        // builtin 写类 + 非 ontology/oo 连接器前缀
+        const builtinDanger = ['write_file', 'save_file', 'todo_write', 'http_fetch']
+        setDanger((r.tools ?? []).filter((t) => builtinDanger.includes(t.name) || (t.name.includes('__') && !t.name.startsWith('ontology__') && !t.name.startsWith('oo__'))).map((t) => t.name))
+      })
+      .catch((e: any) => setErr(e?.message ?? '预览加载失败'))
+  }, [agentId])
+  if (err) return <Typography.Text type="secondary" style={{ fontSize: 11 }}>工具预览不可用：{err}</Typography.Text>
+  return (
+    <div style={{ border: '1px solid var(--ant-color-border, #ddd)', borderRadius: 6, padding: '8px 10px', marginBottom: 10 }}>
+      <Typography.Text strong style={{ fontSize: 12 }}>运行时工具预览（{tools.length}）</Typography.Text>
+      <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', margin: '2px 0 6px' }}>
+        审批策略生效：{approval === '' ? '关闭' : approval === 'danger' ? '危险工具档' : approval === 'all' ? '全部工具' : approval || '跟随 agent'}{danger.length > 0 && approval !== '' ? ` · 危险清单 ${danger.length} 项将挂起审批` : ''}
+      </Typography.Text>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {tools.map((t) => (
+          <Tooltip key={t.name} title={`来源：${t.source}`}>
+            <Tag color={danger.includes(t.name) ? 'orange' : 'default'} style={{ margin: 0, fontSize: 11 }}>{t.name}</Tag>
+          </Tooltip>
+        ))}
+      </div>
+      {notes.length > 0 && (
+        <Typography.Text type="secondary" style={{ fontSize: 10.5, display: 'block', marginTop: 6 }}>
+          {notes.join('；')}
+        </Typography.Text>
       )}
     </div>
   )

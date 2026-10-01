@@ -27,9 +27,9 @@ type CompanionCandidate struct {
 	BatchRank float64 `json:"batch_rank"`
 	// REQ-229②：事件时点（time_scope，如「2026-09」；event 类知识的时间范围提示）
 	TimeScope string `json:"time_scope,omitempty"`
-	Status          string  `json:"status"` // pending | confirmed | rejected
-	CreatedAt       string  `json:"created_at"`
-	DecidedAt       string  `json:"decided_at,omitempty"`
+	Status    string `json:"status"` // pending | confirmed | rejected
+	CreatedAt string `json:"created_at"`
+	DecidedAt string `json:"decided_at,omitempty"`
 	// REQ-194/M34：抽取时实体对齐标记（aligned=对齐已有实体沿用原名 / new=新造；空=存量未标）
 	Aligned string `json:"aligned,omitempty"`
 	// REQ-194/M34：审计注记（语义矛盾检测「疑似矛盾待人工」等）

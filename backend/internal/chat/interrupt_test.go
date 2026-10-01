@@ -46,7 +46,7 @@ func TestToolApprovalInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrapped, ok := tool.NewApprovalTool(composed.Tools[0], "current_time")
+	wrapped, ok := tool.NewApprovalTool(composed.Tools[0], "current_time", nil)
 	if !ok {
 		t.Fatal("wrap approval failed")
 	}
@@ -96,7 +96,7 @@ func TestToolApprovalDeny(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrapped, _ := tool.NewApprovalTool(composed.Tools[0], "current_time")
+	wrapped, _ := tool.NewApprovalTool(composed.Tools[0], "current_time", nil)
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name: "denier", Model: stubApprovalModel{},
 		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []einotool.BaseTool{wrapped}}},

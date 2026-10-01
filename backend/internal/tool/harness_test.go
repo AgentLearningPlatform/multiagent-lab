@@ -106,12 +106,16 @@ func TestHTTPFetchTool(t *testing.T) {
 	if res, err2 := it.InvokableRun(context.Background(), `{"url":"http://example.invalid/x"}`); err2 != nil || strings.Contains(res, "拒绝") || !strings.Contains(res, "抓取失败") {
 		t.Fatalf("公开域名应通过守卫报抓取失败回执: err=%v res=%s", err2, res)
 	}
+	// REQ-224 适配：PreHook 升格为带 guard 名的规格结构体（Fn 为守卫函数）
 	guard := NewFetchGuardPre()
-	if err := guard("http_fetch", `{"url":"http://192.168.1.1/x"}`); err == nil {
+	if err := guard.Fn("http_fetch", `{"url":"http://192.168.1.1/x"}`); err == nil {
 		t.Fatal("fetchGuard 应拒绝内网")
 	}
-	if err := guard("other_tool", `{"url":"http://192.168.1.1/x"}`); err != nil {
+	if err := guard.Fn("other_tool", `{"url":"http://192.168.1.1/x"}`); err != nil {
 		t.Fatalf("非目标工具应放行: %v", err)
+	}
+	if guard.Guard == "" {
+		t.Fatal("PreHook 应带 guard 名（hook.denied 审计载荷需要）")
 	}
 }
 
@@ -142,9 +146,9 @@ func TestTodoWriteTool(t *testing.T) {
 // hooks：pre 拒绝阻断执行；链为空不包装。
 func TestHookChainWrap(t *testing.T) {
 	bt, _ := NewHTTPFetchTool()
-	chain := &HookChain{Pre: []PreHook{func(name, args string) error {
+	chain := &HookChain{Pre: []PreHook{{Guard: "testGuard", Fn: func(name, args string) error {
 		return errDenied
-	}}}
+	}}}}
 	wrapped := chain.Wrap(bt)
 	it := wrapped.(einotool.InvokableTool)
 	if res, err := it.InvokableRun(context.Background(), `{"url":"http://example.com"}`); err != nil || !strings.Contains(res, "denied by hook") {

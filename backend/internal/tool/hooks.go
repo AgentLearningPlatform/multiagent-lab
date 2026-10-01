@@ -17,8 +17,14 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// PreHook 执行前守卫：返回错误即拒绝本次调用（错误文本回喂模型）。
-type PreHook func(toolName, argsJSON string) error
+// PreHookFn 执行前守卫函数：返回错误即拒绝本次调用（错误文本回喂模型）。
+type PreHookFn func(toolName, argsJSON string) error
+
+// PreHook 带 guard 名的守卫规格（REQ-224：hook.denied 审计事件载荷需要 guard 名）。
+type PreHook struct {
+	Guard string // 守卫名（fetchGuard / cmdGuard / 自定义）
+	Fn    PreHookFn
+}
 
 // PostHook 执行后观测（只读；不改结果）。
 type PostHook func(toolName, result string)
@@ -54,8 +60,13 @@ type hookedInvokableTool struct {
 func (h hookedInvokableTool) InvokableRun(ctx context.Context, args string, opts ...einotool.Option) (string, error) {
 	name := toolNameOf(ctx, h.InvokableTool)
 	for _, pre := range h.chain.Pre {
-		if err := pre(name, args); err != nil {
+		if err := pre.Fn(name, args); err != nil {
 			// 守卫拒绝 → 结构化拒绝文本回喂模型（对齐审批 deny 口径；dsh 纪律：调用失败不结束轮次）
+			// REQ-224：hook.denied 结构化审计事件（guard/工具名/参数摘要/拒绝原因）
+			EmitEvent(ctx, "hook.denied", map[string]any{
+				"guard": pre.Guard, "tool_name": name,
+				"args_digest": argsDigest(args), "reason": err.Error(),
+			})
 			b, _ := json.Marshal(map[string]string{"denied": err.Error()})
 			return string(b), nil
 		}
@@ -89,7 +100,11 @@ func (h hookedStreamTool) StreamableRun(ctx context.Context, args string, opts .
 		name = info.Name
 	}
 	for _, pre := range h.chain.Pre {
-		if err := pre(name, args); err != nil {
+		if err := pre.Fn(name, args); err != nil {
+			EmitEvent(ctx, "hook.denied", map[string]any{
+				"guard": pre.Guard, "tool_name": name,
+				"args_digest": argsDigest(args), "reason": err.Error(),
+			})
 			return nil, err
 		}
 	}
@@ -101,7 +116,7 @@ func (h hookedStreamTool) StreamableRun(ctx context.Context, args string, opts .
 // NewFetchGuardPre http_fetch 守卫：从入参提取 URL 做内网/环回黑名单预检（与工具内校验双保险，
 // 为审批前的快速拒绝点）。
 func NewFetchGuardPre() PreHook {
-	return func(toolName, argsJSON string) error {
+	return PreHook{Guard: "fetchGuard", Fn: func(toolName, argsJSON string) error {
 		if toolName != "http_fetch" {
 			return nil
 		}
@@ -118,7 +133,7 @@ func NewFetchGuardPre() PreHook {
 			return fmt.Errorf("http_fetch 拒绝访问内网/环回地址（fetchGuard）")
 		}
 		return nil
-	}
+	}}
 }
 
 // cmdGuardPatterns 危险命令模式表（run_command 类工具启用即生效；大小写不敏感子串匹配）。
@@ -138,7 +153,34 @@ func CommandGuard(cmd string) (bool, string) {
 	return true, ""
 }
 
+// argsDigest 审计载荷用参数摘要（≤200 字节 rune 安全截断——审计留痕不复制全文）。
+func argsDigest(argsJSON string) string {
+	r := []rune(strings.TrimSpace(argsJSON))
+	if len(r) > 200 {
+		return string(r[:200]) + "…"
+	}
+	return string(r)
+}
+
 // DefaultHookChain 装配期默认 hook 链（首批：fetchGuard；cmdGuard 随 run_command 工具接线）。
 func DefaultHookChain() *HookChain {
 	return &HookChain{Pre: []PreHook{NewFetchGuardPre()}}
+}
+
+// HookInfo hook 清单条目（REQ-231⑥：Harness 页签 hooks 卡数据源——前端静态文案退役，
+// 由后端读取链真相；可配置化随 REQ-232）。
+type HookInfo struct {
+	Name        string `json:"name"`
+	Active      bool   `json:"active"`
+	Description string `json:"description"`
+}
+
+// DescribeHooks 当前 hook 注册真相（Active 自 DefaultHookChain 链长推导——fetchGuard 为
+// 首个且当前唯一 pre-hook；cmdGuard 规则表先行、随 run_command 接线生效 REQ-225②）。
+func DescribeHooks() []HookInfo {
+	active := len(DefaultHookChain().Pre) > 0
+	return []HookInfo{
+		{Name: "fetchGuard", Active: active, Description: "http_fetch 执行前内网/环回地址预检（SSRF 粗防），拒绝时结构化回执回喂模型、调用不执行"},
+		{Name: "cmdGuard", Active: false, Description: "危险命令模式表（随 run_command 工具接线生效，REQ-202 B1 三前置 / REQ-225②）"},
+	}
 }

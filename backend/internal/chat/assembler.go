@@ -469,6 +469,10 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 		})
 		if ferr != nil {
 			tb.Warnings = append(tb.Warnings, fmt.Sprintf("MCP %s(%s) 连接失败（含幂等重试），本次运行不加载其工具: %v", name, target, ferr))
+			// REQ-224/M52（51 号 W1）：connector.degraded 结构化事件（SSE+落库；run.started warnings 兼容保留）
+			tool.EmitEvent(ctx, "connector.degraded", map[string]any{
+				"connector": name, "target": target, "reason": ferr.Error(),
+			})
 			return
 		}
 		if len(bts) == 0 {
@@ -650,16 +654,29 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 	} else if sc.ToolApprovalOverride == "off" {
 		approval = ""
 	}
-	if approval == "all" {
+	// REQ-231① 审批三档：""=off（不审批）| "danger"=危险清单（写类内置+连接器/mcp 非 read-only
+	// 前缀工具；read-only 免审）| "all"=全部工具。豁免清单/超时经 ApprovalPolicy 注入（②③）。
+	if approval == "all" || approval == "danger" {
+		policy := &tool.ApprovalPolicy{ExemptTools: ag.ApprovalExempt, TimeoutHours: ag.ApprovalTimeoutHours}
 		for i, bt := range tb.Tools {
 			ti, ierr := bt.Info(ctx)
 			if ierr != nil || ti == nil || ti.Name == "" {
 				continue
 			}
-			if wrapped, ok := tool.NewApprovalTool(bt, ti.Name); ok {
+			if approval == "danger" && !tool.IsDangerousTool(ti.Name) {
+				continue // danger 档只审危险清单（REQ-231①；read-only 免审）
+			}
+			if wrapped, ok := tool.NewApprovalTool(bt, ti.Name, policy); ok {
 				tb.Tools[i] = wrapped
 			}
 		}
+	}
+	// REQ-231④ 生效策略透出（对话窗口/轨迹「当前生效审批档」显示；P-H2 治理）
+	switch approval {
+	case "danger":
+		tb.Warnings = append(tb.Warnings, "审批策略：danger（仅危险工具需人工批准"+exemptNote(ag.ApprovalExempt)+"；生效来源："+approvalSource(sc.ToolApprovalOverride, ag.ToolApproval)+"）")
+	case "all":
+		tb.Warnings = append(tb.Warnings, "审批策略：all（全部工具需人工批准"+exemptNote(ag.ApprovalExempt)+"；生效来源："+approvalSource(sc.ToolApprovalOverride, ag.ToolApproval)+"）")
 	}
 	// 7) 空参数归一化包装（toolargs.go：GLM 等 Anthropic 兼容端点空入参 tool_use 致命解析失败的统一收口）
 	for i, bt := range tb.Tools {
@@ -681,6 +698,25 @@ func (a *Assembler) assembleTools(ctx context.Context, ag *store.Agent, sc assem
 		tb.Tools = kept
 	}
 	return tb, nil
+}
+
+// exemptNote REQ-231②：豁免清单在策略文案中的附注。
+func exemptNote(exempt []string) string {
+	if len(exempt) == 0 {
+		return ""
+	}
+	return "；豁免 " + strings.Join(exempt, "/")
+}
+
+// approvalSource REQ-231④：生效档来源（会话级覆盖 or agent 级配置）。
+func approvalSource(override, agentLevel string) string {
+	switch override {
+	case "on":
+		return "会话覆盖=on"
+	case "off":
+		return "会话覆盖=off"
+	}
+	return "agent 级=" + map[string]string{"": "off", "danger": "danger", "all": "all"}[agentLevel]
 }
 
 // composeInstruction 技能注入后的最终系统提示词（§6.12；无 Composer/无技能时即原指令）。

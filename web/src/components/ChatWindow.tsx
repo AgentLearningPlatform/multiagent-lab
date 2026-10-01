@@ -119,6 +119,19 @@ export function describeEvent(type: string, d: any): { text: string; err?: boole
       return { text: `🔗 本体查询${d?.profile_id ? ` · ${d.profile_id}` : ''}` }
     case 'ontology.unavailable':
       return { text: '⚠ 本体方案不可用 · 已降级', err: true }
+    // REQ-224/M52：结构化审计事件（schema_version=2 契约）
+    case 'approval.granted':
+      return { text: `✅ 审批通过 · ${d?.tool_name ?? ''}${d?.decision_source === 'timeout' ? '（超时自动）' : ''}` }
+    case 'approval.denied':
+      return { text: `⛔ 审批拒绝 · ${d?.tool_name ?? ''}${d?.decision_source === 'timeout' ? ' · 挂起超时自动拒绝' : ''}`, warn: true }
+    case 'hook.denied':
+      return { text: `🛡 守卫拦截 · ${d?.guard ?? ''} · ${d?.tool_name ?? ''} · ${d?.reason ?? ''}`, warn: true }
+    case 'verify.completed':
+      return { text: `🧪 验证通过 · ${d?.command ?? ''}` }
+    case 'verify.failed':
+      return { text: `🧪 验证未通过 · ${d?.error ?? ''}`, warn: true }
+    case 'connector.degraded':
+      return { text: `🔌 连接器降级 · ${d?.connector ?? ''} · ${d?.reason ?? ''}`, warn: true }
     default:
       return { text: `· ${type}` }
   }

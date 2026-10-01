@@ -4,23 +4,27 @@ package store
 
 // Agent 智能体配置实体。
 type Agent struct {
-	ID               string      `json:"id"`
-	Name             string      `json:"name"`
-	Description      string      `json:"description"`
-	Instruction      string      `json:"instruction"`
-	ModelConnID      *string     `json:"model_conn_id"` // 空 = 跟随全局默认（P1）
-	Temperature      *float64    `json:"temperature"`
-	MaxTokens        *int        `json:"max_tokens"`
-	MaxIteration     int         `json:"max_iteration"`
-	Tools            []string    `json:"tools"`
-	Skills           []string    `json:"skills"`      // P2 生效
-	MCPServers       []MCPServer `json:"mcp_servers"` // P2 生效；REQ-214 起退役为兼容残留（存量迁移后置空，JSON 字段保留供旧导出消费）
+	ID           string      `json:"id"`
+	Name         string      `json:"name"`
+	Description  string      `json:"description"`
+	Instruction  string      `json:"instruction"`
+	ModelConnID  *string     `json:"model_conn_id"` // 空 = 跟随全局默认（P1）
+	Temperature  *float64    `json:"temperature"`
+	MaxTokens    *int        `json:"max_tokens"`
+	MaxIteration int         `json:"max_iteration"`
+	Tools        []string    `json:"tools"`
+	Skills       []string    `json:"skills"`      // P2 生效
+	MCPServers   []MCPServer `json:"mcp_servers"` // P2 生效；REQ-214 起退役为兼容残留（存量迁移后置空，JSON 字段保留供旧导出消费）
 	// REQ-214/M46：连接器引用（实例 id 数组）——agent 级连接白名单（最小权限第一层）。
-	Connectors      []string `json:"connectors"`
-	RuntimeBackend   string      `json:"runtime_backend"`
-	InferenceBackend string      `json:"inference_backend"`  // M13 §6.16：空 = eino-adk 自研默认
-	LogoURL          string      `json:"logo_url,omitempty"` // REQ-137：非内置后端登记的原 logo 图标 URL
-	ToolApproval     string      `json:"tool_approval"`      // REQ-14 恢复②：工具调用人工审批（""=off | "all"）
+	Connectors       []string `json:"connectors"`
+	RuntimeBackend   string   `json:"runtime_backend"`
+	InferenceBackend string   `json:"inference_backend"`  // M13 §6.16：空 = eino-adk 自研默认
+	LogoURL          string   `json:"logo_url,omitempty"` // REQ-137：非内置后端登记的原 logo 图标 URL
+	ToolApproval     string   `json:"tool_approval"`      // REQ-14 恢复②：工具调用人工审批（""=off | "danger"危险档 | "all"；REQ-231①）
+	// REQ-231②：审批豁免清单（JSON 数组；danger/all 档下清单内工具直接放行——个工具覆盖档位）
+	ApprovalExempt []string `json:"approval_exempt"`
+	// REQ-231③：审批挂起超时（小时；0=不限——恢复重入时超时自动 deny 附超时语义）
+	ApprovalTimeoutHours float64 `json:"approval_timeout_hours"`
 	// M10/10b：docker 沙箱资源限制（runtime_backend=docker 时生效；空/0 = 默认 512m/1CPU）
 	SandboxMemory string   `json:"sandbox_memory,omitempty"`
 	SandboxCPUs   float64  `json:"sandbox_cpus,omitempty"`
@@ -44,8 +48,8 @@ type Agent struct {
 	WorkDir string `json:"work_dir"`
 	// REQ-202/M38：结束前验证命令（verify_on_stop 背压；空=不验证；失败不标记 completed）
 	VerifyCommand string `json:"verify_command"`
-	CreatedAt              string  `json:"created_at"`
-	UpdatedAt              string  `json:"updated_at"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 // McpServe Agent 对外服务配置（REQ-131/M18）：开启后经平台 /mcp 端点以 agent_{id} 工具暴露。
@@ -75,8 +79,8 @@ type Connector struct {
 	HasCredentials       bool           `json:"has_credentials"` // 读侧派生（凭据永不回传明文）
 	Status               string         `json:"status"`          // unknown | ok | error（连接测试回写）
 	StatusDetail         string         `json:"status_detail"`
-	Tools                []string       `json:"tools"`           // REQ-214 P2：工具名清单（test 成功落库——授权前知情）
-	TestedAt             string         `json:"tested_at"`       // REQ-214 P2：最近一次连接测试时间（状态时效性）
+	Tools                []string       `json:"tools"`     // REQ-214 P2：工具名清单（test 成功落库——授权前知情）
+	TestedAt             string         `json:"tested_at"` // REQ-214 P2：最近一次连接测试时间（状态时效性）
 	IsBuiltin            bool           `json:"is_builtin"`
 	CreatedAt            string         `json:"created_at"`
 	UpdatedAt            string         `json:"updated_at"`
@@ -130,11 +134,11 @@ type Conversation struct {
 	// ContextState 上下文压缩状态（REQ-201/M37：JSON 摘要+覆盖消息 ID；空=未压缩）
 	ContextState string `json:"context_state,omitempty"`
 	// TodoJSON todo_write 任务清单（REQ-202/M38：模型自写进度，机器可读侧；空=未写）
-	TodoJSON string `json:"todo_json,omitempty"`
-	TopK         int     `json:"top_k"`
-	MinScore     float64 `json:"min_score"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	TodoJSON  string  `json:"todo_json,omitempty"`
+	TopK      int     `json:"top_k"`
+	MinScore  float64 `json:"min_score"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
 // Message 消息（role: user/assistant/system/tool）。

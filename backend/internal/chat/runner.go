@@ -13,15 +13,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/kb"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
-	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/tool"
 )
 
 // Service 运行服务：装配、执行、停止。
@@ -216,6 +217,12 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 		ctx = withDebug(ctx, rec)
 	}
 
+	// REQ-224/M52：运行期事件汇——装配层/工具包装层（审批 granted·denied/hook.denied/连接器降级）
+	// 经 ctx 发结构化审计事件，与常规事件同走 emitAndRecord（SSE+落库同源，schema_version=2）
+	ctx = tool.WithEventSink(ctx, func(t string, data map[string]any) {
+		s.emitAndRecord(context.Background(), conv, runID, newEvent(t, runID, data), emit)
+	})
+
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
 	if err != nil {
 		return nil, err
@@ -264,6 +271,9 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 		"model":           rt.ModelLabel,
 		"backend":         "inprocess", // M10 接入执行后端后按实际后端标注
 	}
+	if apMode, apSrc := effectiveApprovalPolicy(agent, conv); apMode != "" || apSrc != "agent" {
+		startData["tool_approval"] = map[string]any{"mode": apMode, "source": apSrc}
+	}
 	if len(rt.Warnings) > 0 {
 		startData["warnings"] = rt.Warnings
 	}
@@ -310,7 +320,7 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 		s.abandonInterrupt(runCtx, conv, runID, emit)
 	}
 
-	rc := newRunConsumer(s, runCtx, conv, runID, rt, emit, start)
+	rc := newRunConsumer(s, runCtx, conv, runID, rt, emit, start, debugPersist)
 	// WithCheckPointID（M11 收尾）：中断时 ADK 自动存 checkpoint，供 Resume 定向恢复
 	rc.consume(rt.Runner.Run(runCtx, histMsgs, adk.WithCheckPointID(checkPointIDOf(runID))))
 	rc.subagentLeave(rc.lastAgent)
@@ -366,6 +376,10 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 				dir = a.resolveWorkRoot(assembleScope{ProjectID: pid}, agent)
 			}
 			if out, verr := RunVerification(runCtx, agent.VerifyCommand, dir); verr != nil {
+				// REQ-224/M52（51 号 W1）：verify 升独立事件（失败；run.warning/run.finished reason 兼容保留）
+				s.emitAndRecord(runCtx, conv, runID, newEvent("verify.failed", runID, map[string]any{
+					"command": agent.VerifyCommand, "output": truncateRunes(out, 1500), "error": verr.Error(),
+				}), emit)
 				s.emitAndRecord(runCtx, conv, runID, newEvent("run.warning", runID, map[string]any{
 					"message": "verify_on_stop 验证未通过，本次运行不标记完成: " + verr.Error(),
 					"output":  truncateRunes(out, 1500),
@@ -376,6 +390,12 @@ func (s *Service) runOnce(ctx context.Context, conv *store.Conversation, agent *
 				res.Error = "verify_failed: " + verr.Error()
 				return res, nil
 			}
+		}
+		if agent != nil && agent.VerifyCommand != "" {
+			// REQ-224/M52（51 号 W1）：verify 升独立事件（通过）
+			s.emitAndRecord(runCtx, conv, runID, newEvent("verify.completed", runID, map[string]any{
+				"command": agent.VerifyCommand,
+			}), emit)
 		}
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
 		// REQ-210/M37 随轮兑现：运行时不变量检查（01 §9 搭车件）——completed 收尾时工具调用/结果计数
@@ -605,6 +625,29 @@ type interruptState struct {
 // 挂起状态落 conversation.interrupt_state，发 run.interrupted 事件（前端渲染答复/审批卡）。
 // checkpoint id 取恢复链锚点（REQ-214 顺修：Resume 后再次挂起时 ADK 沿用锚点 id 保存快照），
 // 无锚点（新 Run）按 runID 派生。
+// effectiveApprovalPolicy REQ-231④ 生效策略透出：当前 run 实际生效的审批档与覆盖来源
+// （与装配期合并同语义；run 头显示用，治 P-H2 生效策略不可见）。
+// 合并语义：会话级 off→关闭（source=conversation）；会话级 on→保留 agent 档、空档升 all
+//（source=conversation）；会话级空→跟随 agent（source=agent）。档位值域 ''|all|danger（REQ-231①）。
+func effectiveApprovalPolicy(agent *store.Agent, conv *store.Conversation) (mode, source string) {
+	mode = agent.ToolApproval
+	source = "agent"
+	var convAp string
+	if conv.ToolApproval != nil {
+		convAp = *conv.ToolApproval // ''=跟随智能体 | on | off（迁移 016）
+	}
+	switch convAp {
+	case "off":
+		return "", "conversation"
+	case "on":
+		if mode == "" {
+			mode = "all"
+		}
+		return mode, "conversation"
+	}
+	return mode, source
+}
+
 func (s *Service) handleInterrupted(ctx context.Context, conv *store.Conversation, runID string, ii *adk.InterruptInfo, emit EmitFn) {
 	cpID := checkPointIDOf(runID)
 	if anchor, ok := s.cpAnchors.Load(conv.ID); ok {
@@ -687,6 +730,7 @@ type runConsumer struct {
 	trackAgent    func(string)
 	emitReasoning func(string)
 	recordDelta   func(string)
+	persistDeltas bool // REQ-224⑤：message.delta 随 debug_persist 门控落库
 
 	buf         []byte
 	stopped     bool
@@ -703,9 +747,10 @@ type runConsumer struct {
 }
 
 // newRunConsumer 构造事件消费者（Run 与 Resume 共用；闭包绑定自身状态）。
-func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, runID string, rt *BuildResult, emit EmitFn, start time.Time) *runConsumer {
+func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, runID string, rt *BuildResult, emit EmitFn, start time.Time, persistDeltas bool) *runConsumer {
 	rc := &runConsumer{
 		s: s, ctx: ctx, conv: conv, runID: runID, rt: rt, emit: emit, start: start,
+		persistDeltas: persistDeltas,
 		rootAgent:  rt.AgentName,
 		toolAgg:    map[int]*pendingToolCall{},
 		toolCallAt: map[string]time.Time{},
@@ -735,7 +780,13 @@ func newRunConsumer(s *Service, ctx context.Context, conv *store.Conversation, r
 	rc.recordDelta = func(delta string) {
 		rc.buf = append(rc.buf, delta...)
 		if len(delta) > 0 {
-			emit(newEvent("message.delta", runID, map[string]any{"delta": delta}))
+			// REQ-224/M52⑤：message.delta 落库评估定案=随 debug_persist 门控（同 model.step）——
+			// 开启调试入库的会话回放缺口闭合；默认不落库（体积/写放大权衡，正文消息流可见）
+			if rc.persistDeltas {
+				s.emitAndRecord(rc.ctx, conv, runID, newEvent("message.delta", runID, map[string]any{"delta": delta}), emit)
+			} else {
+				emit(newEvent("message.delta", runID, map[string]any{"delta": delta}))
+			}
 		}
 	}
 	return rc
@@ -857,6 +908,15 @@ func (rc *runConsumer) consume(iter *adk.AsyncIterator[*adk.AgentEvent]) {
 			if src := rt.SourceOf[mo.Message.ToolName]; src != "" {
 				data["source"] = src
 			}
+			// REQ-224/M52（51 号 W1）：tool.result 落库截断——32KB 头 24+尾 8+truncated 标记
+			// （http_fetch/kubectl 大输出单行膨胀 SQLite；全文随消息历史按 REQ-201⑤ 剪枝治理）
+			if c, ok := data["content"].(string); ok {
+				if out, total := truncateToolResult(c); out != c {
+					data["content"] = out
+					data["truncated"] = true
+					data["content_total_bytes"] = total
+				}
+			}
 			// M11 §6.13：save_file 成功 → artifact.saved 事件（对话产物面板数据源）
 			if mo.Message.ToolName == "save_file" {
 				if fid, name, path, ok := tool.ParseSaveFileResult(mo.Message.Content); ok {
@@ -906,6 +966,11 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 		}
 		ctx = withDebug(ctx, rec)
 	}
+	// REQ-224/M52：事件汇挂载（同 runOnce——审批 granted·denied 在恢复重入路径发出）
+	ctx = tool.WithEventSink(ctx, func(t string, data map[string]any) {
+		s.emitAndRecord(context.Background(), conv, runID, newEvent(t, runID, data), emit)
+	})
+
 	rt, err := s.Assembler.Assemble(ctx, agent, conv)
 	if err != nil {
 		return nil, err
@@ -926,6 +991,9 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 	startData := map[string]any{
 		"conversation_id": conv.ID, "agent_name": rt.AgentName, "model": rt.ModelLabel,
 		"backend": "inprocess", "resumed": true,
+	}
+	if apMode, apSrc := effectiveApprovalPolicy(agent, conv); apMode != "" || apSrc != "agent" {
+		startData["tool_approval"] = map[string]any{"mode": apMode, "source": apSrc}
 	}
 	if debug >= 1 && rt.Snapshot != nil {
 		startData["assembly"] = rt.Snapshot
@@ -950,7 +1018,7 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 	// 同一 id（REQ-214 顺修——多级审批/多轮 ask_human 第二次恢复不再 checkpoint not exist）
 	s.cpAnchors.Store(conv.ID, st.CheckpointID)
 
-	rc := newRunConsumer(s, runCtx, conv, runID, rt, emit, start)
+	rc := newRunConsumer(s, runCtx, conv, runID, rt, emit, start, debugPersist)
 	rc.consume(iter)
 	rc.subagentLeave(rc.lastAgent)
 
@@ -987,6 +1055,12 @@ func (s *Service) Resume(ctx context.Context, conv *store.Conversation, agent *s
 	case rc.interrupted:
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("interrupted")), emit)
 	default:
+		if agent != nil && agent.VerifyCommand != "" {
+			// REQ-224/M52（51 号 W1）：verify 升独立事件（通过）
+			s.emitAndRecord(runCtx, conv, runID, newEvent("verify.completed", runID, map[string]any{
+				"command": agent.VerifyCommand,
+			}), emit)
+		}
 		s.emitAndRecord(runCtx, conv, runID, newEvent("run.finished", runID, finishData("completed")), emit)
 	}
 	return res, nil
@@ -1091,6 +1165,37 @@ func (s *Service) Stop(conversationID string) bool {
 		cancel()
 	}
 	return ok
+}
+
+// truncateToolResult REQ-224/M52（51 号 W1）：tool.result 内容截断——阈值 32KB，
+// 头 24KB + 尾 8KB（rune 安全切边），中段以标记省略；未超限原样返回。
+func truncateToolResult(content string) (string, int) {
+	const threshold = 32 * 1024
+	const head = 24 * 1024
+	const tail = 8 * 1024
+	total := len(content)
+	if total <= threshold {
+		return content, total
+	}
+	headB := string(runeSafeCutBack([]byte(content[:head])))
+	tailB := string(runeSafeCutFwd([]byte(content[total-tail:])))
+	return headB + "\n…[truncated " + fmt.Sprint(total-threshold) + " bytes]…\n" + tailB, total
+}
+
+// runeSafeCutBack 向后回退到 UTF-8 边界（头段截边）。
+func runeSafeCutBack(b []byte) []byte {
+	for len(b) > 0 && !utf8.RuneStart(b[len(b)-1]) {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+
+// runeSafeCutFwd 向前进到 UTF-8 边界（尾段截边）。
+func runeSafeCutFwd(b []byte) []byte {
+	for len(b) > 0 && !utf8.RuneStart(b[0]) {
+		b = b[1:]
+	}
+	return b
 }
 
 // emitAndRecord 发送事件并落 run_event 表（时间线可回放，验收5）。
@@ -1259,7 +1364,7 @@ func (s *Service) runDocker(ctx context.Context, conv *store.Conversation, agent
 
 func (s *Service) emitAndRecord(_ context.Context, conv *store.Conversation, runID string, ev *Event, emit EmitFn) {
 	emit(ev)
-	re := &store.RunEvent{ConversationID: conv.ID, RunID: runID, Type: ev.Type, Data: string(ev.Data)}
+	re := &store.RunEvent{ConversationID: conv.ID, RunID: runID, Type: ev.Type, Data: string(ev.Data), SchemaVersion: store.EventSchemaVersion}
 	if _, err := s.Store.InsertEvent(re); err != nil {
 		log.Printf("[chat] record run event: %v", err)
 	}
