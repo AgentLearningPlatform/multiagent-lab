@@ -263,7 +263,7 @@ func BuildHistoryMessages(msgs []*store.Message) []*schema.Message {
 
 - [`37_AI应用工程范式演进_从提示词到Graph工程.md`](37_AI应用工程范式演进_从提示词到Graph工程.md) —— 本文的理论坐标系（五层定义/边界/代表项目）
 - [`36_智能体开发架构深度对比`](36_智能体开发架构深度对比_本地实现与DeepSeekHarness.md) —— 本地实现 vs dsh 十层剖析，A/B 阶段的多数落点由此而来
-- [`../08_调研预研/22_多类型智能体方案研究.md`](../08_调研预研/22_多类型智能体方案研究.md) —— REQ-142 产物，C/D 阶段的上游
+- [`../02_智能体/08_调研预研/22_多类型智能体方案研究.md`](../02_智能体/08_调研预研/22_多类型智能体方案研究.md) —— REQ-142 产物，C/D 阶段的上游
 - `docs/01_智能体_需求文档_PRD.md` §3.3 / §9 需求池 —— 立项事实源
 - `docs/02_智能体_技术方案设计.md` §6.2 / §6.4 / §6.16 / §12 里程碑 —— 排期载体
 - 源码锚点：`backend/internal/chat/assembler.go`、`runner.go`、`checkpoint.go`、`skill/composer.go`、`tool/builtin.go`

@@ -501,5 +501,5 @@ compose.GetInterruptState[*AskHumanState](ctx) + compose.GetResumeContext[string
 - [DeepSeek Harness 官方仓库](https://github.com/deepseek-ai/deepseek-harness)（MIT，developer preview）
 - 官方文档：`docs/architecture.zh.md`、`docs/capability-seams.zh.md`、`docs/subsystems/{core,session,compaction,subagent}.zh.md`、`docs/tool-catalog.zh.md`、`docs/agent-lifecycle.zh.md`
 - 本站既有：[31_智能体对接DeepSeek-Harness_可行性及方案分析.md](31_智能体对接DeepSeek-Harness_可行性及方案分析.md)（对接/嵌入可行性及方案选型，REQ-160 已交付现状与 ACP/SDK 深化建议）
-- 本站既有：[22_多类型智能体方案研究](../../08_调研预研/22_多类型智能体方案研究.md)（REQ-142）
+- 本站既有：[22_多类型智能体方案研究](../../02_智能体/08_调研预研/22_多类型智能体方案研究.md)（REQ-142）
 - [docs/02_智能体_技术方案设计.md](../../docs/02_智能体_技术方案设计.md) §6.16（推理后端可插拔契约与能力矩阵）
