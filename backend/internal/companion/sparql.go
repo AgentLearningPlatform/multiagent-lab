@@ -110,8 +110,8 @@ func nodeKind(kind string) string {
 	}
 }
 
-// InsertNodeTriples 概念/事件入图（同名 slug 归并；自带溯源三件套）。
-func InsertNodeTriples(graphID, candID, kind, label, definition string, confidence float64, msgID string, at time.Time) string {
+// InsertNodeTriples 概念/事件入图（同名 slug 归并；自带溯源三件套；timeScope 非空落 bot:timeScope）。
+func InsertNodeTriples(graphID, candID, kind, label, definition, timeScope string, confidence float64, msgID string, at time.Time) string {
 	g := GraphURI(graphID)
 	e := EntityURI(label)
 	var b strings.Builder
@@ -120,6 +120,9 @@ func InsertNodeTriples(graphID, candID, kind, label, definition string, confiden
 	fmt.Fprintf(&b, "    <%s> a %s ;\n      rdfs:label %q ;\n", e, nodeKind(kind), turtleEscape(label))
 	if definition != "" {
 		fmt.Fprintf(&b, "      bot:definition %q ;\n", turtleEscape(definition))
+	}
+	if timeScope != "" {
+		fmt.Fprintf(&b, "      bot:timeScope %q ;\n", turtleEscape(timeScope))
 	}
 	fmt.Fprintf(&b, "      bot:confidence %.2f ;\n      bot:extractedFrom <%s> ;\n      prov:generatedAtTime %q ;\n      prov:wasGeneratedBy <%sactivity-%s> .\n",
 		confidence, MessageURI(msgID), xsdTime(at), EntityNS, candID)
@@ -140,7 +143,8 @@ func InsertRelationTriples(graphID, candID, relName, sourceLabel, targetLabel, d
 	if definition != "" {
 		fmt.Fprintf(&b, "      bot:definition %q ;\n", turtleEscape(definition))
 	}
-	fmt.Fprintf(&b, "      bot:confidence %.2f ;\n      bot:extractedFrom <%s> ;\n      prov:generatedAtTime %q ;\n      prov:wasGeneratedBy <%sactivity-%s> .\n",
+	// REQ-227①：首建即计数（确认次数语义——印证聚合在其上递增）
+	fmt.Fprintf(&b, "      bot:confidence %.2f ;\n      bot:confirmCount 1 ;\n      bot:extractedFrom <%s> ;\n      prov:generatedAtTime %q ;\n      prov:wasGeneratedBy <%sactivity-%s> .\n",
 		confidence, MessageURI(msgID), xsdTime(at), EntityNS, candID)
 	// 边两端实体不存在则薄建（label 锚定，同名归并）
 	fmt.Fprintf(&b, "    <%s> a bot:Concept ; rdfs:label %q .\n", EntityURI(sourceLabel), turtleEscape(sourceLabel))
@@ -161,6 +165,43 @@ SELECT ?edge WHERE {
     FILTER NOT EXISTS { ?edge bot:invalidAt ?any }
   }
 } LIMIT 1`, BotNS, GraphURI(graphID), EntityURI(sourceLabel), turtleEscape(relName))
+}
+
+// FindActiveEdgeWithObject REQ-227①：活跃旧边连同客体 URI（印证聚合的同事实判定——
+// object 相同=同一事实被再次确认走聚合计数；不同=矛盾走失效化既有路径）。
+func FindActiveEdgeWithObject(graphID, sourceLabel, relName string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+SELECT ?edge ?o WHERE {
+  GRAPH <%s> {
+    ?edge a bot:Relation ; bot:subject <%s> ; bot:relName %q ; bot:object ?o .
+    FILTER NOT EXISTS { ?edge bot:invalidAt ?any }
+  }
+} LIMIT 1`, BotNS, GraphURI(graphID), EntityURI(sourceLabel), turtleEscape(relName))
+}
+
+// AggregateConfirmCountRead 读边当前印证计数（无计数=0）。
+func AggregateConfirmCountRead(edgeURI string) string {
+	return fmt.Sprintf(`PREFIX bot: <%s>
+SELECT ?c WHERE { GRAPH ?g { <%s> bot:confirmCount ?c } } LIMIT 1`, BotNS, edgeURI)
+}
+
+// AggregateConfirmCountWrite REQ-227①：同事实再确认——confirmCount 覆盖写（读改写两步，
+// DELETE DATA 需具体旧值不支持变量；伴生写路径低频且同本体确认经宿主引擎串行）+ 新 activity
+// 挂多值 provenance（每次确认的候选活动全部可溯，图内保持单边）。oldCount=0 时省 DELETE。
+func AggregateConfirmCountWrite(graphID, edgeURI, candID string, oldCount, newCount int, at time.Time) string {
+	del := ""
+	if oldCount > 0 {
+		del = fmt.Sprintf("DELETE DATA { GRAPH <%s> { <%s> bot:confirmCount %d . } };\n", GraphURI(graphID), edgeURI, oldCount)
+	}
+	return fmt.Sprintf(`PREFIX bot: <%s>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+%sINSERT DATA {
+  GRAPH <%s> {
+    <%s> bot:confirmCount %d ;
+      prov:wasGeneratedBy <%sactivity-%s> ;
+      bot:lastConfirmedAt %q .
+  }
+}`, BotNS, del, GraphURI(graphID), edgeURI, newCount, EntityNS, candID, xsdTime(at))
 }
 
 // InvalidateEdge 旧边失效化（bot:invalidAt 标记而非删除，保留可查历史）。
@@ -208,12 +249,13 @@ func SelectNodes(graphID string) string {
 	return fmt.Sprintf(`PREFIX bot: <%s>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX prov: <http://www.w3.org/ns/prov#>
-SELECT ?kind ?label ?def ?conf ?at WHERE {
+SELECT ?kind ?label ?def ?conf ?tscope ?at WHERE {
   GRAPH <%s> {
     ?s a ?kind ; rdfs:label ?label .
     FILTER(?kind IN (bot:Concept, bot:Event))
     OPTIONAL { ?s bot:definition ?def }
     OPTIONAL { ?s bot:confidence ?conf }
+    OPTIONAL { ?s bot:timeScope ?tscope }
     OPTIONAL { ?s prov:generatedAtTime ?at }
   }
 } ORDER BY ?at LIMIT 300`, BotNS, GraphURI(graphID))
@@ -224,11 +266,12 @@ func SelectEdges(graphID string) string {
 	return fmt.Sprintf(`PREFIX bot: <%s>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX prov: <http://www.w3.org/ns/prov#>
-SELECT ?src ?rel ?dst ?at WHERE {
+SELECT ?src ?rel ?dst ?at ?count WHERE {
   GRAPH <%s> {
     ?e a bot:Relation ; bot:relName ?rel ; bot:subject ?s ; bot:object ?o ; prov:generatedAtTime ?at .
     ?s rdfs:label ?src .
     ?o rdfs:label ?dst .
+    OPTIONAL { ?e bot:confirmCount ?count }
     FILTER NOT EXISTS { ?e bot:invalidAt ?any }
   }
 } ORDER BY ?at LIMIT 300`, BotNS, GraphURI(graphID))
@@ -255,17 +298,18 @@ func DropGraphByURI(uri string) string {
 	return fmt.Sprintf(`DROP SILENT GRAPH <%s>`, uri)
 }
 
-// SelectEntityInfo 实体定义与置信度（KG 检索源并入：命中实体详情，OPTIONAL 兼容薄建实体）。
+// SelectEntityInfo 实体定义/置信度/时点（KG 检索源并入：命中实体详情，OPTIONAL 兼容薄建实体）。
 func SelectEntityInfo(graphID, label string) string {
 	return fmt.Sprintf(`PREFIX bot: <%s>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT ?def ?conf WHERE {
+SELECT ?def ?conf ?tscope WHERE {
   GRAPH <%s> {
     <%s> rdfs:label %q .
     OPTIONAL { <%s> bot:definition ?def }
     OPTIONAL { <%s> bot:confidence ?conf }
+    OPTIONAL { <%s> bot:timeScope ?tscope }
   }
-} LIMIT 1`, BotNS, GraphURI(graphID), EntityURI(label), turtleEscape(label), EntityURI(label), EntityURI(label))
+} LIMIT 1`, BotNS, GraphURI(graphID), EntityURI(label), turtleEscape(label), EntityURI(label), EntityURI(label), EntityURI(label))
 }
 
 // SelectEntityEdges 实体的活跃关系边（双向：作为主体或客体；失效边不召回）。

@@ -23,6 +23,10 @@ type CompanionCandidate struct {
 	Confidence      float64 `json:"confidence"`
 	SourceMessageID string  `json:"source_message_id,omitempty"`
 	SourceExcerpt   string  `json:"source_excerpt,omitempty"`
+	// REQ-227②：批内分位（抽取批次内归一化 0~1；0=存量未校准。自动入图门控=conf≥阈值且分位≥0.5）
+	BatchRank float64 `json:"batch_rank"`
+	// REQ-229②：事件时点（time_scope，如「2026-09」；event 类知识的时间范围提示）
+	TimeScope string `json:"time_scope,omitempty"`
 	Status          string  `json:"status"` // pending | confirmed | rejected
 	CreatedAt       string  `json:"created_at"`
 	DecidedAt       string  `json:"decided_at,omitempty"`
@@ -47,20 +51,23 @@ type CompanionGraphSource struct {
 	ConversationID string `json:"conversation_id"`
 }
 
-const companionCandidateCols = `id,conversation_id,agent_id,kind,name,rel_name,rel_target,definition,confidence,source_message_id,source_excerpt,status,created_at,decided_at,aligned,note`
+const companionCandidateCols = `id,conversation_id,agent_id,kind,name,rel_name,rel_target,definition,confidence,source_message_id,source_excerpt,status,created_at,decided_at,aligned,note,batch_rank,time_scope`
 
 func scanCandidate(row interface{ Scan(...any) error }) (*CompanionCandidate, error) {
 	var c CompanionCandidate
-	var relName, relTarget, def, excerpt, decided, aligned, note sql.NullString
-	var conf sql.NullFloat64
-	err := row.Scan(&c.ID, &c.ConversationID, &c.AgentID, &c.Kind, &c.Name, &relName, &relTarget, &def, &conf, &c.SourceMessageID, &excerpt, &c.Status, &c.CreatedAt, &decided, &aligned, &note)
+	var relName, relTarget, def, excerpt, decided, aligned, note, timeScope sql.NullString
+	var conf, batchRank sql.NullFloat64
+	err := row.Scan(&c.ID, &c.ConversationID, &c.AgentID, &c.Kind, &c.Name, &relName, &relTarget, &def, &conf, &c.SourceMessageID, &excerpt, &c.Status, &c.CreatedAt, &decided, &aligned, &note, &batchRank, &timeScope)
 	if err != nil {
 		return nil, err
 	}
 	c.RelName, c.RelTarget, c.Definition, c.SourceExcerpt = relName.String, relTarget.String, def.String, excerpt.String
-	c.Aligned, c.Note = aligned.String, note.String
+	c.Aligned, c.Note, c.TimeScope = aligned.String, note.String, timeScope.String
 	if conf.Valid {
 		c.Confidence = conf.Float64
+	}
+	if batchRank.Valid {
+		c.BatchRank = batchRank.Float64
 	}
 	if decided.Valid {
 		c.DecidedAt = decided.String
@@ -85,8 +92,8 @@ func (s *Store) CreateCompanionCandidates(cands []*CompanionCandidate) error {
 		if c.Status == "" {
 			c.Status = "pending"
 		}
-		if _, err := tx.Exec(`INSERT INTO companion_candidate (`+companionCandidateCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			c.ID, c.ConversationID, c.AgentID, c.Kind, c.Name, c.RelName, c.RelTarget, c.Definition, c.Confidence, c.SourceMessageID, c.SourceExcerpt, c.Status, now(), nil, c.Aligned, c.Note); err != nil {
+		if _, err := tx.Exec(`INSERT INTO companion_candidate (`+companionCandidateCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			c.ID, c.ConversationID, c.AgentID, c.Kind, c.Name, c.RelName, c.RelTarget, c.Definition, c.Confidence, c.SourceMessageID, c.SourceExcerpt, c.Status, now(), nil, c.Aligned, c.Note, c.BatchRank, c.TimeScope); err != nil {
 			return err
 		}
 	}
@@ -286,6 +293,17 @@ func (s *Store) DeleteOntologyCompanionData(ontologyID string) error {
 		return err
 	}
 	_, err := s.DB.Exec(`DELETE FROM companion_cursor WHERE agent_id IN (SELECT id FROM agent WHERE companion_ontology_id = ?)`, ontologyID)
+	return err
+}
+
+// ResetAgentExtraction REQ-229③ 全量重沉淀数据面：清该 agent 全部 pending 候选与抽取游标
+// （confirmed 候选历史保留；伴生图不动——重抽后同事实经印证聚合 REQ-227① 计数递增不炸图）。
+// 下次对话收尾抽取因游标为空自然全量重抽。
+func (s *Store) ResetAgentExtraction(agentID string) error {
+	if _, err := s.DB.Exec(`DELETE FROM companion_candidate WHERE agent_id = ? AND status = 'pending'`, agentID); err != nil {
+		return err
+	}
+	_, err := s.DB.Exec(`DELETE FROM companion_cursor WHERE agent_id = ?`, agentID)
 	return err
 }
 

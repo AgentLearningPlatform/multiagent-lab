@@ -189,6 +189,18 @@ func (s *Server) bindCompanionAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// reseedCompanionAgent POST /api/companion/agents/{id}/reseed（REQ-229③ 全量重沉淀）：
+// 清该 agent pending 候选与抽取游标（图数据与绑定不动），下次对话收尾自然全量重抽；
+// 同事实重入图经印证聚合（REQ-227①）计数递增不炸图。
+func (s *Server) reseedCompanionAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	if err := s.Companion.ReseedAgent(r.Context(), agentID); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"reseed": true})
+}
+
 // ontologyCompanionCandidates GET /api/companion/ontologies/{id}/candidates（REQ-216⑥）。
 func (s *Server) ontologyCompanionCandidates(w http.ResponseWriter, r *http.Request) {
 	ontID := r.PathValue("id")

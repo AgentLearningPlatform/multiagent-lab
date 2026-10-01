@@ -169,6 +169,22 @@ export default function AgentCompanionManage({ agent, onUnbound }: { agent: Agen
     if (ok + fail > 0) loadAll()
   }
 
+  // REQ-229③：全量重沉淀（清 pending 候选与游标；下次对话收尾全量重抽，同事实印证聚合不炸图）
+  const [reseeding, setReseeding] = useState(false)
+  const doReseed = async () => {
+    setReseeding(true)
+    setActionErr(null)
+    try {
+      await companionApi.reseedAgent(agent.id)
+      showToast('已重置抽取状态：下次对话收尾将对历史消息全量重抽（同事实确认走印证聚合计数）')
+      loadAll()
+    } catch (e: any) {
+      setActionErr(e?.message ?? '重置失败')
+    } finally {
+      setReseeding(false)
+    }
+  }
+
   // REQ-216：解绑伴生本体（清该 agent 候选与游标+断开绑定；本体伴生子图数据保留）
   const [unbinding, setUnbinding] = useState(false)
   const doUnbind = async () => {
@@ -272,6 +288,15 @@ export default function AgentCompanionManage({ agent, onUnbound }: { agent: Agen
             <Tag color={pendingTotal > 0 ? 'blue' : 'default'} style={{ margin: 0 }}>
               跨会话待确认 {pendingTotal}
             </Tag>
+            <Popconfirm
+              title="全量重沉淀？"
+              description="清空该智能体全部待确认候选与抽取游标（已入图内容与图数据保留）；下次对话收尾将对历史消息从头重抽，同事实确认走印证聚合计数。换绑新本体后想沉淀历史时使用。"
+              okText="重置并重抽"
+              cancelText="取消"
+              onConfirm={doReseed}
+            >
+              <Button size="small" loading={reseeding}>全量重沉淀</Button>
+            </Popconfirm>
             <Popconfirm
               title="解绑伴生本体？"
               description="清空该智能体全部候选与游标并断开绑定（REQ-216 解绑语义）；绑定本体伴生子图数据保留（本体资产详情页可管理）。"

@@ -89,6 +89,25 @@ export default function AgentSidePanel({
     return saved ?? 'config'
   })
   const [collapsed, setCollapsed] = useState(true) // 默认竖条态（REQ-217⑤「默认收缩」）
+  // REQ-230①：候选触达——伴生入口红点（pending>0 亮起；选中 agent 即取数+对话运行后 dataVersion 刷新）
+  const { dataVersion } = useUI()
+  const [companionPending, setCompanionPending] = useState(0)
+  useEffect(() => {
+    if (agent.is_builtin || !agent.companion_ontology_id) {
+      setCompanionPending(0)
+      return
+    }
+    let alive = true
+    companionApi
+      .status(agent.id)
+      .then((st) => {
+        if (alive) setCompanionPending(st.pending_count ?? 0)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [agent.id, agent.companion_ontology_id, dataVersion])
   const switchView = (v: PanelView) => {
     if (v === view && !collapsed) {
       setCollapsed(true) // 再点同一按钮 = 收起回竖条态
@@ -198,19 +217,21 @@ export default function AgentSidePanel({
             <FolderOutlined />
           </button>
         </Tooltip>
-        <Tooltip title="伴生本体" placement="left">
-          <button
-            type="button"
-            className={`proj-bar-btn${view === 'companion' && !collapsed ? ' active' : ''}`}
-            aria-label="伴生本体"
-            aria-selected={view === 'companion' && !collapsed}
-            role="tab"
-            // REQ-213：内置助手（平台辅助角色）无伴生诉求，伴生视图入口隐藏
-            hidden={!!agent.is_builtin}
-            onClick={() => switchView('companion')}
-          >
-            <ClusterOutlined />
-          </button>
+        <Tooltip title={companionPending > 0 ? `伴生本体（${companionPending} 条候选待确认）` : '伴生本体'} placement="left">
+          <Badge count={companionPending} size="small" offset={[-2, 2]}>
+            <button
+              type="button"
+              className={`proj-bar-btn${view === 'companion' && !collapsed ? ' active' : ''}`}
+              aria-label="伴生本体"
+              aria-selected={view === 'companion' && !collapsed}
+              role="tab"
+              // REQ-213：内置助手（平台辅助角色）无伴生诉求，伴生视图入口隐藏
+              hidden={!!agent.is_builtin}
+              onClick={() => switchView('companion')}
+            >
+              <ClusterOutlined />
+            </button>
+          </Badge>
         </Tooltip>
         <Tooltip title="Git 视图（后续扩展）" placement="left">
           <button type="button" className="proj-bar-btn" aria-label="Git 视图（后续扩展）" disabled>
@@ -311,6 +332,30 @@ function AgentCompanionView({ agent, onChanged }: { agent: Agent; onChanged?: ()
   const save = async () => {
     try {
       const v = await form.validateFields()
+      const targetOnt: string = v.companion_ontology_id ?? ''
+      if (targetOnt === '' && (agent.companion_ontology_id ?? '') !== '') {
+        // REQ-230④：解绑不可逆（清候选+游标）——保存路径补确认弹窗（管理页解绑按钮已有 Popconfirm）
+        Modal.confirm({
+          title: '解绑伴生本体？',
+          content: '将清空该智能体全部待确认候选与抽取游标并断开绑定；本体伴生子图数据保留。确认继续保存？',
+          okText: '解绑并保存',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: () => doSave(),
+        })
+        return
+      }
+      await doSave()
+    } catch (e: any) {
+      if (e?.errorFields) return
+      showToast(e.message, 'err')
+      setSaving(false)
+    }
+  }
+
+  const doSave = async () => {
+    try {
+      const v = await form.getFieldsValue()
       const targetOnt: string = v.companion_ontology_id ?? ''
       setSaving(true)
       if (targetOnt !== (agent.companion_ontology_id ?? '')) {

@@ -67,6 +67,7 @@ func TestToCandidates(t *testing.T) {
 	out.Events = append(out.Events, struct {
 		Name       string  `json:"name"`
 		Definition string  `json:"definition"`
+		TimeScope  string  `json:"time_scope"`
 		Confidence float64 `json:"confidence"`
 		Source     string  `json:"source"`
 	}{Name: "", Confidence: 0.5}) // 空 name 应被过滤
@@ -114,7 +115,10 @@ func TestGraphURIs(t *testing.T) {
 }
 
 func TestInsertAndInvalidate(t *testing.T) {
-	ins := InsertNodeTriples("c1", "cand1", "concept", "Pod 扩容", "副本伸缩", 0.86, "m9", testTime())
+	ins := InsertNodeTriples("c1", "cand1", "concept", "Pod 扩容", "副本伸缩", "2026-09", 0.86, "m9", testTime())
+	if !strings.Contains(ins, `bot:timeScope "2026-09"`) {
+		t.Fatalf("timeScope 应落 bot:timeScope:\n%s", ins)
+	}
 	for _, want := range []string{"GRAPH <http://eino-lab/graph/ont-c1>", "a bot:Concept", `rdfs:label "Pod 扩容"`, "prov:wasGeneratedBy", "bot:extractedFrom <http://eino-lab/msg/m9>"} {
 		if !strings.Contains(ins, want) {
 			t.Fatalf("INSERT 缺少 %q:\n%s", want, ins)

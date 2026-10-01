@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Input, Slider, Space, Tag, Typography } from 'antd'
 import * as THREE from 'three'
 import type { CompanionGraph, CompanionGraphEdge, CompanionGraphNode } from '../../../../api/companion'
 
@@ -41,10 +41,28 @@ export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
   const [initErr, setInitErr] = useState<string | null>(null)
   const [selected, setSelected] = useState<CompanionGraphNode | null>(null)
   const [query, setQuery] = useState('')
+  // REQ-230③：时间轴滑杆（截至 T 的累计成长视图——0%=最早节点前，100%=全部）
+  const [timePct, setTimePct] = useState(100)
+  const timeBounds = useMemo(() => {
+    const ts = (graph?.nodes ?? []).map((n) => n.created_at || '').filter(Boolean).sort()
+    return { min: ts[0] ?? '', max: ts[ts.length - 1] ?? '' }
+  }, [graph])
+  const cutoff = useMemo(() => {
+    if (!timeBounds.min || !timeBounds.max || timePct >= 100) return null
+    const a = new Date(timeBounds.min).getTime()
+    const b = new Date(timeBounds.max).getTime()
+    if (!isFinite(a) || !isFinite(b) || b <= a) return null
+    return new Date(a + ((b - a) * timePct) / 100).toISOString()
+  }, [timePct, timeBounds])
+
+  const visibleNodes = useMemo(() => {
+    if (!cutoff) return graph?.nodes ?? []
+    return (graph?.nodes ?? []).filter((n) => !n.created_at || n.created_at <= cutoff)
+  }, [graph, cutoff])
 
   const nodes = useMemo(
     () =>
-      (graph?.nodes ?? []).map((n: CompanionGraphNode) => ({
+      (visibleNodes as CompanionGraphNode[]).map((n: CompanionGraphNode) => ({
         id: n.label,
         label: n.label,
         kind: n.kind,
@@ -57,7 +75,10 @@ export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
   )
   const links = useMemo(
     () =>
-      (graph?.edges ?? [])
+      (visibleNodes.length !== (graph?.nodes?.length ?? 0)
+        ? (graph?.edges ?? []).filter((e: CompanionGraphEdge) => visibleNodes.some((n) => n.label === e.source) && visibleNodes.some((n) => n.label === e.target) && (!e.created_at || !cutoff || e.created_at <= cutoff))
+        : (graph?.edges ?? [])
+      )
         .filter((e: CompanionGraphEdge) => e.source && e.target)
         .map((e: CompanionGraphEdge, i: number) => ({
           id: `e${i}`,
@@ -65,8 +86,9 @@ export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
           target: e.target,
           label: e.rel,
           createdAt: e.created_at,
+          confirmCount: e.confirm_count ?? 1,
         })),
-    [graph],
+    [graph, visibleNodes, cutoff],
   )
   const neighbors = useMemo(() => {
     const m = new Map<string, Set<string>>()
@@ -122,7 +144,7 @@ export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
           })
           .nodeColor((n: any) => n.color)
           .linkColor('rgba(120,128,160,0.5)')
-          .linkWidth(0.6)
+          .linkWidth((l: any) => 0.6 + Math.min((l.confirmCount ?? 1) - 1, 4) * 0.9) // REQ-227①：边宽随印证计数
           .linkDirectionalArrowLength(3)
           .linkLabel((l: any) => l.label)
           .linkDirectionalParticles(1)
@@ -212,6 +234,20 @@ export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
             复位全景
           </Button>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>时间轴</Typography.Text>
+          <Slider
+            range={false}
+            min={0}
+            max={100}
+            value={timePct}
+            onChange={(v) => setTimePct(v as number)}
+            tooltip={{ formatter: () => (cutoff ? `截至 ${cutoff.slice(0, 10)}` : `全部（${timeBounds.max?.slice(0, 10) || '—'}）`) }}
+            style={{ flex: 1, margin: '0 4px' }}
+            aria-label="成长时间轴（截至某时点的累计视图）"
+          />
+          <Typography.Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>{cutoff ? cutoff.slice(0, 10) : '全部'}</Typography.Text>
+        </div>
         <div ref={containerRef} style={{ width: '100%', height: 480, borderRadius: 8, background: 'linear-gradient(180deg,#f4f0fb 0%,#eae8f5 100%)' }} />
         <div style={{ position: 'absolute', zIndex: 5, bottom: 8, left: 10, fontSize: 11, color: 'var(--ant-color-text-tertiary, #888)' }}>
           成长序（入图时间）：{byTime.slice(0, 3).map((n) => n.label).join(' → ')}{byTime.length > 3 ? ' …' : ''} · 拖拽旋转 · 滚轮缩放 · 点击聚焦
@@ -242,6 +278,12 @@ export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
               <div className="onto-flow-detail-row">
                 <span className="onto-flow-detail-label">置信度</span>
                 <Tag style={{ margin: 0 }} color={selected.confidence >= 0.7 ? 'green' : 'orange'}>{selected.confidence.toFixed(2)}</Tag>
+              </div>
+            )}
+            {selected.time_scope && (
+              <div className="onto-flow-detail-row">
+                <span className="onto-flow-detail-label">时点</span>
+                <Tag style={{ margin: 0 }} color="gold">{selected.time_scope}</Tag>
               </div>
             )}
             {selected.created_at && (

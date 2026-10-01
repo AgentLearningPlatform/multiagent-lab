@@ -34,11 +34,24 @@ func snapshotPath(ontologyID string) string {
 }
 
 // snapshotRefresh 全量导出子图 → 快照文件（原子写：tmp + rename）。
+// REQ-227④ 对账头：文件为信封 {"version":1,"count":N,"results":<SPARQL JSON>}——回灌前
+// 校验 count 与 bindings 数一致，不一致告警不回灌（防半截写/损坏静默空图）。
 // 引擎查询失败/写盘失败仅日志（快照是持久性保障不是功能正确性依赖——下次写路径会再刷）。
 func (s *Service) snapshotRefresh(ctx context.Context, ontologyID, base string) {
 	raw, err := s.Plans.Query(ctx, base, SelectGraphAllTriples(ontologyID))
 	if err != nil {
 		log.Printf("[companion] 快照导出查询失败（本体 %s，下次写路径重试）: %v", ontologyID, err)
+		return
+	}
+	var probe struct {
+		Results struct {
+			Bindings []json.RawMessage `json:"bindings"`
+		} `json:"results"`
+	}
+	_ = json.Unmarshal(raw, &probe)
+	envelope, err := json.Marshal(map[string]any{"version": 1, "count": len(probe.Results.Bindings), "results": json.RawMessage(raw)})
+	if err != nil {
+		log.Printf("[companion] 快照信封编码失败（本体 %s）: %v", ontologyID, err)
 		return
 	}
 	dir := snapshotDir()
@@ -47,7 +60,7 @@ func (s *Service) snapshotRefresh(ctx context.Context, ontologyID, base string) 
 		return
 	}
 	tmp := snapshotPath(ontologyID) + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	if err := os.WriteFile(tmp, envelope, 0o644); err != nil {
 		log.Printf("[companion] 快照写盘失败（本体 %s）: %v", ontologyID, err)
 		return
 	}
@@ -79,8 +92,11 @@ func (s *Service) ensureInflated(ctx context.Context, ontologyID, base string) {
 	if n == 0 {
 		raw, err := os.ReadFile(snapshotPath(ontologyID))
 		if err == nil {
-			triples, perr := parseTriples(raw)
-			if perr == nil && len(triples) > 0 {
+			triples, perr := parseSnapshotFile(raw)
+			if perr != nil {
+				// REQ-227④：快照损坏告警不静默（此前 parseTriples 失败静默跳过=图空无感知）
+				log.Printf("[companion] 快照解析失败（本体 %s，疑似损坏不回灌）: %v", ontologyID, perr)
+			} else if len(triples) > 0 {
 				for i := 0; i < len(triples); i += legacyCopyBatch {
 					end := i + legacyCopyBatch
 					if end > len(triples) {
@@ -126,4 +142,30 @@ func (s *Service) OnOntologyDeleted(ontologyID string) {
 	snapshotDelete(ontologyID)
 	s.Plans.Invalidate(ontologyID)
 	s.invalidateLabelCache(ontologyID)
+}
+
+
+// parseSnapshotFile 快照文件 → 三元组（REQ-227④ 信封格式带 count 对账；兼容旧裸数组格式）。
+func parseSnapshotFile(raw []byte) ([]migrateTriple, error) {
+	var envelope struct {
+		Version int             `json:"version"`
+		Count   int             `json:"count"`
+		Results json.RawMessage `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.Version != 1 || envelope.Results == nil {
+		// 旧格式（裸 SPARQL JSON）兼容
+		return parseTriples(raw)
+	}
+	var probe struct {
+		Results struct {
+			Bindings []json.RawMessage `json:"bindings"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(envelope.Results, &probe); err != nil {
+		return nil, fmt.Errorf("信封 results 解析失败: %w", err)
+	}
+	if len(probe.Results.Bindings) != envelope.Count {
+		return nil, fmt.Errorf("快照对账不一致：count=%d 实际=%d（疑似半截写/损坏）", envelope.Count, len(probe.Results.Bindings))
+	}
+	return parseTriples(envelope.Results)
 }

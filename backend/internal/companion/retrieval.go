@@ -45,6 +45,7 @@ type entityHit struct {
 	Label       string    `json:"label"`
 	Definition  string    `json:"definition,omitempty"`
 	Confidence  float64   `json:"confidence,omitempty"`
+	TimeScope   string    `json:"time_scope,omitempty"` // REQ-229②：事件时点提示
 	Match       string    `json:"match,omitempty"` // vector | lexical | vector+lexical（REQ-194②如实呈现）
 	HasEdgeInfo bool      `json:"-"`
 	Edges       []edgeRow `json:"relations,omitempty"`
@@ -78,9 +79,9 @@ func (s *Service) RetrievalContext(ctx context.Context, conv *store.Conversation
 	out := make([]entityHit, 0, len(hits))
 	for _, label := range hits {
 		h := entityHit{Label: label, Match: matchOf[label]}
-		def, conf, err := s.queryEntityInfo(ctx, ontID, label)
+		def, conf, tscope, err := s.queryEntityInfo(ctx, ontID, label)
 		if err == nil {
-			h.Definition, h.Confidence = def, conf
+			h.Definition, h.Confidence, h.TimeScope = def, conf, tscope
 		}
 		if edges, err := s.queryEntityNeighborhood(ctx, ontID, label); err == nil {
 			h.Edges, h.HasEdgeInfo = edges, true
@@ -240,10 +241,10 @@ func (s *Service) queryLabels(ctx context.Context, ontologyID string) ([]string,
 	return parseLabelValues(raw), nil
 }
 
-func (s *Service) queryEntityInfo(ctx context.Context, ontologyID, label string) (string, float64, error) {
+func (s *Service) queryEntityInfo(ctx context.Context, ontologyID, label string) (string, float64, string, error) {
 	raw, err := s.graphQuery(ctx, ontologyID, SelectEntityInfo(ontologyID, label))
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	var res struct {
 		Results struct {
@@ -253,14 +254,14 @@ func (s *Service) queryEntityInfo(ctx context.Context, ontologyID, label string)
 		} `json:"results"`
 	}
 	if json.Unmarshal(raw, &res) != nil || len(res.Results.Bindings) == 0 {
-		return "", 0, nil
+		return "", 0, "", nil
 	}
 	b := res.Results.Bindings[0]
 	conf := 0.0
 	if v, ok := b["conf"]; ok {
 		fmt.Sscanf(v.Value, "%f", &conf)
 	}
-	return b["def"].Value, conf, nil
+	return b["def"].Value, conf, b["tscope"].Value, nil
 }
 
 // queryEntityNeighborhood 命中实体 2 跳邻域（1 跳优先，2 跳补位；每实体限流 ≤8 边）。
@@ -334,6 +335,9 @@ func renderCompanionContext(hits []entityHit) string {
 		if h.Definition != "" {
 			fmt.Fprintf(&b, "：%s", h.Definition)
 		}
+		if h.TimeScope != "" {
+			fmt.Fprintf(&b, "（时点：%s）", h.TimeScope)
+		}
 		for _, e := range h.Edges {
 			hopTag := ""
 			if e.Hop == 2 {
@@ -371,7 +375,7 @@ func entityDetails(hits []entityHit) []map[string]any {
 		for _, e := range h.Edges {
 			rels = append(rels, map[string]any{"rel": e.Rel, "other": e.Other, "dir": e.Dir, "hop": e.Hop})
 		}
-		out = append(out, map[string]any{"label": h.Label, "definition": h.Definition, "confidence": h.Confidence, "match": h.Match, "relations": rels})
+		out = append(out, map[string]any{"label": h.Label, "definition": h.Definition, "confidence": h.Confidence, "time_scope": h.TimeScope, "match": h.Match, "relations": rels})
 	}
 	return out
 }

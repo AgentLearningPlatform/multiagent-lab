@@ -28,6 +28,7 @@ import ImportMergeWizard from './components/assets/ImportMergeWizard'
 
 export default function AssetsPage() {
   const { showToast } = useUI()
+  const [tabKey, setTabKey] = useState<string | null>(null) // REQ-230②：显式切换优先；切本体回落默认规则
   const [ontos, setOntos] = useState<Ontology[]>([])
   const [profiles, setProfiles] = useState<RuntimeProfile[]>([])
   const [listErr, setListErr] = useState<string | null>(null)
@@ -114,6 +115,10 @@ export default function AssetsPage() {
   }, [activeId, specTick])
 
   const active = useMemo(() => ontos.find((o) => o.id === activeId) ?? null, [ontos, activeId])
+  // 切换选中本体时回落默认页签规则（REQ-230②）
+  useEffect(() => {
+    setTabKey(null)
+  }, [activeId])
   const validation = activeId ? validations[activeId] : undefined
 
   /** 被 N 套方案引用（只读徽标，增强正交可见性） */
@@ -283,6 +288,8 @@ export default function AssetsPage() {
 
           <Card className="work-card onto-stage-card" size="small">
             <Tabs
+              activeKey={tabKey ?? (boundIds.has(active.id) ? 'companion' : 'spec')} /* REQ-230②：伴生型本体默认打开候选页签 */
+              onChange={(k) => setTabKey(k)}
               destroyOnHidden
               items={[
                 {

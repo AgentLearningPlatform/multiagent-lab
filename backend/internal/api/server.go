@@ -138,6 +138,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/companion/graph", s.companionGraph)
 	m.HandleFunc("POST /api/companion/agents/{id}/bind", s.bindCompanionAgent)
 	m.HandleFunc("POST /api/companion/agents/{id}/reset", s.resetCompanionAgent)
+	m.HandleFunc("POST /api/companion/agents/{id}/reseed", s.reseedCompanionAgent)
 	m.HandleFunc("GET /api/companion/ontologies/{id}/candidates", s.ontologyCompanionCandidates)
 	m.HandleFunc("GET /api/companion/ontologies/{id}/agents", s.ontologyCompanionAgents)
 	m.HandleFunc("POST /api/companion/ontologies/{id}/reset", s.resetCompanionOntology)

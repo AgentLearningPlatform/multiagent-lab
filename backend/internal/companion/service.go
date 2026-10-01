@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ const companionSchema = `{
       "required": ["rel_name", "source", "target"]}},
     "events": {"type": "array", "items": {"type": "object", "properties": {
       "name": {"type": "string"}, "definition": {"type": "string"},
+      "time_scope": {"type": "string"},
       "confidence": {"type": "number"}, "source": {"type": "string"}}, "required": ["name"]}}
   },
   "required": ["concepts", "relations", "events"]
@@ -60,6 +62,7 @@ type extractOut struct {
 	Events []struct {
 		Name       string  `json:"name"`
 		Definition string  `json:"definition"`
+		TimeScope  string  `json:"time_scope"`
 		Confidence float64 `json:"confidence"`
 		Source     string  `json:"source"`
 	} `json:"events"`
@@ -73,7 +76,7 @@ func companionPrompt(corpus, hint, alignment string) string {
 	b.WriteString("要求：\n")
 	b.WriteString("1. concepts：领域实体/术语（如 Pod、滚动更新、淋巴结局限性切除），name 用唯一中文短语，definition 一句话，confidence 0~1。\n")
 	b.WriteString("2. relations：概念间有意义的关联，rel_name 用动名词（如「引发」「适用于」「依赖」），source/target 引用 concepts 中的 name，evidence 为原文依据短句。\n")
-	b.WriteString("3. events：带时间性的动作/变更/结论（如「2026-09 完成灰度切换」）。\n")
+	b.WriteString("3. events：带时间性的动作/变更/结论（如「2026-09 完成灰度切换」），time_scope 填事件时间范围（如「2026-09」，对话未明示则留空）。\n")
 	b.WriteString("4. 只抽取对话中明确陈述的事实，不要推测；没有可抽内容就返回三个空数组。\n")
 	if strings.TrimSpace(hint) != "" {
 		// REQ-187：领域聚焦提示（agent 级配置）——追加领域抽取标准
@@ -387,6 +390,7 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 
 		cands := toCandidates(convID, agentID, win.msgs, &out)
 		markAligned(cands, known) // REQ-194①：对齐标记落库
+		markBatchRank(cands)      // REQ-227②：批内分位（置信校准——治 LLM 自评虚高）
 		if err := s.Store.CreateCompanionCandidates(cands); err != nil {
 			return total, err
 		}
@@ -394,7 +398,7 @@ func (s *Service) ExtractNew(ctx context.Context, convID, agentID string) (int, 
 		// 与 REQ-194⑤语义矛盾检测；自动入图走与人工确认完全相同的链路，区别仅在来源标记 bot:autoConfirmed）
 		if agent.CompanionAutoThreshold > 0 {
 			for _, c := range cands {
-				if c.Confidence >= agent.CompanionAutoThreshold {
+				if c.Confidence >= agent.CompanionAutoThreshold && c.BatchRank >= 0.5 {
 					if _, err := s.ConfirmCandidate(ctx, c.ID); err != nil {
 						log.Printf("[companion] 自动入图失败（候选 %s，不影响其余候选）: %v", c.ID, err)
 						continue
@@ -459,7 +463,7 @@ func toCandidates(convID, agentID string, msgs []*store.Message, out *extractOut
 			continue
 		}
 		mid, excerpt := anchor(e.Source)
-		add(&store.CompanionCandidate{Kind: "event", Name: truncate(e.Name, 120), Definition: truncate(e.Definition, 500), Confidence: e.Confidence, SourceMessageID: mid, SourceExcerpt: excerpt})
+		add(&store.CompanionCandidate{Kind: "event", Name: truncate(e.Name, 120), Definition: truncate(e.Definition, 500), TimeScope: truncate(e.TimeScope, 40), Confidence: e.Confidence, SourceMessageID: mid, SourceExcerpt: excerpt})
 	}
 	return cands
 }
@@ -486,12 +490,28 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 		return nil, fmt.Errorf("种子 schema 预置失败: %w", err)
 	}
 	if c.Kind == "relation" {
-		// 确定性矛盾：同主体+同关系名+未失效旧边 → invalidAt 标记（失效化而非删除）
-		raw, err := s.graphQuery(ctx, ontID, FindActiveEdge(ontID, c.Name, c.RelName))
+		// REQ-227① 印证聚合：活跃旧边连同客体——object 相同=同一事实再确认，聚合计数不建新边；
+		// 不同=矛盾，走失效化+语义检测+新边既有路径
+		raw, err := s.graphQuery(ctx, ontID, FindActiveEdgeWithObject(ontID, c.Name, c.RelName))
 		if err != nil {
 			return nil, fmt.Errorf("矛盾检测查询失败: %w", err)
 		}
-		if edge := parseEdgeURI(raw); edge != "" {
+		edge, objURI, _ := parseEdgeWithObject(raw)
+		if edge != "" && objURI != "" && objURI == EntityURI(c.RelTarget) {
+			oldCount := s.readConfirmCount(ctx, ontID, edge)
+			if err := s.graphUpdate(ctx, ontID, AggregateConfirmCountWrite(ontID, edge, c.ID, oldCount, oldCount+1, now)); err != nil {
+				return nil, fmt.Errorf("印证聚合失败: %w", err)
+			}
+			log.Printf("[companion] 印证聚合：候选 %s（%s —%s→ %s）与活跃边同事实，confirmCount=%d", c.ID, c.Name, c.RelName, c.RelTarget, oldCount+1)
+			s.audit("companion_confirm_aggregate", c.ID, fmt.Sprintf("伴生印证聚合：%s —%s→ %s（第 %d 次确认）", c.Name, c.RelName, c.RelTarget, oldCount+1), map[string]any{"agent_id": c.AgentID, "ontology_id": ontID, "edge": edge})
+			s.invalidateLabelCache(ontID)
+			if base, berr := s.Plans.EnsureHostPlan(ctx, ontID); berr == nil {
+				s.snapshotRefresh(ctx, ontID, base)
+			}
+			return s.Store.DecideCompanionCandidate(candID, "confirmed")
+		}
+		if edge != "" {
+			// 确定性矛盾：同主体+同关系名+不同客体 → invalidAt 标记（失效化而非删除）
 			if err := s.graphUpdate(ctx, ontID, InvalidateEdge(ontID, edge, now)); err != nil {
 				return nil, fmt.Errorf("旧边失效化失败: %w", err)
 			}
@@ -502,16 +522,144 @@ func (s *Service) ConfirmCandidate(ctx context.Context, candID string) (*store.C
 			return nil, fmt.Errorf("关系入图失败: %w", err)
 		}
 	} else {
-		if err := s.graphUpdate(ctx, ontID, InsertNodeTriples(ontID, c.ID, c.Kind, c.Name, c.Definition, c.Confidence, c.SourceMessageID, now)); err != nil {
+		// REQ-229① 同名异义提醒：图内已有同名实体且定义相似度低 → 候选注记待人工（不阻断）
+		s.disambiguationCheck(ctx, ontID, c)
+		if err := s.graphUpdate(ctx, ontID, InsertNodeTriples(ontID, c.ID, c.Kind, c.Name, c.Definition, c.TimeScope, c.Confidence, c.SourceMessageID, now)); err != nil {
 			return nil, fmt.Errorf("入图失败: %w", err)
 		}
 	}
 	s.invalidateLabelCache(ontID) // REQ-194②：图写入失效标签向量缓存（REQ-216 起按本体图）
+	s.audit("companion_confirm", candID, fmt.Sprintf("伴生确认入图：%s", companionCandTitle(c)), map[string]any{"agent_id": c.AgentID, "ontology_id": ontID, "kind": c.Kind})
 	// REQ-216 增量①：快照同步刷新（持久性保障——引擎数据目录被方案重建时据此无损回灌）
 	if base, berr := s.Plans.EnsureHostPlan(ctx, ontID); berr == nil {
 		s.snapshotRefresh(ctx, ontID, base)
 	}
 	return s.Store.DecideCompanionCandidate(candID, "confirmed")
+}
+
+// companionCandTitle 候选可读标题（审计行）。
+func companionCandTitle(c *store.CompanionCandidate) string {
+	if c.Kind == "relation" {
+		return fmt.Sprintf("%s —%s→ %s", c.Name, c.RelName, c.RelTarget)
+	}
+	return c.Name
+}
+
+// parseEdgeWithObject FindActiveEdgeWithObject 结果 → 边 URI + 客体 URI（客体标签同 URI，省略）。
+func parseEdgeWithObject(raw []byte) (edge, objURI, objLabel string) {
+	var res struct {
+		Results struct {
+			Bindings []map[string]struct {
+				Value string `json:"value"`
+			} `json:"bindings"`
+		} `json:"results"`
+	}
+	if json.Unmarshal(raw, &res) != nil || len(res.Results.Bindings) == 0 {
+		return "", "", ""
+	}
+	b := res.Results.Bindings[0]
+	return b["edge"].Value, b["o"].Value, b["o"].Value
+}
+
+// readConfirmCount 读边印证计数（无计数=0；查询失败按 0——覆盖写语义下保守递增）。
+func (s *Service) readConfirmCount(ctx context.Context, ontologyID, edgeURI string) int {
+	raw, err := s.graphQuery(ctx, ontologyID, AggregateConfirmCountRead(edgeURI))
+	if err != nil {
+		return 0
+	}
+	var res struct {
+		Results struct {
+			Bindings []map[string]struct {
+				Value string `json:"value"`
+			} `json:"bindings"`
+		} `json:"results"`
+	}
+	if json.Unmarshal(raw, &res) != nil || len(res.Results.Bindings) == 0 {
+		return 0
+	}
+	n := 0
+	_, _ = fmt.Sscanf(res.Results.Bindings[0]["c"].Value, "%d", &n)
+	return n
+}
+
+// disambiguationCheck REQ-229① 同名异义提醒：图内已有同名实体的定义与新候选定义
+// bigram Jaccard < 阈值（双方非空）→ 候选 note「同名异义疑似待人工」（橙徽标沿 REQ-194⑤
+// 形态；规则臂零依赖——KB-7 向量臂待 embedding 配置后升级）。失败仅日志不阻断入图。
+const disambigJaccardMin = 0.2
+
+func (s *Service) disambiguationCheck(ctx context.Context, ontologyID string, c *store.CompanionCandidate) {
+	if strings.TrimSpace(c.Definition) == "" {
+		return
+	}
+	raw, err := s.graphQuery(ctx, ontologyID, SelectEntityInfo(ontologyID, c.Name))
+	if err != nil {
+		return
+	}
+	var res struct {
+		Results struct {
+			Bindings []map[string]struct {
+				Value string `json:"value"`
+			} `json:"bindings"`
+		} `json:"results"`
+	}
+	if json.Unmarshal(raw, &res) != nil || len(res.Results.Bindings) == 0 {
+		return
+	}
+	existing := res.Results.Bindings[0]["def"].Value
+	if strings.TrimSpace(existing) == "" {
+		return
+	}
+	if jaccardBigram(existing, c.Definition) >= disambigJaccardMin {
+		return
+	}
+	note := fmt.Sprintf("同名异义疑似待人工：图内已有同名实体（定义：%s），与新候选定义相似度低", truncate(existing, 80))
+	if err := s.Store.SetCompanionCandidateNote(c.ID, note); err != nil {
+		log.Printf("[companion] 异义注记回写失败（候选 %s）: %v", c.ID, err)
+		return
+	}
+	log.Printf("[companion] 同名异义提醒：候选 %s 与图内同名实体定义相似度低，已注记待人工", c.ID)
+}
+
+// jaccardBigram 字符 bigram Jaccard 相似度（轻量规则臂；纯函数便于单测）。
+func jaccardBigram(a, b string) float64 {
+	set := func(t string) map[string]bool {
+		r := []rune(strings.ToLower(strings.TrimSpace(t)))
+		m := map[string]bool{}
+		for i := 0; i+1 < len(r); i++ {
+			m[string(r[i:i+2])] = true
+		}
+		return m
+	}
+	sa, sb := set(a), set(b)
+	if len(sa) == 0 || len(sb) == 0 {
+		return 1 // 不可比时按「相似」处理（不触发提醒）
+	}
+	inter := 0
+	for k := range sa {
+		if sb[k] {
+			inter++
+		}
+	}
+	union := len(sa) + len(sb) - inter
+	if union == 0 {
+		return 1
+	}
+	return float64(inter) / float64(union)
+}
+
+// audit REQ-227③：伴生治理动作落 onto_decision（复用第五栏审计表零新表；失败仅日志
+// 不阻断主链路——审计是增强不是门禁）。
+func (s *Service) audit(subject, subjectID, title string, meta map[string]any) {
+	if s == nil || s.Store == nil {
+		return
+	}
+	metaJSON := ""
+	if b, err := json.Marshal(meta); err == nil {
+		metaJSON = string(b)
+	}
+	if _, err := s.Store.InsertDecision(&store.OntoDecision{SubjectKind: "manual", SubjectID: subjectID, Title: title, MetaJSON: metaJSON}); err != nil {
+		log.Printf("[companion] 审计留痕失败（%s %s）: %v", subject, subjectID, err)
+	}
 }
 
 // semanticConflictCheck REQ-194⑤语义矛盾检测：同主体活跃断言与新断言拼 prompt 交 LLM 二分类。
@@ -583,9 +731,32 @@ func parseSubjectEdges(raw []byte) []edgeAssertion {
 	return out
 }
 
-// RejectCandidate 候选拒绝（不触达伴生图）。
+// markBatchRank REQ-227② 批内分位：批次内按 confidence 升序归一化位次（0~1；单条=1.0）。
+// 分位是**批内相对分**——绝对自评虚高时仍能区分批内优劣势；存量 0=未校准（门控不回溯）。
+func markBatchRank(cands []*store.CompanionCandidate) {
+	n := len(cands)
+	if n == 0 {
+		return
+	}
+	if n == 1 {
+		cands[0].BatchRank = 1
+		return
+	}
+	order := make([]*store.CompanionCandidate, n)
+	copy(order, cands)
+	sort.Slice(order, func(i, j int) bool { return order[i].Confidence < order[j].Confidence })
+	for i, c := range order {
+		c.BatchRank = float64(i) / float64(n-1)
+	}
+}
+
+// RejectCandidate 候选拒绝（不触达伴生图；REQ-227③ 审计留痕）。
 func (s *Service) RejectCandidate(ctx context.Context, candID string) (*store.CompanionCandidate, error) {
-	return s.Store.DecideCompanionCandidate(candID, "rejected")
+	c, err := s.Store.DecideCompanionCandidate(candID, "rejected")
+	if err == nil && c != nil {
+		s.audit("companion_reject", candID, fmt.Sprintf("伴生拒绝：%s", companionCandTitle(c)), map[string]any{"agent_id": c.AgentID})
+	}
+	return c, err
 }
 
 // GraphNode / GraphEdge 成长可视化数据（REQ-154；3d-force-graph 前端渲染）。
@@ -594,6 +765,7 @@ type GraphNode struct {
 	Kind       string  `json:"kind"` // Concept | Event
 	Definition string  `json:"definition,omitempty"`
 	Confidence float64 `json:"confidence,omitempty"`
+	TimeScope  string  `json:"time_scope,omitempty"` // REQ-229②：事件时点提示
 	CreatedAt  string  `json:"created_at,omitempty"`
 }
 
@@ -602,6 +774,8 @@ type GraphEdge struct {
 	Target    string `json:"target"`
 	Rel       string `json:"rel"`
 	CreatedAt string `json:"created_at,omitempty"`
+	// REQ-227①：印证计数（同事实被确认的次数；1=仅一次。成长图边宽随此值）
+	ConfirmCount int `json:"confirm_count,omitempty"`
 }
 
 // Graph 绑定本体伴生子图全量读取（REQ-154 成长可视化数据源；REQ-216 图=本体伴生子图：
@@ -641,7 +815,7 @@ func (s *Service) Graph(ctx context.Context, agentID string) (map[string]any, er
 				conf := 0.0
 				fmt.Sscanf(b["conf"].Value, "%f", &conf)
 				kind := strings.TrimPrefix(b["kind"].Value, BotNS)
-				nodes = append(nodes, GraphNode{Label: b["label"].Value, Kind: kind, Definition: b["def"].Value, Confidence: conf, CreatedAt: b["at"].Value})
+				nodes = append(nodes, GraphNode{Label: b["label"].Value, Kind: kind, Definition: b["def"].Value, Confidence: conf, TimeScope: b["tscope"].Value, CreatedAt: b["at"].Value})
 			}
 		}
 	}
@@ -657,7 +831,11 @@ func (s *Service) Graph(ctx context.Context, agentID string) (map[string]any, er
 		}
 		if json.Unmarshal(raw, &res) == nil {
 			for _, b := range res.Results.Bindings {
-				edges = append(edges, GraphEdge{Source: b["src"].Value, Target: b["dst"].Value, Rel: b["rel"].Value, CreatedAt: b["at"].Value})
+				cnt := 1
+				if v, ok := b["count"]; ok && v.Value != "" {
+					fmt.Sscanf(v.Value, "%d", &cnt)
+				}
+				edges = append(edges, GraphEdge{Source: b["src"].Value, Target: b["dst"].Value, Rel: b["rel"].Value, CreatedAt: b["at"].Value, ConfirmCount: cnt})
 			}
 		}
 	}
@@ -672,6 +850,7 @@ func (s *Service) ResetAgent(_ context.Context, agentID string) error {
 	if err := s.Store.DeleteAgentCompanionData(agentID); err != nil {
 		return err
 	}
+	s.audit("companion_unbind", agentID, "伴生解绑：清候选游标并断开绑定（图数据留本体）", nil)
 	return s.Store.SetAgentCompanionBinding(agentID, "")
 }
 
@@ -683,7 +862,19 @@ func (s *Service) ResetOntology(ctx context.Context, ontologyID string) error {
 	}
 	snapshotDelete(ontologyID)
 	s.invalidateLabelCache(ontologyID)
+	s.audit("companion_reset_ontology", ontologyID, "伴生清空：DROP 本体伴生子图并清全部绑定者候选游标", nil)
 	return s.Store.DeleteOntologyCompanionData(ontologyID)
+}
+
+// ReseedAgent REQ-229③ 全量重沉淀数据面编排：清该 agent pending 候选与游标（图数据与
+// 绑定不动），下次对话收尾因游标为空自然全量重抽；同事实重入图经印证聚合（REQ-227①）
+// 计数递增不炸图。
+func (s *Service) ReseedAgent(_ context.Context, agentID string) error {
+	if err := s.Store.ResetAgentExtraction(agentID); err != nil {
+		return err
+	}
+	s.audit("companion_reseed", agentID, "伴生全量重沉淀：清 pending 候选与游标（下次对话收尾重抽）", nil)
+	return nil
 }
 
 // StatusByAgent agent 视角伴生管线状态（REQ-216：宿主方案=伴生引擎；图=本体伴生子图）。
@@ -731,4 +922,73 @@ func (s *Service) StatusByAgent(ctx context.Context, agentID string) (map[string
 // （migrate216.go——绑定回填先行，conv 图直接落到本体伴生子图），本方法仅为旧调用名兜底。
 func (s *Service) MigrateConvGraphsToAgent(ctx context.Context) error {
 	return s.migrateConvGraphs(ctx)
+}
+
+
+// RecordHits REQ-228① 召回价值闭环：run 结束后比对——本次 run 的 companion retrieval
+// 命中实体在 assistant 回答中词面出现（最小消费信号，非深度归因）→ 落 run_event
+// kind=companion.hit（labels/match 随 data）。api 层 Chat.Run 返回后调用（此时消息已落库）。
+func (s *Service) RecordHits(convID, runID string) {
+	if s == nil || s.Store == nil || runID == "" {
+		return
+	}
+	events, _, err := s.Store.ListEventsQ(convID, store.EventQuery{RunID: runID, Type: "retrieval"})
+	if err != nil || len(events) == 0 {
+		return
+	}
+	labels := map[string]string{} // label → match
+	for _, ev := range events {
+		var data struct {
+			Source   string `json:"source"`
+			Entities []struct {
+				Label string `json:"label"`
+				Match string `json:"match"`
+			} `json:"entities"`
+		}
+		if json.Unmarshal([]byte(ev.Data), &data) != nil || data.Source != "companion" {
+			continue
+		}
+		for _, e := range data.Entities {
+			if e.Label != "" {
+				labels[e.Label] = e.Match
+			}
+		}
+	}
+	if len(labels) == 0 {
+		return
+	}
+	msgs, err := s.Store.ListMessages(convID)
+	if err != nil {
+		return
+	}
+	answer := ""
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "assistant" && strings.TrimSpace(msgs[i].Content) != "" {
+			answer = msgs[i].Content
+			break
+		}
+	}
+	if answer == "" {
+		return
+	}
+	// CJK 场景词面常有空格差异（「Pod 驱逐」vs「Pod驱逐」）——比对前做空白归一化
+	compact := func(t string) string {
+		return strings.Join(strings.Fields(t), "")
+	}
+	answerCompact := compact(answer)
+	hits := make([]map[string]any, 0, len(labels))
+	for label, match := range labels {
+		if strings.Contains(answerCompact, compact(label)) {
+			hits = append(hits, map[string]any{"label": label, "match": match})
+		}
+	}
+	if len(hits) == 0 {
+		return
+	}
+	data, _ := json.Marshal(map[string]any{"hits": hits})
+	if _, err := s.Store.InsertEvent(&store.RunEvent{ConversationID: convID, RunID: runID, Type: "companion.hit", Data: string(data)}); err != nil {
+		log.Printf("[companion] hit 事件落库失败: %v", err)
+		return
+	}
+	log.Printf("[companion] 召回消费追踪：%d 个命中实体在回答中出现（run %s）", len(hits), runID)
 }

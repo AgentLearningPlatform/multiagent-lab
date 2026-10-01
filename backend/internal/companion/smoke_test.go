@@ -94,7 +94,7 @@ func TestGraphEngineSmoke(t *testing.T) {
 	}
 
 	// ② 概念入图
-	if err := svc.graphUpdate(ctx, "ont_smoke", InsertNodeTriples("ont_smoke", "k1", "concept", "Pod 扩容", "副本水平伸缩", 0.86, "m1", testTime())); err != nil {
+	if err := svc.graphUpdate(ctx, "ont_smoke", InsertNodeTriples("ont_smoke", "k1", "concept", "Pod 扩容", "副本水平伸缩", "", 0.86, "m1", testTime())); err != nil {
 		t.Fatalf("概念入图失败: %v", err)
 	}
 
@@ -203,7 +203,7 @@ func TestRetrievalVectorFallbackSmoke(t *testing.T) {
 	if err := svc.graphUpdate(ctx, "ont_smoke", SeedSchema()); err != nil {
 		t.Fatalf("种子 schema 失败: %v", err)
 	}
-	if err := svc.graphUpdate(ctx, "ont_smoke", InsertNodeTriples("ont_smoke", "k1", "concept", "阿司匹林", "非甾体抗炎药", 0.9, "m1", testTime())); err != nil {
+	if err := svc.graphUpdate(ctx, "ont_smoke", InsertNodeTriples("ont_smoke", "k1", "concept", "阿司匹林", "非甾体抗炎药", "", 0.9, "m1", testTime())); err != nil {
 		t.Fatalf("概念入图失败: %v", err)
 	}
 	if err := svc.graphUpdate(ctx, "ont_smoke", InsertRelationTriples("ont_smoke", "k2", "抑制", "阿司匹林", "前列腺素", "", 0.85, "m1", testTime())); err != nil {

@@ -23,8 +23,12 @@ export interface CompanionCandidate {
   decided_at?: string
   /** REQ-194①：抽取时实体对齐标记（aligned=沿用已有实体 / new=新造；空=存量未标） */
   aligned?: '' | 'aligned' | 'new'
-  /** REQ-194⑤：审计注记（语义矛盾「疑似矛盾待人工」等） */
+  /** REQ-194⑤：审计注记（语义矛盾「疑似矛盾待人工」/同名异义疑似等） */
   note?: string
+  /** REQ-227②：批内分位（0~1；0=存量未校准） */
+  batch_rank?: number
+  /** REQ-229②：事件时点（time_scope） */
+  time_scope?: string
 }
 
 /** REQ-194⑥：按实体归组（group_by=entity；代表候选=组内置信最高） */
@@ -62,6 +66,8 @@ export interface CompanionGraphNode {
   kind: 'Concept' | 'Event'
   definition?: string
   confidence?: number
+  /** REQ-229②：事件时点（time_scope） */
+  time_scope?: string
   created_at?: string
 }
 export interface CompanionGraphEdge {
@@ -69,6 +75,8 @@ export interface CompanionGraphEdge {
   target: string
   rel: string
   created_at?: string
+  /** REQ-227①：印证计数（同事实被确认次数；成长图边宽随此值） */
+  confirm_count?: number
 }
 export interface CompanionGraph {
   agent_id: string
@@ -143,6 +151,9 @@ export const companionApi = {
       `/api/companion/agents/${agentId}/bind`,
       { method: 'POST', body: JSON.stringify(payload) },
     ),
+  // REQ-229③：全量重沉淀（清 pending 候选与游标，下次对话收尾全量重抽；图数据与绑定不动）
+  reseedAgent: (agentId: string) =>
+    req<{ reseed: boolean }>(`/api/companion/agents/${agentId}/reseed`, { method: 'POST', body: '{}' }),
   // REQ-216：本体级伴生图清空（DROP 子图+清全部绑定 agent 候选游标；本体资产不受影响）
   resetOntology: (ontologyId: string) =>
     req<{ reset: boolean }>(`/api/companion/ontologies/${encodeURIComponent(ontologyId)}/reset`, { method: 'POST', body: '{}' }),
