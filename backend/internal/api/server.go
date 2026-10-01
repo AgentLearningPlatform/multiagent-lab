@@ -133,6 +133,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/agents/{id}", s.getAgent)
 	m.HandleFunc("PUT /api/agents/{id}", s.updateAgent)
 	m.HandleFunc("DELETE /api/agents/{id}", s.deleteAgent)
+	// REQ-226/M54：配置治理（版本/回滚）
+	m.HandleFunc("GET /api/agents/{id}/config-versions", s.listAgentConfigVersions)
+	m.HandleFunc("GET /api/agents/{id}/config-versions/{version}/diff", s.agentConfigDiff)
+	m.HandleFunc("POST /api/agents/{id}/config-versions/{version}/rollback", s.rollbackAgentConfig)
 
 	// REQ-170/M28：伴生本体（候选确认流 API 先行；绑定经 REQ-216 companion_ontology_id）
 	m.HandleFunc("GET /api/companion/candidates", s.listCompanionCandidates)

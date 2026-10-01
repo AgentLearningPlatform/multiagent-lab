@@ -46,7 +46,7 @@ func TestConnectorCRUDAndNameConflict(t *testing.T) {
 func TestConnectorCredentialsPreservedOnUpdate(t *testing.T) {
 	st := newConnectorTestStore(t)
 	c, err := st.CreateConnector(&Connector{Kind: ConnectorKindSSH, Name: "ops-ssh",
-		Config: map[string]any{"host": "10.0.0.5"},
+		Config:               map[string]any{"host": "10.0.0.5"},
 		CredentialsEncrypted: []byte("CIPHERTEXT")})
 	if err != nil {
 		t.Fatal(err)

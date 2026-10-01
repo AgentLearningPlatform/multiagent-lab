@@ -858,3 +858,13 @@ export interface PipelineDetail {
   profile: PipelineProfile
   checklist: PipelineChecklistItem[]
 }
+
+/** REQ-226/M54：Agent 配置版本快照（保存即版本；一键回滚数据面） */
+export interface AgentConfigVersion {
+  id: string
+  agent_id: string
+  version: number
+  config_json: string
+  note: string
+  created_at: string
+}

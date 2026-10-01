@@ -1,4 +1,5 @@
 import type {
+  AgentConfigVersion,
   Agent,
   AiDraftResult,
   McpServeInfo,
@@ -227,6 +228,10 @@ export const api = {
   agentToolPreview: (id: string) =>
     req<{ tools: { name: string; source: string }[]; masked?: { name: string; source: string }[]; notes?: string[] }>(`/api/agents/${id}/tool-preview`),
   listHooks: () => req<{ hooks: { name: string; active: boolean; description: string }[] }>('/api/hooks'),
+  // REQ-226/M54：配置治理（版本列表/一键回滚）
+  listConfigVersions: (id: string) => req<AgentConfigVersion[]>(`/api/agents/${id}/config-versions`),
+  rollbackConfig: (id: string, version: number) =>
+    req<Agent>(`/api/agents/${id}/config-versions/${version}/rollback`, { method: 'POST', body: '{}' }),
   createConnection: (c: any) => req<ModelConnection>('/api/model-connections', { method: 'POST', body: JSON.stringify(c) }),
   updateConnection: (id: string, c: any) => req<ModelConnection>(`/api/model-connections/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
   deleteConnection: (id: string) => req<{ deleted: string }>(`/api/model-connections/${id}`, { method: 'DELETE' }),

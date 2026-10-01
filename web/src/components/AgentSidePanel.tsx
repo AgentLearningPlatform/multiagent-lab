@@ -21,7 +21,7 @@ import AIOptimizeButton from './AIOptimizeButton'
 import AgentCompanionManage from './AgentCompanionManage'
 import AssistantProposalBanner from './AssistantProposalBanner'
 import type { SandboxStatus } from '../api/client'
-import type { Agent, Connector, InferenceBackendStatus, McpServeInfo, ModelConnection, Ontology, Skill, ToolInfo } from '../api/types'
+import type { Agent, AgentConfigVersion, Connector, InferenceBackendStatus, McpServeInfo, ModelConnection, Ontology, Skill, ToolInfo } from '../api/types'
 import { companionApi } from '../api/companion'
 import { useUI } from '../store/ui'
 import { inferenceBackendOptions } from './inferenceOptions'
@@ -1120,6 +1120,9 @@ function AgentConfigForm({
         />
       </Form>
 
+      {/* REQ-226/M54：配置版本与一键回滚（保存即版本；回滚动作自身先快照可再滚回） */}
+      {!isBuiltin && <ConfigVersionCard agentId={agent.id} onRolled={onChanged} />}
+
       <div className="proj-view-actions">
         <Button type="primary" size="small" loading={saving} onClick={save}>
           保存
@@ -1537,5 +1540,132 @@ function ToolPreviewCard({ agentId, approval, notes: notesProp }: { agentId: str
         </Typography.Text>
       )}
     </div>
+  )
+}
+
+
+// ---------------------------------------------------------------------------
+// REQ-226/M54：配置版本与一键回滚——「保存即版本」（PUT 成功后端自动快照「更新前」
+// 整包配置）；版本列表新→旧 + 选中版本与当前的 diff + 一键回滚（回滚动作自身先快照
+// 「回滚前」状态，可再滚回）；保留最近 50 版（后端惰性裁剪）。治 P-2「改坏配置无法还原」。
+// ---------------------------------------------------------------------------
+function ConfigVersionCard({ agentId, onRolled }: { agentId: string; onRolled?: () => void }) {
+  const { showToast, bumpData } = useUI()
+  const [versions, setVersions] = useState<AgentConfigVersion[]>([])
+  const [loading, setLoading] = useState(false)
+  const [selected, setSelected] = useState<number | null>(null)
+  const [diffs, setDiffs] = useState<{ field: string; old: string; new: string }[] | null>(null)
+  const [rolling, setRolling] = useState(false)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    api
+      .listConfigVersions(agentId)
+      .then((ls) => {
+        setVersions(ls ?? [])
+        setSelected(null)
+        setDiffs(null)
+      })
+      .catch(() => setVersions([]))
+      .finally(() => setLoading(false))
+  }, [agentId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const showDiff = async (version: number) => {
+    setSelected(version)
+    setDiffs(null)
+    try {
+      const res = await fetch(`/api/agents/${agentId}/config-versions/${version}/diff`)
+      const body = await res.json()
+      setDiffs(body.diffs ?? [])
+    } catch {
+      setDiffs([])
+    }
+  }
+
+  const rollback = async (version: number) => {
+    setRolling(true)
+    try {
+      await api.rollbackConfig(agentId, version)
+      showToast(`已回滚到版本 v${version}（回滚前状态已自动快照，可再滚回）`)
+      bumpData()
+      onRolled?.()
+      load()
+    } catch (e: any) {
+      showToast(e.message, 'err')
+    } finally {
+      setRolling(false)
+    }
+  }
+
+  return (
+    <Card
+      size="small"
+      style={{ marginTop: 10 }}
+      title={
+        <span style={{ fontSize: 12 }}>
+          配置版本（保存即版本，REQ-226）
+          <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>保留最近 50 版</Typography.Text>
+        </span>
+      }
+      extra={
+        <Button size="small" icon={<ReloadOutlined />} onClick={load} aria-label="刷新配置版本" />
+      }
+    >
+      {loading ? (
+        <Spin size="small" />
+      ) : versions.length === 0 ? (
+        <Typography.Text type="secondary" style={{ fontSize: 11 }}>暂无历史版本——下次保存配置后自动生成（保存前状态入版本）</Typography.Text>
+      ) : (
+        <>
+          <Select
+            size="small"
+            style={{ width: '100%' }}
+            placeholder="选择历史版本查看与当前配置的差异"
+            value={selected}
+            onChange={(v) => showDiff(v as number)}
+            options={versions.map((v) => ({
+              value: v.version,
+              label: `v${v.version} · ${v.created_at?.slice(5, 16).replace('T', ' ')} · ${v.note}`,
+            }))}
+          />
+          {selected !== null && (
+            <div style={{ marginTop: 8 }}>
+              {diffs === null ? (
+                <Spin size="small" />
+              ) : diffs.length === 0 ? (
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>该版本与当前配置无差异</Typography.Text>
+              ) : (
+                <div style={{ maxHeight: 160, overflowY: 'auto', fontSize: 11 }}>
+                  {diffs.map((d) => (
+                    <div key={d.field} style={{ padding: '2px 0', borderBottom: '1px dashed var(--ant-color-border, #eee)' }}>
+                      <Tag style={{ margin: 0 }}>{d.field}</Tag>
+                      <Typography.Text type="secondary" delete style={{ fontSize: 11 }}>{(d.old || '∅').slice(0, 60)}</Typography.Text>
+                      {' → '}
+                      <Typography.Text style={{ fontSize: 11 }}>{(d.new || '∅').slice(0, 60)}</Typography.Text>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Popconfirm
+                title={`回滚到 v${selected}？`}
+                description="整包写回该版本配置；回滚前状态会自动快照（可再滚回）。"
+                okText="回滚"
+                okButtonProps={{ danger: true, loading: rolling }}
+                cancelText="取消"
+                onConfirm={() => rollback(selected)}
+              >
+                <Button size="small" danger style={{ marginTop: 8 }} disabled={diffs !== null && diffs.length === 0}>
+                  一键回滚到 v{selected}
+                </Button>
+              </Popconfirm>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
   )
 }

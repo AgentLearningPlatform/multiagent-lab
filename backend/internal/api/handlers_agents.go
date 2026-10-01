@@ -1,12 +1,14 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
-	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
-
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/inference"
+	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/runtime"
 	"github.com/xiaoyao/eino-multiagent-lab/backend/internal/store"
 )
 
@@ -150,7 +152,9 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	var prevSnapshot *store.Agent
 	if prev, perr := s.Store.GetAgent(a.ID); perr == nil && prev != nil {
+		prevSnapshot = prev
 		if s.normalizeMcpServe(&a, *prev) {
 			defer s.mcpSync()
 		}
@@ -162,6 +166,14 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	// REQ-226/M54：保存即快照——「更新前」配置整包落版本表（一键回滚数据面；失败仅日志不阻断保存）
+	if prevSnapshot != nil {
+		if prevJSON, merr := json.Marshal(prevSnapshot); merr == nil {
+			if _, verr := s.Store.InsertAgentConfigVersion(a.ID, string(prevJSON), "保存前自动快照"); verr != nil {
+				log.Printf("[agents] 配置快照失败（%s）: %v", a.ID, verr)
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, updated)
 }
@@ -344,4 +356,83 @@ func (s *Server) sandboxStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"stopped": r.PathValue("id")})
+}
+
+// listAgentConfigVersions GET /api/agents/{id}/config-versions（REQ-226/M54：版本列表）。
+func (s *Server) listAgentConfigVersions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Store.ListAgentConfigVersions(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if list == nil {
+		list = []*store.AgentConfigVersion{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// agentConfigDiff GET /api/agents/{id}/config-versions/{version}/diff——该版与当前配置的差异。
+func (s *Server) agentConfigDiff(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	var version int
+	if _, err := fmt.Sscanf(r.PathValue("version"), "%d", &version); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version 须为数字"})
+		return
+	}
+	v, err := s.Store.GetAgentConfigVersion(agentID, version)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	cur, err := s.Store.GetAgent(agentID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	curJSON, _ := json.Marshal(cur)
+	diffs, err := store.AgentConfigDiff(v.ConfigJSON, string(curJSON))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": version, "diffs": diffs})
+}
+
+// rollbackAgentConfig POST /api/agents/{id}/config-versions/{version}/rollback——
+// 读历史版本整包写回当前配置（解出 store.Agent 走 UpdateAgent 全量更新；
+// 回滚动作本身先快照「回滚前」状态，可再滚回；24 小时内无效操作不保护——教学尺度）。
+func (s *Server) rollbackAgentConfig(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	var version int
+	if _, err := fmt.Sscanf(r.PathValue("version"), "%d", &version); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version 须为数字"})
+		return
+	}
+	v, err := s.Store.GetAgentConfigVersion(agentID, version)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	cur, err := s.Store.GetAgent(agentID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	// 回滚前先快照当前（可再滚回）
+	if curJSON, merr := json.Marshal(cur); merr == nil {
+		_, _ = s.Store.InsertAgentConfigVersion(agentID, string(curJSON), "回滚前自动快照")
+	}
+	var target store.Agent
+	if err := json.Unmarshal([]byte(v.ConfigJSON), &target); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "版本快照解析失败: " + err.Error()})
+		return
+	}
+	target.ID = agentID
+	updated, err := s.Store.UpdateAgent(&target)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	s.mcpSync()
+	writeJSON(w, http.StatusOK, updated)
 }
