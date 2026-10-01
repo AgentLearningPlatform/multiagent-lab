@@ -2,7 +2,8 @@
 module: 智能体
 topic: 外部 MCP 客户端直连验证包（REQ-152）
 desc: /mcp 端点配置与 Claude/Cursor 直连实测记录（原 docs/27，编号保留）
-synced: 2026-09-28
+synced: 2026-10-01
+status: 历史档（REQ-131/M18 对外服务化配套实测记录；现状见 docs/02 §6.13）
 ---
 
 # 27_外部MCP客户端直连验证包

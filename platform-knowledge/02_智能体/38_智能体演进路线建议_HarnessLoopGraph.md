@@ -4,7 +4,8 @@ topic: multiagent-lab 智能体演进路线建议——基于 Harness / Loop / G
 desc: 五层现状体检打分（Context 0.5 / Harness 1.5 / Loop 0.5 / Graph 0.5，源码行号证据）+ 按依赖排序的四阶段路线 A 上下文补零 → B Harness 执行面 → C Loop 最小闭环 → D Graph 兑现（**已拍板采纳（2026-09-29），REQ-201~206/M37~M41 落地载体——撞号顺延，见 18 号 v1.85**）
 req: [REQ-201, REQ-202, REQ-203, REQ-204, REQ-205, REQ-223, REQ-224, REQ-225, REQ-226]
 docs: ["docs/01_智能体_需求文档_PRD.md §3.9", "docs/02_智能体_技术方案设计.md §6.2/§6.4/§6.16/§12 M37~M41"]
-synced: 2026-09-30
+synced: 2026-10-01
+status: 历史路线档（A/B/C 已交付，域现状承接于 53/54/55 号；D 阶段承接于 56 号——本档不再更新，仅理论参照）
 ---
 
 # 智能体演进路线建议：Harness / Loop / Graph 三层怎么补
