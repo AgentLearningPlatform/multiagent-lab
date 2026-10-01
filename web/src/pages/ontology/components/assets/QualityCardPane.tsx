@@ -107,7 +107,7 @@ export default function QualityCardPane({ ontologyId }: { ontologyId: string }) 
         </div>
       </Card>
 
-      {err && <Alert type="error" showIcon message="质量检查失败" description={err} onClose={() => setErr(null)} />}
+      {err && <Alert type="error" showIcon title="质量检查失败" description={err} onClose={() => setErr(null)} />}
 
       {!report ? (
         <div className="work-empty" style={{ minHeight: 200 }}>

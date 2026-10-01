@@ -39,6 +39,7 @@ import type { EngineStatus } from '../../api/client'
 import type { Conversation, Ontology, RuntimeProfile } from '../../api/types'
 import { useUI } from '../../store/ui'
 import { StatusBadge } from './shared'
+import { DRAWER_SIZES, drawerSizeProps } from '../../lib/layout'
 import SparqlWorkbench from './components/SparqlWorkbench'
 import LifecyclePane from './components/LifecyclePane'
 import TraceTable from './components/TraceTable'
@@ -314,7 +315,7 @@ function EngineProfilesPage({
         <Alert
           type="warning"
           showIcon
-          message="运行平面暂不可达"
+          title="运行平面暂不可达"
           description="RUNTIME_MGR_URL（:8090）未就绪，无法读取 / 管理运行方案。"
           action={
             <Button size="small" icon={<ReloadOutlined />} onClick={reload} aria-label="重试加载方案">
@@ -327,7 +328,7 @@ function EngineProfilesPage({
         <Alert
           type="error"
           showIcon
-          message={`${ENGINES.find((e) => e.key === engine)?.label} 引擎未安装，方案无法启动（REQ-146 预检）`}
+          title={`${ENGINES.find((e) => e.key === engine)?.label} 引擎未安装，方案无法启动（REQ-146 预检）`}
           description={
             <div>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 12 }}>
@@ -358,7 +359,7 @@ function EngineProfilesPage({
         <Alert
           type="error"
           showIcon
-          message="引擎可用性预检（last_error 映射）"
+          title="引擎可用性预检（last_error 映射）"
           description={friendlyEngineError(mine.find((p) => p.status === 'error')?.last_error) ?? '存在错误状态的方案，悬停状态徽标查看详情。'}
         />
       )}
@@ -596,7 +597,7 @@ function ProfileEdit({
           <Alert
             type="info"
             showIcon
-            message={`引擎 ${profile.engine ?? '—'} 与端口 ${profile.port ? profile.port : '自动分配'} 不可修改（引擎换型=删建方案；端口影响 facade 挂载稳定性）。保存后下次启动按新本体集合装载。`}
+            title={`引擎 ${profile.engine ?? '—'} 与端口 ${profile.port ? profile.port : '自动分配'} 不可修改（引擎换型=删建方案；端口影响 facade 挂载稳定性）。保存后下次启动按新本体集合装载。`}
           />
           <div className="onto-csv-field">
             <span className="cfg-label">方案名称</span>
@@ -720,7 +721,7 @@ function ProfileWizard({
       />
       {step === 0 && (
         <Space direction="vertical" style={{ width: '100%' }} size={8}>
-          <Alert type="info" showIcon message={`本分组内固定为 ${engine}（Oxigraph 轻量无推理；Fuseki 支持 RDFS/OWL 推理开关）。`} />
+          <Alert type="info" showIcon title={`本分组内固定为 ${engine}（Oxigraph 轻量无推理；Fuseki 支持 RDFS/OWL 推理开关）。`} />
           <div className="onto-wizard-engine">
             <Tag color="green" style={{ margin: 0 }}>{engine}</Tag>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -742,7 +743,7 @@ function ProfileWizard({
             onChange={setSelectedIds}
             options={ontos.map((o) => ({ value: o.id, label: `${o.name}（v${o.version ?? '—'} · 概念 ${o.n_concepts ?? 0}）` }))}
           />
-          {ontos.length === 0 && <Alert type="warning" showIcon style={{ marginTop: 8 }} message="构建平面暂无本体，请先到「本体构建」创建。" />}
+          {ontos.length === 0 && <Alert type="warning" showIcon style={{ marginTop: 8 }} title="构建平面暂无本体，请先到「本体构建」创建。" />}
         </>
       )}
       {step === 2 && (
@@ -764,7 +765,7 @@ function ProfileWizard({
           <Alert
             type="info"
             showIcon
-            message="配置变更后需重启方案生效；SPARQL 端点经平台反代访问（浏览器不直连引擎端口）。"
+            title="配置变更后需重启方案生效；SPARQL 端点经平台反代访问（浏览器不直连引擎端口）。"
           />
         </Space>
       )}
@@ -802,7 +803,7 @@ function ProfileDetail({
     <Drawer
       open={!!profile}
       onClose={onClose}
-      width={860}
+      {...drawerSizeProps('planDetail', DRAWER_SIZES.large)}
       title={
         profile ? (
           <Space size={8} wrap>
@@ -877,7 +878,7 @@ function OverviewPane({ profile }: { profile: RuntimeProfile }) {
         type="info"
         showIcon
         style={{ marginTop: 12 }}
-        message="显式重载语义（REQ-87）"
+        title="显式重载语义（REQ-87）"
         description="本体在仓库更新版本后，需在此方案执行「重载」才按新版本返回查询结果；页面不静默生效。"
       />
     </>
@@ -939,7 +940,7 @@ function FacadePane({ profile }: { profile: RuntimeProfile }) {
         type={running ? 'success' : 'info'}
         showIcon
         style={{ marginBottom: 12 }}
-        message={
+        title={
           running
             ? `统一 MCP facade 已随本方案暴露（端口 ${profile.port ?? '—'}）`
             : '方案未运行：启动后由 Runtime Manager 暴露 facade'
@@ -993,7 +994,7 @@ function QueryMountPane({ profile, profilesErr }: { profile: RuntimeProfile; pro
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="对话经「运行方案」挂载本体"
+        title="对话经「运行方案」挂载本体"
         description={`在对话输入框的「本体增强」chip 中选择 running 方案「${profile.name}」；装配期注入 guide，单次失败即降级（ontology.unavailable 事件卡），配置保留，下一条消息自动恢复。`}
       />
       {profile.status === 'running' ? (
@@ -1011,7 +1012,7 @@ function QueryMountPane({ profile, profilesErr }: { profile: RuntimeProfile; pro
         <Alert
           type={profilesErr ? 'warning' : 'info'}
           showIcon
-          message="启动方案后可执行 SPARQL 查询"
+          title="启动方案后可执行 SPARQL 查询"
           description="SPARQL 工作台按运行方案绑定端点；非 running 状态查询将被运行平面拒绝（409）。"
         />
       )}
@@ -1019,7 +1020,7 @@ function QueryMountPane({ profile, profilesErr }: { profile: RuntimeProfile; pro
       <div className="onto-sec">
         <span className="onto-sec-title">已挂载对话</span>
       </div>
-      {err && <Alert type="warning" showIcon message="对话列表获取失败" description={err} />}
+      {err && <Alert type="warning" showIcon title="对话列表获取失败" description={err} />}
       {convs && convs.length === 0 && (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '14px 0' }} description="暂无对话挂载该运行方案" />
       )}
@@ -1050,7 +1051,7 @@ function OpenOntologiesGuide() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="Open Ontologies：独立托管双轨（oo-worker :8092）"
+        title="Open Ontologies：独立托管双轨（oo-worker :8092）"
         description="Rust 单二进制（MIT，Oxigraph 0.5 后端）：RDFS/OWL-RL 物化推理、SHACL 校验、不一致检查、变更影响分析、数据装载、MCP server（39 个 onto_* 工具）。与主线两平面并行双轨、无接口依赖、可整体摘除。"
       />
       <div className="onto-sec" style={{ marginTop: 0 }}>
@@ -1066,7 +1067,7 @@ function OpenOntologiesGuide() {
       <div className="onto-sec">
         <span className="onto-sec-title">数据边界</span>
       </div>
-      <Alert type="warning" showIcon message="oo 数据不进主线仓库（spec_json 体系）" description="双轨数据 P1 不互通；回流路径：导出 TTL → 主线「本体构建 → 导入文件」（REQ-78 双轨互通 P2 后自动化）。" />
+      <Alert type="warning" showIcon title="oo 数据不进主线仓库（spec_json 体系）" description="双轨数据 P1 不互通；回流路径：导出 TTL → 主线「本体构建 → 导入文件」（REQ-78 双轨互通 P2 后自动化）。" />
       <div className="onto-sec">
         <span className="onto-sec-title">工作台入口</span>
       </div>

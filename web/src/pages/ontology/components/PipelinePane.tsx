@@ -246,7 +246,7 @@ export default function PipelinePane() {
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message={`引导执行清单（${doneCount}/${checklist.length} 已打卡）`}
+          title={`引导执行清单（${doneCount}/${checklist.length} 已打卡）`}
           description={
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {checklist.map((c) => {

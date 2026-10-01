@@ -116,7 +116,7 @@ export default function TraceTable({ profiles }: { profiles: RuntimeProfile[] })
           刷新
         </Button>
       </div>
-      {err && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message="透视记录获取失败" description={err} />}
+      {err && <Alert type="warning" showIcon style={{ marginBottom: 10 }} title="透视记录获取失败" description={err} />}
       <Table<TraceEntry>
         rowKey={(r) => String(r.id ?? `${r.ts}-${r.tool}-${r.ontology_id}`)}
         columns={columns}

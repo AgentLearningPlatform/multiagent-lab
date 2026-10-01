@@ -141,7 +141,7 @@ function TextDiffPane({ ontologyId, fromV, toV }: { ontologyId: string; fromV: n
       <Alert
         type="error"
         showIcon
-        message="文本对照加载失败"
+        title="文本对照加载失败"
         description={err}
         action={<Button size="small" onClick={() => setTick((t) => t + 1)}>重试</Button>}
       />
@@ -219,7 +219,7 @@ export default function VersionDiff({ ontologyId, versions, currentVersion }: { 
         <Select size="small" value={toV ?? undefined} onChange={setToV} style={{ width: 220 }} placeholder="目标版本" options={opts} />
       </div>
       {err ? (
-        <Alert type="warning" showIcon message="版本对比失败" description={err} />
+        <Alert type="warning" showIcon title="版本对比失败" description={err} />
       ) : loading ? (
         <Skeleton active paragraph={{ rows: 4 }} />
       ) : !result ? (

@@ -251,7 +251,7 @@ export default function SparqlWorkbench({ profileId, persistenceId }: { profileI
       />
 
       {err && (
-        <Alert type="error" showIcon closable style={{ marginTop: 10 }} message="查询执行失败" description={err} onClose={() => setErr(null)} />
+        <Alert type="error" showIcon closable style={{ marginTop: 10 }} title="查询执行失败" description={err} onClose={() => setErr(null)} />
       )}
 
       {result?.kind === 'ask' && (
@@ -259,7 +259,7 @@ export default function SparqlWorkbench({ profileId, persistenceId }: { profileI
           type={result.value ? 'success' : 'warning'}
           showIcon
           style={{ marginTop: 10 }}
-          message={`ASK 查询结果：${result.value}`}
+          title={`ASK 查询结果：${result.value}`}
         />
       )}
 

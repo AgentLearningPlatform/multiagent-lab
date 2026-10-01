@@ -176,7 +176,7 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
         type="success"
         showIcon
         style={{ marginBottom: 12 }}
-        message="对话式本体构建（OntoChat 流程，REQ-103 模式 A 已交付）"
+        title="对话式本体构建（OntoChat 流程，REQ-103 模式 A 已交付）"
         description="对话式 CQ 引导 → 逐轮补全领域信息 → spec_json 草稿（生成-校验循环后端内聚）→ 预览确认入库。复用主平台模型代理，无新服务。"
       />
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
@@ -283,7 +283,7 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
                     <Tag color="geekblue" style={{ margin: 0 }}>关系 {draft.relations?.length ?? 0}</Tag>
                     <Tag color="purple" style={{ margin: 0 }}>实例 {draft.instances?.length ?? 0}</Tag>
                   </Space>
-                  {draftWarning && <Alert type="warning" showIcon style={{ marginTop: 8 }} message={draftWarning} />}
+                  {draftWarning && <Alert type="warning" showIcon style={{ marginTop: 8 }} title={draftWarning} />}
                   <Space style={{ marginTop: 10 }} size={8}>
                     <Input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="本体名称" style={{ width: 240 }} />
                     <Button type="primary" icon={<ThunderboltOutlined />} loading={turning} onClick={saveDraft}>
@@ -293,7 +293,7 @@ export default function OntoChatFlow({ onSaved }: { onSaved: (ontologyId: string
                 </Card>
               )}
               {isDone && active.ontology_id && (
-                <Alert type="success" showIcon style={{ marginTop: 10 }} message={`草稿已入库为「${active.title}」关联的本体 ${active.ontology_id}，可到「本体资产」栏继续编辑与部署`} />
+                <Alert type="success" showIcon style={{ marginTop: 10 }} title={`草稿已入库为「${active.title}」关联的本体 ${active.ontology_id}，可到「本体资产」栏继续编辑与部署`} />
               )}
 
               {/* 输入区 */}

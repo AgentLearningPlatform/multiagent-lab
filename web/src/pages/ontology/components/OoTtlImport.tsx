@@ -149,7 +149,7 @@ export default function OoTtlImport() {
             <Alert
               type="warning"
               showIcon
-              message={`有损导入 warnings（${warnings.length}）`}
+              title={`有损导入 warnings（${warnings.length}）`}
               description={
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
                   {warnings.slice(0, 8).map((w, i) => (
@@ -164,7 +164,7 @@ export default function OoTtlImport() {
         </Card>
       )}
       {appliedVersion !== null && (
-        <Alert type="success" showIcon style={{ marginTop: 8 }} message={`TTL 已并入目标本体新版本（v${appliedVersion}）——strict 质量门禁通过。`} />
+        <Alert type="success" showIcon style={{ marginTop: 8 }} title={`TTL 已并入目标本体新版本（v${appliedVersion}）——strict 质量门禁通过。`} />
       )}
     </Card>
   )

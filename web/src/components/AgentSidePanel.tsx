@@ -7,7 +7,6 @@ import {
   DoubleRightOutlined,
   ClusterOutlined,
   BranchesOutlined,
-  CloseOutlined,
   CopyOutlined,
   ExportOutlined,
   FileOutlined,
@@ -70,12 +69,14 @@ const ASSISTANT_BASE_TOOLS = ['doc_read', 'list_model_connections', 'list_agents
 export default function AgentSidePanel({
   agent,
   open,
-  onClose,
+  onOpenChange,
   onChanged,
 }: {
   agent: Agent
+  /** 展开态（true=内容面板，false=竖条）；REQ-237：面板常驻挂载（竖条对齐 REQ-217⑤「常驻右侧」定案），open 仅控制展开/收缩 */
   open: boolean
-  onClose: () => void
+  /** 展开态变化（竖条点入口展开=true、再点收起=false）；与 ChatWindow 头部收放按钮同源 */
+  onOpenChange?: (open: boolean) => void
   onChanged?: () => void
 }) {
   // REQ-218①/M49：activity bar 六入口平级——智能体配置 / 模型 / 连接器 / 对外服务 / 文件 /
@@ -89,6 +90,10 @@ export default function AgentSidePanel({
     return saved ?? 'config'
   })
   const [collapsed, setCollapsed] = useState(true) // 默认竖条态（REQ-217⑤「默认收缩」）
+  // REQ-237：常驻挂载后 open=展开态权威（头部收放按钮/竖条入口双向同步）
+  useEffect(() => {
+    setCollapsed(!open)
+  }, [open])
   // REQ-230①：候选触达——伴生入口红点（pending>0 亮起；选中 agent 即取数+对话运行后 dataVersion 刷新）
   const { dataVersion } = useUI()
   const [companionPending, setCompanionPending] = useState(0)
@@ -111,9 +116,11 @@ export default function AgentSidePanel({
   const switchView = (v: PanelView) => {
     if (v === view && !collapsed) {
       setCollapsed(true) // 再点同一按钮 = 收起回竖条态
+      onOpenChange?.(false)
       return
     }
     setView(v)
+    if (collapsed) onOpenChange?.(true)
     setCollapsed(false)
     localStorage.setItem(PANEL_VIEW_KEY, v)
   }
@@ -142,7 +149,7 @@ export default function AgentSidePanel({
     window.addEventListener('mouseup', onUp)
   }
   return (
-    <aside className={`proj-panel${open ? ' open' : ''}`} style={{ width: collapsed ? PANEL_BAR_WIDTH : panelWidth }} data-panel-width={panelWidth}>
+    <aside className="proj-panel" style={{ width: collapsed ? PANEL_BAR_WIDTH : panelWidth }}>
       {!collapsed && (
         <div
           className="proj-panel-resizer"
@@ -154,7 +161,7 @@ export default function AgentSidePanel({
         />
       )}
       <div className="proj-panel-bar" role="tablist" aria-label="智能体侧边栏视图">
-        {/* REQ-218①/M49 六入口平级 + REQ-217⑤/M48 再点收起（竖条态默认） */}
+        {/* REQ-218①/M49 六入口平级 + REQ-217⑤/M48 再点收起（竖条态常驻默认） */}
         <Tooltip title="智能体配置" placement="left">
           <button
             type="button"
@@ -239,19 +246,22 @@ export default function AgentSidePanel({
           </button>
         </Tooltip>
         <span className="proj-bar-spacer" />
+        {/* REQ-237：竖条常驻后无「关闭」态——展开/收起即开合（原「关闭侧边栏」按钮退役，与收起语义重复） */}
         <Tooltip title={collapsed ? '展开侧边栏' : '收起为竖条'} placement="left">
           <button
             type="button"
             className="proj-bar-btn"
             aria-label={collapsed ? '展开侧边栏' : '收起为竖条'}
-            onClick={() => (collapsed ? setCollapsed(false) : switchView(view))}
+            onClick={() => {
+              if (collapsed) {
+                onOpenChange?.(true)
+                setCollapsed(false)
+              } else {
+                switchView(view)
+              }
+            }}
           >
             {collapsed ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
-          </button>
-        </Tooltip>
-        <Tooltip title="关闭侧边栏" placement="left">
-          <button type="button" className="proj-bar-btn" aria-label="关闭侧边栏" onClick={onClose}>
-            <CloseOutlined />
           </button>
         </Tooltip>
       </div>
@@ -1068,7 +1078,7 @@ function AgentConfigForm({
                       style={{ marginBottom: 8 }}
                       type="warning"
                       showIcon
-                      message={`已授权连接器当前不可达：${unreachableAuthorized.map((c) => c.name).join('、')}——运行时将降级告警（不加载其工具），可到设置页重新测试`}
+                      title={`已授权连接器当前不可达：${unreachableAuthorized.map((c) => c.name).join('、')}——运行时将降级告警（不加载其工具），可到设置页重新测试`}
                     />
                   )}
                   <Form.Item name="connectors" style={{ marginBottom: 8 }}>
@@ -1191,7 +1201,7 @@ function SandboxPanel({ agent, form }: { agent: Agent; form: FormInstance }) {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="沙箱后端未启用"
+        title="沙箱后端未启用"
         description="平台未配置 SANDBOX_IMAGE——配置后此处可管理该智能体的 agentd 容器。"
       />
     )
@@ -1459,7 +1469,7 @@ function AgentFilesView({ agent, onChanged }: { agent: Agent; onChanged?: () => 
           </Button>
         </Tooltip>
       </div>
-      {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 8 }} />}
+      {err && <Alert type="error" showIcon title={err} style={{ marginBottom: 8 }} />}
       {loading ? (
         <Spin size="small" />
       ) : listing ? (
@@ -1473,7 +1483,7 @@ function AgentFilesView({ agent, onChanged }: { agent: Agent; onChanged?: () => 
                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 6, cursor: 'pointer' }}
                 onClick={() => (e.is_dir ? setPath(path ? `${path}/${e.name}` : e.name) : openFile(e.name))}
               >
-                {e.is_dir ? <FolderOutlined style={{ color: 'var(--c-ink-2, #8a90a5)' }} /> : <FileOutlined style={{ color: 'var(--c-ink-2, #8a90a5)' }} />}
+                {e.is_dir ? <FolderOutlined style={{ color: 'var(--c-ink-2)' }} /> : <FileOutlined style={{ color: 'var(--c-ink-2)' }} />}
                 <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
                 {!e.is_dir && (
                   <Typography.Text type="secondary" style={{ fontSize: 11 }}>
@@ -1485,7 +1495,7 @@ function AgentFilesView({ agent, onChanged }: { agent: Agent; onChanged?: () => 
           </ul>
         )
       ) : null}
-      {previewErr && <Alert type="warning" showIcon message={previewErr} style={{ marginTop: 8 }} />}
+      {previewErr && <Alert type="warning" showIcon title={previewErr} style={{ marginTop: 8 }} />}
       {preview && (
         <Card size="small" title={preview.path} style={{ marginTop: 10 }}
           extra={<Button size="small" type="text" onClick={() => setPreview(null)}>关闭</Button>}>

@@ -149,7 +149,7 @@ export default function OntoExtendFlow() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="OntoExtend 流程——ODP 模式推荐 + LOV 词表扩展现有本体（部分可用，M-O14 P2②）"
+        title="OntoExtend 流程——ODP 模式推荐 + LOV 词表扩展现有本体（部分可用，M-O14 P2②）"
         description="不新建本体：选取人工精选的设计模式（ODP）与 LOV 词表术语生成扩展片段，经导入审查（冲突检测/改名）与质量门禁后并入目标本体新版本。"
       />
       <Steps
@@ -289,7 +289,7 @@ export default function OntoExtendFlow() {
         </Card>
       )}
       {appliedVersion !== null && (
-        <Alert type="success" showIcon message={`已并入目标本体新版本（v${appliedVersion}）——strict 质量门禁通过；到「本体资产」查看版本与质量卡。`} />
+        <Alert type="success" showIcon title={`已并入目标本体新版本（v${appliedVersion}）——strict 质量门禁通过；到「本体资产」查看版本与质量卡。`} />
       )}
       {!targetId && (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先选择目标本体——OntoExtend 对既有本体做增量扩展，不新建" />

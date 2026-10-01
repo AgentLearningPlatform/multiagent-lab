@@ -155,7 +155,7 @@ export function ModelModal({ conn, groups, conns, initialProvider, onClose, onSa
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message="尚无提供商"
+            title="尚无提供商"
             description="请先关闭本弹窗，用「＋ 添加提供商」从厂商预设快速填充访问配置（仅需补 API Key）。"
           />
         )}

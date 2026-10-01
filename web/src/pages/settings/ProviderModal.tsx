@@ -212,7 +212,7 @@ export function ProviderModal({ group, conns, onClose, onSaved }: {
               type="info"
               showIcon
               style={{ marginBottom: 4 }}
-              message="协议与 Base URL 为各模型连接自己的属性（同一供应商下可混合 openai_compat 与 anthropic，REQ-177）——请在展开区逐连接「编辑」维护。"
+              title="协议与 Base URL 为各模型连接自己的属性（同一供应商下可混合 openai_compat 与 anthropic，REQ-177）——请在展开区逐连接「编辑」维护。"
             />
           </>
         ) : (
@@ -263,7 +263,7 @@ export function ProviderModal({ group, conns, onClose, onSaved }: {
                 type="info"
                 showIcon
                 style={{ marginBottom: 12 }}
-                message="Anthropic 协议暂仅支持对话模型（无官方向量接口），类型已锁定为 chat"
+                title="Anthropic 协议暂仅支持对话模型（无官方向量接口），类型已锁定为 chat"
               />
             )}
             <Form.Item name="model_name" label="首个模型名" rules={[{ required: true, message: '模型名必填' }]} style={{ marginBottom: 12 }} extra="后端无独立提供商实体，添加提供商将同时创建首个模型连接">

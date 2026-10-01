@@ -267,7 +267,7 @@ export default function CsvIngestPane({
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="CSV 灌装（REQ-96）：同名映射 + 映射向导"
+        title="CSV 灌装（REQ-96）：同名映射 + 映射向导"
         description="表头即属性/关系名（同名映射）；向导增量：列类型转换（int/number/date/bool）、关系列多值分隔符、跳行规则。映射配置可保存复用。入库走校验门控并生成新版本。"
       />
       <Steps
@@ -371,11 +371,11 @@ export default function CsvIngestPane({
           type="error"
           showIcon
           style={{ marginBottom: 12 }}
-          message="校验未通过，不允许保存坏本体"
+          title="校验未通过，不允许保存坏本体"
           description={
             <Table
               rowKey={(r) => r.path + r.message}
-              columns={ERR_COLUMNS}
+              columns={ERR_COLUMNS} scroll={{ x: 'max-content' }}
               dataSource={validationErrors}
               pagination={false}
               size="small"
@@ -400,7 +400,7 @@ export default function CsvIngestPane({
               type="warning"
               showIcon
               style={{ marginBottom: 12 }}
-              message={`warnings（${warnings.length}）`}
+              title={`warnings（${warnings.length}）`}
               description={
                 <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 160, overflow: 'auto' }}>
                   {warnings.slice(0, 50).map((wn, i) => (
@@ -430,7 +430,7 @@ export default function CsvIngestPane({
             确认入库为新版本
           </Button>
           {appliedVersion !== null && (
-            <Alert type="success" showIcon style={{ marginTop: 12 }} message={`已入库：当前版本 v${appliedVersion}（Spec 编辑/可视化/版本 diff 已同步）`} />
+            <Alert type="success" showIcon style={{ marginTop: 12 }} title={`已入库：当前版本 v${appliedVersion}（Spec 编辑/可视化/版本 diff 已同步）`} />
           )}
         </>
       )}

@@ -77,7 +77,7 @@ export function ReloadHintAlert({ version }: { version?: number }) {
       type="info"
       showIcon
       style={{ marginTop: 10 }}
-      message={`已保存新版本${version != null ? `（v${version}）` : ''}；运行方案需在其页面显式重载后生效`}
+      title={`已保存新版本${version != null ? `（v${version}）` : ''}；运行方案需在其页面显式重载后生效`}
       description="构建与运行解耦（REQ-87）：仓库是唯一事实源，运行方案是部署视图——到「本体运行」栏对应方案执行「重载」后查询按新版本返回。"
     />
   )

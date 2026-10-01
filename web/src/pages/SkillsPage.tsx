@@ -21,6 +21,7 @@ import { api } from '../api/client'
 import EmptyGuide from '../components/EmptyGuide'
 import type { Agent, Skill, ToolInfo } from '../api/types'
 import { useUI } from '../store/ui'
+import { SIDEBAR_WIDTH, sidebarDefaultSize, sidebarRemember } from '../lib/layout'
 
 type FilterKey = 'all' | 'mounted' | 'unmounted'
 
@@ -98,9 +99,9 @@ export default function SkillsPage() {
   return (
     <Splitter
       className="main sidebar-splitter"
-      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+      onResizeEnd={sidebarRemember}
     >
-      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+      <Splitter.Panel defaultSize={sidebarDefaultSize()} min={SIDEBAR_WIDTH.min} max={SIDEBAR_WIDTH.max} className="sidebar-panel">
         <aside className="sidebar">
           <div className="side-head">
             <span className="side-title">技能筛选</span>

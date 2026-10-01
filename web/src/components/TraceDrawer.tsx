@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import type { RunEventDTO } from '../api/types'
 import { describeEvent, levelGated } from './ChatWindow'
 import EventReplayDrawer from './EventReplayDrawer'
+import { DRAWER_SIZES, drawerSizeProps } from '../lib/layout'
 
 /**
  * 调用轨迹面板（REQ-217①②④/M48）：对话运行按 run 分组的时间线 + 过滤 + 显示设置收编。
@@ -140,10 +141,10 @@ export default function TraceDrawer({
     <Drawer
       title={`调用轨迹 · ${title}`}
       placement="right"
-      width={560}
+      {...drawerSizeProps('trace', DRAWER_SIZES.medium)}
       open={open}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
       extra={
         <Space size={6}>
           <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新</Button>
@@ -202,7 +203,7 @@ export default function TraceDrawer({
             开启后调试档细节随运行落库，供轨迹面板与回放查看（级别≥详细时产生）
           </Typography.Text>
           {debugLevel >= 1 && !debugPersist && (
-            <Alert type="warning" showIcon style={{ marginTop: 6 }} message="当前级别≥详细，但入库关闭：调试细节不会留存到历史（REQ-149）" />
+            <Alert type="warning" showIcon style={{ marginTop: 6 }} title="当前级别≥详细，但入库关闭：调试细节不会留存到历史（REQ-149）" />
           )}
         </span>
         <div>
@@ -220,7 +221,7 @@ export default function TraceDrawer({
           />
         </div>
         {!hasDebugRecorded && (
-          <Alert type="info" showIcon message="历史运行未见模型步骤事件（未开调试事件入库）——该类行不可用为诚实标注，非缺陷" />
+          <Alert type="info" showIcon title="历史运行未见模型步骤事件（未开调试事件入库）——该类行不可用为诚实标注，非缺陷" />
         )}
       </div>
 
@@ -364,7 +365,7 @@ function RunBlock({
                 <Tag color={TYPE_COLOR[e.type] ?? 'default'} style={{ margin: 0, fontSize: 10 }}>{e.type}</Tag>
                 <span style={{ fontSize: 12, flex: 1 }} className={desc.warn ? 'warn-text' : ''}>{desc.text}</span>
                 {d?.source && <Tag style={{ margin: 0, fontSize: 10 }}>{String(d.source)}</Tag>}
-                {dur && <span style={{ fontSize: 11, color: 'var(--c-ink-2, #8a90a5)' }}>{dur}</span>}
+                {dur && <span style={{ fontSize: 11, color: 'var(--c-ink-2)' }}>{dur}</span>}
               </div>
               {(showRaw || openId[e.id]) && e.data && (
                 <pre className="raw-json" style={{ margin: '2px 0 2px 34px', maxHeight: 240, overflow: 'auto' }}>{JSON.stringify(d ?? e.data, null, 2)}</pre>

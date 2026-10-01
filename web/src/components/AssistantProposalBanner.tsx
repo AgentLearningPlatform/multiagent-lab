@@ -55,7 +55,7 @@ export default function AssistantProposalBanner({ onChanged }: { onChanged?: () 
       type="warning"
       showIcon
       style={{ marginBottom: 12 }}
-      message="平台助手配置提案待确认（对话中 propose_assistant_config 产出，两段式确认前不落库）"
+      title="平台助手配置提案待确认（对话中 propose_assistant_config 产出，两段式确认前不落库）"
       description={
         <div style={{ fontSize: 12 }}>
           {proposal.changes.map((c, i) => (

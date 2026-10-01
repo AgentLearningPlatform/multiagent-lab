@@ -12,6 +12,7 @@ import BuildPage from './BuildPage'
 import AssetsPage from './AssetsPage'
 import RuntimePage from './RuntimePage'
 import AuditPage from './AuditPage'
+import { SIDEBAR_WIDTH, sidebarDefaultSize, sidebarRemember } from '../../lib/layout'
 
 // ---------------------------------------------------------------------------
 // 本体模块壳（D-O11 / REQ-104）：左侧边栏栏位
@@ -70,11 +71,12 @@ export default function OntologyModule() {
     )
 
   return (
-    <Splitter className="main sidebar-splitter">
+    // REQ-237（57 号 F4）：左栏宽度并入全站单一约定（同 key/默认/边界，写入回填——原只读他页 key 且默认 240 互踩）
+    <Splitter className="main sidebar-splitter" onResizeEnd={sidebarRemember}>
       <Splitter.Panel
-        defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 240}
-        min={200}
-        max={420}
+        defaultSize={sidebarDefaultSize()}
+        min={SIDEBAR_WIDTH.min}
+        max={SIDEBAR_WIDTH.max}
         className="sidebar-panel"
       >
         <aside className="sidebar">

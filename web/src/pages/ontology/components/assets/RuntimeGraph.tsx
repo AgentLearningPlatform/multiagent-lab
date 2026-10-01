@@ -107,7 +107,7 @@ SELECT ?c (COUNT(?i) AS ?n) WHERE { ?c a owl:Class . ?i a ?c } GROUP BY ?c`
       <Alert
         type="info"
         showIcon
-        message="运行态实渲需要包含该本体的 running 方案"
+        title="运行态实渲需要包含该本体的 running 方案"
         description="到「本体运行」栏启动方案后回到此处查看引擎实装的类层次（REQ-81：浏览对象是运行中的本体）。"
       />
     )
@@ -133,7 +133,7 @@ SELECT ?c (COUNT(?i) AS ?n) WHERE { ?c a owl:Class . ?i a ?c } GROUP BY ?c`
         </Typography.Text>
       </Space>
       {loading && !spec && <Spin style={{ display: 'block', margin: '32px auto' }} />}
-      {err && <Alert type="warning" showIcon message="运行态拉取失败" description={err} />}
+      {err && <Alert type="warning" showIcon title="运行态拉取失败" description={err} />}
       {spec && <Graph3D key={profileId} spec={spec} />}
     </div>
   )

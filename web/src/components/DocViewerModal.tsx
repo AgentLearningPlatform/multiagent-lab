@@ -3,6 +3,7 @@ import { Drawer, Spin, Typography } from 'antd'
 import { api } from '../api/client'
 import XMarkdown from '@ant-design/x-markdown'
 import { resolveRef } from '../lib/docref'
+import { DRAWER_SIZES, drawerSizeProps } from '../lib/layout'
 
 /**
  * 内部方案文档只读查看（REQ-140/169）：点击界面中链接的 docs/ 等文档指针 →
@@ -57,7 +58,7 @@ export default function DocViewerModal({
   const displayContent = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
 
   return (
-    <Drawer open={open} onClose={onClose} width={820} title={title ? `📄 ${title}` : '文档查看'}>
+    <Drawer open={open} onClose={onClose} {...drawerSizeProps('docviewer', DRAWER_SIZES.large)} title={title ? `📄 ${title}` : '文档查看'}>
       <div onClick={onBodyClick}>
         {loading ? (
           <Spin size="small" />

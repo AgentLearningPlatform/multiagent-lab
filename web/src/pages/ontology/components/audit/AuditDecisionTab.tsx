@@ -5,6 +5,7 @@ import { BranchesOutlined, ExportOutlined, ReloadOutlined, SaveOutlined } from '
 import { api, ApiError } from '../../../../api/client'
 import type { OntoDecision } from '../../../../api/types'
 import { useUI } from '../../../../store/ui'
+import { DRAWER_SIZES, drawerSizeProps } from '../../../../lib/layout'
 
 // ---------------------------------------------------------------------------
 // 消费与审计 · 决策审计页签（SQLite 决策表 + derived_from 溯源链 + PROV-O 导出）。
@@ -164,7 +165,7 @@ export default function AuditDecisionTab({ kbId }: { kbId?: string }) {
           </Space>
         }
       >
-        {err && <Alert type="warning" showIcon style={{ marginBottom: 10 }} message="决策列表获取失败" description={err} />}
+        {err && <Alert type="warning" showIcon style={{ marginBottom: 10 }} title="决策列表获取失败" description={err} />}
         <Table<OntoDecision>
           rowKey="id"
           columns={columns}
@@ -253,7 +254,7 @@ function ChainDrawer({ decision, onClose }: { decision: OntoDecision; onClose: (
   return (
     <Drawer
       open
-      width={640}
+      {...drawerSizeProps('chain', DRAWER_SIZES.medium)}
       title={
         <Space size={8}>
           <BranchesOutlined />
@@ -272,7 +273,7 @@ function ChainDrawer({ decision, onClose }: { decision: OntoDecision; onClose: (
         derived_from 逐级回溯（32 跳封顶，环防御）。
       </Typography.Text>
 
-      {err && <Alert type="error" showIcon style={{ marginTop: 10 }} message="溯源链获取失败" description={err} />}
+      {err && <Alert type="error" showIcon style={{ marginTop: 10 }} title="溯源链获取失败" description={err} />}
 
       <div className="sema-audit-chain" style={{ marginTop: 12 }}>
         {loading && chain.length === 0 ? (

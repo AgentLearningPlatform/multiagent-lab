@@ -63,7 +63,7 @@
   display: flex; flex-direction: column; gap: 4px;
 }
 .hit.hi { border-left-color: #16a34a; }
-.hit.mid { border-left-color: #4f46e5; }
+.hit.mid { border-left-color: var(--c-brand); }
 .hit.lo { border-left-color: #d9a23b; }
 .hit-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .hit-doc { font-weight: 600; color: var(--c-ink); }
@@ -414,7 +414,7 @@
 .sema-explorer { position: relative; border: 1px solid var(--c-line); border-radius: 10px; overflow: hidden; background: #fff; }
 .sema-explorer-iframe { display: block; width: 100%; height: 520px; border: 0; }
 .sema-explorer-skeleton {
-  position: absolute; inset: 0; z-index: 1;
+  position: absolute; inset: 0; z-index: var(--z-raised);
   display: flex; align-items: center; justify-content: center; gap: 8px;
   background: #fbfbfd; color: var(--c-ink-3); font-size: 12.5px;
 }
@@ -437,10 +437,10 @@
 }
 /* REQ-189：AgentSidePanel 宽度拖拽手柄（左缘 6px 热区；宽度由组件内联下发，本默认值仅兜底非 agent 用法） */
 .proj-panel-resizer {
-  position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; z-index: 5;
+  position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; z-index: var(--z-resizer);
   cursor: col-resize; background: transparent; transition: background .15s ease;
 }
-.proj-panel-resizer:hover, .proj-panel-resizer:active { background: var(--ant-color-primary, #4f46e5); opacity: .35; }
+.proj-panel-resizer:hover, .proj-panel-resizer:active { background: var(--c-brand); opacity: .35; }
 @keyframes proj-panel-in {
   from { opacity: .4; transform: translateX(12px); }
   to { opacity: 1; transform: none; }
@@ -536,7 +536,7 @@
 .git-commit-row:last-child::before { height: 13px; bottom: auto; }
 .git-dot {
   position: absolute; left: 1px; top: 12px; width: 6px; height: 6px;
-  border-radius: 50%; background: #fff; border: 2px solid var(--c-brand); z-index: 1;
+  border-radius: 50%; background: #fff; border: 2px solid var(--c-brand); z-index: var(--z-raised);
 }
 .git-dot.merge { border-color: #9254de; border-radius: 2px; transform: rotate(45deg); }
 .git-commit-subject { font-size: 12px; color: var(--c-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -746,7 +746,7 @@
 .viz-legend-panel.ant-card { border-radius: 8px; }
 .viz-legend-panel .onto-flow-info-title { display: flex; align-items: center; gap: 4px; }
 .viz-legend-toggle {
-  position: absolute; z-index: 6; top: 8px; right: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  position: absolute; z-index: var(--z-float); top: 8px; right: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
 }
 
 /* 三维浏览控制条：多选 Select 的 tag 会把行高压到 44px（其余控件 24px）——压齐 single 行高。

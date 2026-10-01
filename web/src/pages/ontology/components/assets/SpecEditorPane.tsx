@@ -143,7 +143,7 @@ export default function SpecEditorPane({
           type="error"
           showIcon
           style={{ marginTop: 10 }}
-          message="Spec 加载失败"
+          title="Spec 加载失败"
           description={specErr}
           action={
             <Button size="small" onClick={onReloadSpec}>
@@ -158,7 +158,7 @@ export default function SpecEditorPane({
               type="warning"
               showIcon
               style={{ margin: '10px 0' }}
-              message="Spec 体积较大，已切换为只读"
+              title="Spec 体积较大，已切换为只读"
               description="请在本地编辑后经导入 / 导出接口处理，避免浏览器卡顿。"
             />
           )}
@@ -173,10 +173,10 @@ export default function SpecEditorPane({
           </div>
           {validationErrors.length > 0 && (
             <>
-              <Alert type="error" showIcon style={{ marginTop: 12 }} message={`校验未通过（${validationErrors.length} 项）`} />
+              <Alert type="error" showIcon style={{ marginTop: 12 }} title={`校验未通过（${validationErrors.length} 项）`} />
               <Table<ValidationError>
                 rowKey={(r) => `${r.path}::${r.message}`}
-                columns={ERR_COLUMNS}
+                columns={ERR_COLUMNS} scroll={{ x: 'max-content' }}
                 dataSource={validationErrors}
                 pagination={false}
                 size="small"

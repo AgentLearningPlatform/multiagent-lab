@@ -65,9 +65,7 @@ export default function AuditPage() {
               <Tag style={{ margin: 0 }}>自研 KG · 零外部进程</Tag>
             </div>
             <p className="work-head-desc">
-              本体叙事的「构建 → 运行 → <strong>消费</strong> → <strong>审计</strong>」环节载体（D-O15 改造自原
-              Semantica 独立栏；D-O19 定位厘清）：第五栏 = <strong>本体消费侧观测台</strong>——KG 检索默认走本体
-              TTL 装载链路（带来源徽标，KB 文本抽取来源可切换、永不混排），构建/抽取决策全程留痕可溯源。
+              本体消费侧观测台（D-O19）：KG 检索默认走本体 TTL 装载链路（带来源徽标，与 KB 抽取来源可切换、永不混排），构建/抽取决策全程留痕可溯源。
             </p>
           </div>
           <Space size={8} wrap>
@@ -91,14 +89,14 @@ export default function AuditPage() {
         {/* 状态条：当前库 KG 规模 + 重建入口 */}
         <div className="sema-status">
           {kbsErr ? (
-            <Alert type="warning" showIcon message="知识库列表不可用" description={kbsErr} />
+            <Alert type="warning" showIcon title="知识库列表不可用" description={kbsErr} />
           ) : !cur ? (
-            <Alert type="info" showIcon message="先选择一个知识库" description="没有合适的库？先到「知识库」页创建并导入文档。" />
+            <Alert type="info" showIcon title="先选择一个知识库" description="没有合适的库？先到「知识库」页创建并导入文档。" />
           ) : (
             <Alert
               type={cur.kg_ready ? 'success' : 'warning'}
               showIcon
-              message={
+              title={
                 <Space size={8} wrap>
                   <span>{cur.name}</span>
                   <Tag color="blue" style={{ margin: 0 }}>
@@ -136,9 +134,6 @@ export default function AuditPage() {
           ]}
         />
 
-        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-          D-O15/REQ-110：KG 与审计数据全部落主平台 SQLite（010 迁移），semantica worker 已归档休眠（tools/semantica-worker/ 代码保留、不进启动链路）。
-        </Typography.Text>
       </div>
     </div>
   )

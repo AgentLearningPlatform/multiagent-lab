@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, Form, Input, Modal, Segmented, Space, Tag } from 'antd'
+import { Button, Form, Input, Modal, Segmented, Space } from 'antd'
 import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons'
 import { api } from '../../../../api/client'
-import type { Ontology, RuntimeProfile, Spec } from '../../../../api/types'
+import type { Ontology, Spec } from '../../../../api/types'
 import { useUI } from '../../../../store/ui'
-import { ontoStatus, stageDoneFlags, type ValidationState } from '../../shared'
 import SpecGraph from '../SpecGraph'
 import Graph3D from '../Graph3D'
 import WebVowlView from '../WebVowlView'
@@ -12,55 +11,9 @@ import OntologyCompanionGraph from '../companion/OntologyCompanionGraph'
 import RuntimeGraph from './RuntimeGraph'
 
 // ---------------------------------------------------------------------------
-// 资产页杂件（B1 拆分，REQ-145）：顶部选择条 / 构建段完成度 dots / 重命名弹窗 /
-// 可视化三态 Tab（M21/VIZ-1+VIZ-3，三维懒加载）
+// 资产页杂件（B1 拆分，REQ-145）：重命名弹窗 / 可视化多形态 Tab（M21/VIZ-1+VIZ-3，三维懒加载）
+// REQ-237 F17：原顶部选择条 OntologyPicker 与 StageDots 死代码删除（左清单两栏化后无引用）
 // ---------------------------------------------------------------------------
-
-export function StageDots({ flags }: { flags: boolean[] }) {
-  const ready = flags.slice(0, 4).filter(Boolean).length
-  return (
-    <span className="onto-dots" title={`S1~S4 构建段已就绪 ${ready}/4（运行段见本体运行栏）`}>
-      {flags.slice(0, 4).map((done, i) => (
-        <i key={i} className={`onto-dot${done ? ' on' : ''}`} />
-      ))}
-    </span>
-  )
-}
-
-/** 顶部资产选择条：紧凑横向列表（满高左清单在四栏壳下由模块侧边栏承担，这里做选择器） */
-export function OntologyPicker({
-  ontos,
-  profiles,
-  activeId,
-  onSelect,
-  validations,
-}: {
-  ontos: Ontology[]
-  profiles: RuntimeProfile[]
-  activeId: string | null
-  onSelect: (id: string) => void
-  validations: Record<string, ValidationState>
-}) {
-  return (
-    <div className="onto-picker">
-      {ontos.map((o) => {
-        const f = stageDoneFlags(o, validations[o.id], profiles, null, false)
-        const st = ontoStatus(o, profiles)
-        return (
-          <button key={o.id} type="button" className={`onto-picker-item${o.id === activeId ? ' active' : ''}`} onClick={() => onSelect(o.id)}>
-            <span className="onto-picker-name" title={o.name}>{o.name}</span>
-            <span className="onto-picker-meta">
-              <StageDots flags={f} />
-              <span>v{o.version ?? '—'}</span>
-              <Tag color={st.color} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{st.text}</Tag>
-            </span>
-          </button>
-        )
-      })}
-      {ontos.length === 0 && <span className="empty-hint">暂无本体</span>}
-    </div>
-  )
-}
 
 export function RenameModal({ ontology, onClose, onSaved }: { ontology: Ontology; onClose: () => void; onSaved: () => void }) {
   const { showToast } = useUI()

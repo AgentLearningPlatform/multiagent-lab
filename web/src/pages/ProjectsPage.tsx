@@ -4,6 +4,7 @@ import { FolderOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import type { Agent, Conversation, Project } from '../api/types'
 import { useUI } from '../store/ui'
+import { SIDEBAR_WIDTH, sidebarDefaultSize, sidebarRemember } from '../lib/layout'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import ProjectModal from '../components/ProjectModal'
@@ -76,9 +77,9 @@ export default function ProjectsPage() {
   return (
     <Splitter
       className="main sidebar-splitter"
-      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+      onResizeEnd={sidebarRemember}
     >
-      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+      <Splitter.Panel defaultSize={sidebarDefaultSize()} min={SIDEBAR_WIDTH.min} max={SIDEBAR_WIDTH.max} className="sidebar-panel">
         <Sidebar
           mode="project"
           agents={[]}
@@ -129,14 +130,15 @@ export default function ProjectsPage() {
             )}
           </div>
 
-          {activeProject && sidePanelOpen && (
+          {/* REQ-237：侧板常驻挂载（REQ-217⑤ 定案落地）——竖条随选中项目常驻，open 仅控制展开/收缩 */}
+          {activeProject && (
             <ProjectSidePanel
               project={activeProject}
               agents={agents}
               open={sidePanelOpen}
               view={panelView}
               onViewChange={setPanelView}
-              onClose={() => setSidePanelOpen(false)}
+              onOpenChange={setSidePanelOpen}
               onChanged={reload}
             />
           )}

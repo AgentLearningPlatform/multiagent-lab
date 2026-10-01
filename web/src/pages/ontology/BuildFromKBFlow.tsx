@@ -213,7 +213,7 @@ function KbBuildFlow() {
               type="info"
               showIcon
               style={{ marginTop: 12 }}
-              message={`「${selected.name}」尚无 KG`}
+              title={`「${selected.name}」尚无 KG`}
               description="策略 B / C 需要先抽取 KG。点击下方按钮用自研抽取器重建（REQ-98 LLM 主路径 + 规则回退，D-O15；graphrag 模式导入文档时也会自动构建）。"
               action={
                 <Button size="small" icon={<DatabaseOutlined />} loading={buildingKG === selected.id} onClick={() => buildKG(selected.id)}>
@@ -281,16 +281,16 @@ function KbBuildFlow() {
         <>
           {specTags}
           {result.warnings?.map((w, i) => (
-            <Alert key={i} type="warning" showIcon style={{ marginTop: 8 }} message={w} />
+            <Alert key={i} type="warning" showIcon style={{ marginTop: 8 }} title={w} />
           ))}
           {report?.ok ? (
-            <Alert type="success" showIcon style={{ marginTop: 8 }} message="本地结构校验通过（入库时构建平面仍会做权威校验）" />
+            <Alert type="success" showIcon style={{ marginTop: 8 }} title="本地结构校验通过（入库时构建平面仍会做权威校验）" />
           ) : (
             <>
-              <Alert type="error" showIcon style={{ marginTop: 8 }} message={`校验未通过（${report?.errors.length ?? 0} 项）——可直接修改下方 JSON 后入库，或重新生成`} />
+              <Alert type="error" showIcon style={{ marginTop: 8 }} title={`校验未通过（${report?.errors.length ?? 0} 项）——可直接修改下方 JSON 后入库，或重新生成`} />
               <Table<ValidationError>
                 rowKey={(r) => `${r.path}::${r.message}`}
-                columns={ERR_COLUMNS}
+                columns={ERR_COLUMNS} scroll={{ x: 'max-content' }}
                 dataSource={report?.errors ?? []}
                 pagination={false}
                 size="small"
@@ -303,7 +303,7 @@ function KbBuildFlow() {
               type="info"
               showIcon
               style={{ marginTop: 8 }}
-              message={`能力问题（CQ，REQ-90 ${result.cq_mode === 'auto' ? '自动生成' : '自定义'}）`}
+              title={`能力问题（CQ，REQ-90 ${result.cq_mode === 'auto' ? '自动生成' : '自定义'}）`}
               description={
                 <ul className="onto-report-list" style={{ margin: 0 }}>
                   {result.cqs.map((c, i) => (
@@ -340,7 +340,7 @@ function KbBuildFlow() {
         <Alert
           type="success"
           showIcon
-          message={`已入库：${ontoName || savedId}`}
+          title={`已入库：${ontoName || savedId}`}
           description="到「本体资产」栏查看产物与版本；到「本体运行」栏可部署为运行方案（如 SPARQL 型方案后可在工作台验证本体命中）。"
           action={
             <Button

@@ -73,7 +73,7 @@ export default function OntologyCompanionGraph({ ontologyId }: { ontologyId: str
     return (
       <div>
         {graph?.plan_error && (
-          <Alert type="warning" showIcon style={{ marginBottom: 8 }} message="宿主方案不可达" description={graph.plan_error} />
+          <Alert type="warning" showIcon style={{ marginBottom: 8 }} title="宿主方案不可达" description={graph.plan_error} />
         )}
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}

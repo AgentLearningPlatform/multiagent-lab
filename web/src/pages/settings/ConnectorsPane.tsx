@@ -234,6 +234,7 @@ export function ConnectorsPane() {
         rowKey="id"
         dataSource={connectors}
         pagination={false}
+        scroll={{ x: 860 }} /* REQ-237 F15：横向滚动兜底 */
         expandable={{
           // REQ-214 P2①：工具清单预览（授权前知道将得到什么工具；未测试过则不可展开）
           rowExpandable: (c) => (c.tools?.length ?? 0) > 0,
@@ -310,7 +311,7 @@ export function ConnectorsPane() {
         style={{ marginTop: 12 }}
         type="info"
         showIcon
-        message="安全边界：凭据仅在创建/编辑时提交一次（AES-256-GCM 加密落库），平台不回传明文；K8s/SSH 连接器由平台托管插件服务承载，工具调用仍受智能体「工具调用人工审批」约束。"
+        title="安全边界：凭据仅在创建/编辑时提交一次（AES-256-GCM 加密落库），平台不回传明文；K8s/SSH 连接器由平台托管插件服务承载，工具调用仍受智能体「工具调用人工审批」约束。"
       />
 
       <Modal

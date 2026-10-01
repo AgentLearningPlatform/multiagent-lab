@@ -132,7 +132,7 @@ export default function ProjectModal({
           type="info"
           showIcon
           style={{ marginBottom: 8 }}
-          message="绑定即授权"
+          title="绑定即授权"
           description="保存后，项目对话中的智能体即获得该目录范围内的文件读写权限（list_files / read_file / save_file + Git 只读展示）；路径越界由系统强制防护（无法访问目录之外）。请仅绑定可信目录。"
         />
         <Form.Item

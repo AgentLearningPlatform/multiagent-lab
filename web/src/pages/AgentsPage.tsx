@@ -3,6 +3,7 @@ import { Button, Result, Splitter } from 'antd'
 import { api } from '../api/client'
 import type { Agent, Conversation } from '../api/types'
 import { useUI } from '../store/ui'
+import { SIDEBAR_WIDTH, sidebarDefaultSize, sidebarRemember } from '../lib/layout'
 import Sidebar from '../components/Sidebar'
 import ChatWindow from '../components/ChatWindow'
 import AgentModal from '../components/AgentModal'
@@ -75,9 +76,9 @@ export default function AgentsPage() {
   return (
     <Splitter
       className="main sidebar-splitter"
-      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+      onResizeEnd={sidebarRemember}
     >
-      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+      <Splitter.Panel defaultSize={sidebarDefaultSize()} min={SIDEBAR_WIDTH.min} max={SIDEBAR_WIDTH.max} className="sidebar-panel">
         <Sidebar
           mode="agent"
           agents={agents}
@@ -123,11 +124,13 @@ export default function AgentsPage() {
             )}
           </div>
 
-          {activeAgent && sidePanelOpen && (
+          {/* REQ-237：侧板常驻挂载（REQ-217⑤「默认收缩 44px 竖条常驻右侧」定案落地）——
+              竖条随选中智能体常驻，open 仅控制展开/收缩，头部收放按钮与竖条入口同源 */}
+          {activeAgent && (
             <AgentSidePanel
               agent={activeAgent}
               open={sidePanelOpen}
-              onClose={() => setSidePanelOpen(false)}
+              onOpenChange={setSidePanelOpen}
               onChanged={reload}
             />
           )}

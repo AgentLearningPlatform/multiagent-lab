@@ -54,7 +54,7 @@ export default function ReferencesPane({ ontologyId }: { ontologyId: string }) {
       <Alert
         type="warning"
         showIcon
-        message="引用清单加载失败"
+        title="引用清单加载失败"
         description={err}
         action={
           <Button size="small" onClick={reload}>
@@ -68,7 +68,7 @@ export default function ReferencesPane({ ontologyId }: { ontologyId: string }) {
   return (
     <div data-testid="onto-references" style={{ maxWidth: 640 }}>
       {(refs.warnings ?? []).map((w, i) => (
-        <Alert key={i} type="warning" showIcon message={w} style={{ marginBottom: 12 }} />
+        <Alert key={i} type="warning" showIcon title={w} style={{ marginBottom: 12 }} />
       ))}
 
       <Section title="运行方案挂载" count={refs.runtime_plans.length}>

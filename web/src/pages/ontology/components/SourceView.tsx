@@ -181,12 +181,12 @@ export default function SourceView({ ontologyId, currentVersion, spec }: { ontol
                 )}
               </div>
               {origErr ? (
-                <Alert type="warning" showIcon message="原始源文件获取失败" description={origErr} />
+                <Alert type="warning" showIcon title="原始源文件获取失败" description={origErr} />
               ) : tooLarge ? (
                 <Alert
                   type="info"
                   showIcon
-                  message="源文件超过 1MB，已切换为下载查看"
+                  title="源文件超过 1MB，已切换为下载查看"
                   description={
                     <Button size="small" icon={<DownloadOutlined />} href={dlUrl} download target="_blank" rel="noreferrer">
                       下载查看

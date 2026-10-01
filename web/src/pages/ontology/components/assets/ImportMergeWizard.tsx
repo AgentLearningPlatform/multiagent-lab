@@ -138,7 +138,7 @@ export default function ImportMergeWizard({
         style={{ marginBottom: 14 }}
         items={[{ title: '文件与策略' }, { title: '冲突审查' }, { title: '应用' }]}
       />
-      {err && <Alert type="error" showIcon style={{ marginBottom: 10 }} message="操作失败" description={err} closable onClose={() => setErr(null)} />}
+      {err && <Alert type="error" showIcon style={{ marginBottom: 10 }} title="操作失败" description={err} closable onClose={() => setErr(null)} />}
 
       {step === 0 && (
         <>
@@ -146,7 +146,7 @@ export default function ImportMergeWizard({
             type="info"
             showIcon
             style={{ marginBottom: 10 }}
-            message="将外部本体文件并入当前本体（增量消歧而非一次性重建）"
+            title="将外部本体文件并入当前本体（增量消歧而非一次性重建）"
             description="支持构建平面可导入的格式（TTL/OWL 走 sidecar、CSV、GraphML、spec_json）。先做冲突预览，确认策略后再应用；应用会生成新版本快照，可随时回退。"
           />
           <Space direction="vertical" style={{ width: '100%' }} size={10}>
@@ -243,7 +243,7 @@ export default function ImportMergeWizard({
           <Alert
             type="success"
             showIcon
-            message={`合并已应用：新版本 v${appliedVersion}`}
+            title={`合并已应用：新版本 v${appliedVersion}`}
             description={
               <>
                 <p>

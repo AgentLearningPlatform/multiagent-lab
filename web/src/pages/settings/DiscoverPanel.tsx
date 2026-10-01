@@ -101,7 +101,7 @@ export function DiscoverPanel({ group, conns, onManualAdd, onClose, onAdded }: {
         <Alert
           type="warning"
           showIcon
-          message="自动发现接口未就绪，可手动添加"
+          title="自动发现接口未就绪，可手动添加"
           description={`${error}（POST /api/model-connections/{id}/list-models；anthropic 网关若未实现 /v1/models 请手动添加）`}
         />
         <div className="discover-foot">
@@ -124,7 +124,7 @@ export function DiscoverPanel({ group, conns, onManualAdd, onClose, onAdded }: {
           type="info"
           showIcon
           style={{ marginBottom: 8 }}
-          message="组内含多协议连接（REQ-177）：自动发现按锚点接入点协议执行；其他协议的模型请「手动添加」后按连接调整协议与 Base URL。"
+          title="组内含多协议连接（REQ-177）：自动发现按锚点接入点协议执行；其他协议的模型请「手动添加」后按连接调整协议与 Base URL。"
         />
       )}
       <div className="discover-toolbar">

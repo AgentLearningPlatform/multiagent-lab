@@ -586,7 +586,7 @@ export default function LearnPage() {
                 type="success"
                 showIcon
                 style={{ marginBottom: 10 }}
-                message="同一份本体在不同引擎下行为不同——这是本体运行环节的核心学习点"
+                title="同一份本体在不同引擎下行为不同——这是本体运行环节的核心学习点"
                 description="推理对照已随 Fuseki（O6）激活：对同一本体建两套 Fuseki 方案（推理一开一关），同一 SPARQL 并行发往两套方案对照结果差异（推荐用 subClassOf 子类实例验证类型传导）。"
               />
               <div className="onto-learn-cards">
@@ -643,7 +643,7 @@ export default function LearnPage() {
                       </Button>
                     </div>
                   ))}
-                  <Alert type="success" showIcon message="7 示例本体已齐（REQ-91 ③ + REQ-153 大型种子）" description="覆盖构建路径与规模梯度：K8s 迷你运维（手写，seed-sample）、软件缺陷管理（AI 生成）、组织与人员（复用对照 FOAF）、设备故障知识（分类+灌装路径，第 5 例随 O13 KB 构建路径）+ 医学常识（med_common，102 概念/170 实例，禁忌关系网）、基因与中心法则（gene_core，104 概念/94 实例，命名对齐 HGNC）两个百级大型种子（REQ-153，兼作 NFR-O-3 性能载体）。每份示例附建模说明（seeds/learning/examples/*.README.md：背景/CQ/决策记录/局限）。" />
+                  <Alert type="success" showIcon title="7 示例本体已齐（REQ-91 ③ + REQ-153 大型种子）" description="覆盖构建路径与规模梯度：K8s 迷你运维（手写，seed-sample）、软件缺陷管理（AI 生成）、组织与人员（复用对照 FOAF）、设备故障知识（分类+灌装路径，第 5 例随 O13 KB 构建路径）+ 医学常识（med_common，102 概念/170 实例，禁忌关系网）、基因与中心法则（gene_core，104 概念/94 实例，命名对齐 HGNC）两个百级大型种子（REQ-153，兼作 NFR-O-3 性能载体）。每份示例附建模说明（seeds/learning/examples/*.README.md：背景/CQ/决策记录/局限）。" />
                 </div>
               )}
             </Card>

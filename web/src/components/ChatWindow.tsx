@@ -339,8 +339,8 @@ function ChatChip({ on, disabled, icon, label, title, onClick }: {
 const BUBBLE_ROLES: BubbleListProps['role'] = {
   user: {
     placement: 'end',
-    avatar: <Avatar icon={<UserOutlined />} style={{ background: '#4f46e5', color: '#fff' }} />,
-    styles: { content: { background: '#4f46e5', color: '#fff', borderRadius: 12, borderBottomRightRadius: 4 } },
+    avatar: <Avatar icon={<UserOutlined />} style={{ background: 'var(--c-brand)', color: '#fff' }} />,
+    styles: { content: { background: 'var(--c-brand)', color: '#fff', borderRadius: 12, borderBottomRightRadius: 4 } },
   },
   ai: {
     placement: 'start',
@@ -1628,7 +1628,7 @@ export default function ChatWindow({
             <Alert
               type="warning"
               showIcon
-              message={`工具调用等待审批：${interrupt.toolName}`}
+              title={`工具调用等待审批：${interrupt.toolName}`}
               description={
                 <div className="chat-interrupt-body">
                   <pre className="chat-interrupt-args">{interrupt.arguments || '（无参数）'}</pre>
@@ -1646,7 +1646,7 @@ export default function ChatWindow({
             <Alert
               type="warning"
               showIcon
-              message={`智能体需要你的输入：${interrupt.question}`}
+              title={`智能体需要你的输入：${interrupt.question}`}
               description={
                 <div className="chat-interrupt-body">
                   {interrupt.choices.length > 0 && (

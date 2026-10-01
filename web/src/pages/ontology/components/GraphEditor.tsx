@@ -252,7 +252,7 @@ export default function GraphEditor({
           type="error"
           showIcon
           style={{ marginBottom: 8 }}
-          message="校验未通过，未保存"
+          title="校验未通过，未保存"
           description={
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {saveErrors.map((e, i) => (

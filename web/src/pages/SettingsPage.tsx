@@ -6,6 +6,7 @@ import { api } from '../api/client'
 import type { ProviderGroupMeta } from '../api/client'
 import type { InferenceBackendStatus, ModelConnection, UsageGroupBy, UsageRow } from '../api/types'
 import { useUI } from '../store/ui'
+import { SIDEBAR_WIDTH, sidebarDefaultSize, sidebarRemember } from '../lib/layout'
 import { DiscoverPanel } from './settings/DiscoverPanel'
 import { ModelModal } from './settings/ModelModal'
 import { ProviderModal } from './settings/ProviderModal'
@@ -252,9 +253,9 @@ export default function SettingsPage() {
   return (
     <Splitter
       className="main sidebar-splitter"
-      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+      onResizeEnd={sidebarRemember}
     >
-      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+      <Splitter.Panel defaultSize={sidebarDefaultSize()} min={SIDEBAR_WIDTH.min} max={SIDEBAR_WIDTH.max} className="sidebar-panel">
         <aside className="sidebar">
           <div className="side-head">
             <span className="side-title">设置</span>
@@ -306,7 +307,7 @@ export default function SettingsPage() {
               <div className="settings-head">
                 <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4 }}>模型管理</Typography.Title>
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                  提供商按接入配置聚合（同一供应商可多实例，REQ-148）；协议为模型连接属性（REQ-177）——同一供应商下可同时存在 openai_compat 与 anthropic（Messages API，含厂商 Anthropic 兼容端点）协议的模型连接，列表按供应商名展示。chat / embedding 各设一条默认模型，供智能体「跟随全局默认」引用。API Key 使用 AES-256-GCM 加密存储于本地（密钥文件 data/.secret）。添加提供商可从厂商预设（Anthropic / DeepSeek / 智谱 GLM / Kimi / 百炼 / 千帆 / 硅基流动 / MiniMax / 星火）快速填充；已预置「百度千帆（预置）」embeddings-v1 向量连接候选——填入 Key 并启用即为默认向量连接。
+                  提供商按接入配置聚合（同一供应商可多实例，REQ-148）；协议为模型连接属性（REQ-177）。chat / embedding 各设一条默认连接，供智能体「跟随全局默认」引用；API Key 加密存储本地。添加提供商可从厂商预设快速填充。
                 </Typography.Paragraph>
               </div>
 
@@ -315,7 +316,7 @@ export default function SettingsPage() {
                   type="warning"
                   showIcon
                   style={{ marginTop: 12 }}
-                  message="尚未配置可用的对话模型"
+                  title="尚未配置可用的对话模型"
                   description="预置了「DeepSeek（预置）」连接：填入 API Key 并启用、设为默认，即可开始对话。"
                 />
               )}

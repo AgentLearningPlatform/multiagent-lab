@@ -193,7 +193,7 @@ function CustomFlow({ onGoKbPath }: { onGoKbPath?: () => void }) {
           type="success"
           showIcon
           style={{ marginTop: 12 }}
-          message={`当前工作本体：${activeId}`}
+          title={`当前工作本体：${activeId}`}
           description="S1~S4 完成后：到「本体资产」栏查看产物与版本，到「本体运行」栏部署为运行方案（S5~S7 已移交）。"
           action={
             <Button
@@ -363,7 +363,7 @@ function S1Source({ onCreated, onGoKbPath }: { onCreated: (selectId?: string) =>
       type={report.lossy ? 'warning' : 'success'}
       showIcon
       style={{ marginTop: 12 }}
-      message={`导入报告：格式 ${report.format}${report.lossy ? '（有损）' : '（无损）'}`}
+      title={`导入报告：格式 ${report.format}${report.lossy ? '（有损）' : '（无损）'}`}
       description={
         report.warnings?.length || report.lossy_note ? (
           <ul className="onto-report-list">
@@ -484,7 +484,7 @@ function S1Source({ onCreated, onGoKbPath }: { onCreated: (selectId?: string) =>
                     <Tag color="purple" style={{ margin: 0 }}>实例 {aiResult.spec?.instances?.length ?? 0}</Tag>
                     <Tag style={{ margin: 0 }}>rounds {aiResult.rounds ?? '—'}</Tag>
                   </Space>
-                  {aiResult.warning && <Alert type="warning" showIcon style={{ marginTop: 8 }} message={aiResult.warning} />}
+                  {aiResult.warning && <Alert type="warning" showIcon style={{ marginTop: 8 }} title={aiResult.warning} />}
                   <Space style={{ marginTop: 10 }} size={8}>
                     <Input
                       value={aiName}
@@ -619,10 +619,10 @@ function S2EditPane({ ontologyId, spec, onSaved, onNext }: { ontologyId: string;
       />
       {validationErrors.length > 0 && (
         <>
-          <Alert type="error" showIcon style={{ marginTop: 12 }} message={`校验未通过（${validationErrors.length} 项）`} />
+          <Alert type="error" showIcon style={{ marginTop: 12 }} title={`校验未通过（${validationErrors.length} 项）`} />
           <Table<ValidationError>
             rowKey={(r) => `${r.path}::${r.message}`}
-            columns={ERR_COLUMNS}
+            columns={ERR_COLUMNS} scroll={{ x: 'max-content' }}
             dataSource={validationErrors}
             pagination={false}
             size="small"
@@ -670,12 +670,12 @@ function S3ValidatePane({ ontologyId, onNext }: { ontologyId: string; onNext: ()
       </Space>
       <p className="onto-detail-empty">JSON Schema + 引用完整性校验（保存时同样自动执行；此处可手动复跑）。</p>
       {result?.ok && (
-        <Alert type="success" showIcon style={{ marginTop: 4 }} message="校验通过" description="可进入 S4 可视化；运行部署到「本体运行」栏。" />
+        <Alert type="success" showIcon style={{ marginTop: 4 }} title="校验通过" description="可进入 S4 可视化；运行部署到「本体运行」栏。" />
       )}
       {result && result.errors.length > 0 && (
         <Table<ValidationError>
           rowKey={(r) => `${r.path}::${r.message}`}
-          columns={ERR_COLUMNS}
+          columns={ERR_COLUMNS} scroll={{ x: 'max-content' }}
           dataSource={result.errors}
           pagination={false}
           size="small"
@@ -705,7 +705,7 @@ function KgGuide() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="KG 消费流程——自研 KG 图谱 / GraphRAG 试查 / 决策溯源（「消费与审计」栏承载）"
+        title="KG 消费流程——自研 KG 图谱 / GraphRAG 试查 / 决策溯源（「消费与审计」栏承载）"
         description="知识库 chunk 语料经 REQ-98 LLM 能力代理抽取为自存 KG（SQLite 实体/关系/claim，D-O15），再消费为 GraphRAG 检索上下文或由 KG 直转本体（策略 B/C）；抽取/构建决策全程留痕可溯源。原 semantica worker 依赖已归档休眠。"
       />
       <div className="onto-sec" style={{ marginTop: 0 }}>
@@ -748,7 +748,7 @@ function OoGuide() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="Open Ontologies 流程——双轨构建（oo serve-http :8092 已集成，M8.5）"
+        title="Open Ontologies 流程——双轨构建（oo serve-http :8092 已集成，M8.5）"
         description="open-ontologies v2.0.1（Rust 单二进制，MIT）：119 个 onto_* MCP 工具（推理/SHACL/映射/Data Pipeline/版本/FOL），serve-http 原生 Streamable HTTP；平台经 /api/oo/ 同源反代，对话可在智能体 MCP 预设一键挂载。其本体为 TTL 文件集（data-dir 自管），不进主线 spec_json 体系。"
       />
       <div className="onto-sec" style={{ marginTop: 0 }}>

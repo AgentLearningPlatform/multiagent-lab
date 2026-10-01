@@ -12,6 +12,14 @@
   --c-brand: #4f46e5;
   --c-err: #c2373f;
   --c-err-weak: #fdeef0;
+  /* 别名令牌（REQ-237 F13 清账）：历史内联样式的 --c-border/--c-bg-soft 原为无定义幽灵令牌（全靠 fallback） */
+  --c-border: var(--c-line);
+  --c-bg-soft: var(--c-bg);
+  /* z-index 层级约定（REQ-237 F14）：顶栏 10 < 悬浮钮 6 < 拖拽手柄 5 < 局部浮层 1 */
+  --z-topnav: 10;
+  --z-float: 6;
+  --z-resizer: 5;
+  --z-raised: 1;
   --mono: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
   /* 智能体标识：与顶栏品牌同源的三节点网络标记（mask 单处定义，靠 currentColor 上色） */
   --agent-glyph-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 6.6 6.4 15.5M12 6.6l5.6 8.9M7.4 16.2h9.2'/%3E%3Ccircle cx='12' cy='5.2' r='2.5' fill='black'/%3E%3Ccircle cx='5.6' cy='16.6' r='2.2' fill='black'/%3E%3Ccircle cx='18.4' cy='16.6' r='2.2' fill='black'/%3E%3C/svg%3E");
@@ -34,7 +42,7 @@ body { font-size: 14px; background: var(--c-bg); }
   background: linear-gradient(180deg, #ffffff 0%, #fbfbfe 100%);
   border-bottom: 1px solid var(--c-line);
   box-shadow: 0 1px 2px rgba(28, 33, 48, 0.03);
-  position: relative; z-index: 10;
+  position: relative; z-index: var(--z-topnav);
 }
 
 /* 品牌区：渐变几何标记（多智能体联结点）+ 词标 / Lab 徽标 / 副标题 */
@@ -204,7 +212,7 @@ body { font-size: 14px; background: var(--c-bg); }
 .msg-list.running .ant-bubble-list-scroll-content { padding-bottom: 56px; }
 
 /* 运行中的停止入口：悬浮于消息流右下（与消息列右缘对齐），复用既有 stop()（abort + POST /stop） */
-.chat-stop { position: absolute; z-index: 6; right: max(24px, calc((100% - var(--chat-col)) / 2)); bottom: 16px; }
+.chat-stop { position: absolute; z-index: var(--z-float); right: max(24px, calc((100% - var(--chat-col)) / 2)); bottom: 16px; }
 .chat-stop-btn {
   display: inline-flex; align-items: center; gap: 7px;
   height: 34px; padding: 0 14px; border-radius: 999px;
@@ -451,11 +459,8 @@ pre.raw-json {
 .cmp-switch { display: inline-flex; align-items: center; gap: 5px; }
 .cmp-switch-label { font-size: 12px; color: var(--c-ink-2); }
 .cmp-history { margin: 4px 12px 0; border-bottom: 1px dashed var(--c-line); }
-.cmp-history .ant-bubble { max-width: 880px; margin-inline: auto; }
-.cmp-grid {
-  flex: 1; min-height: 0; display: grid;
-  grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr)); /* 2~4 列横向等分 */
-}
+.cmp-history .ant-bubble { max-width: var(--chat-col); margin-inline: auto; } /* REQ-237 F8：与主消息列并轨（原 880 双标准） */
+/* REQ-237 F17：.cmp-grid 死代码删除（Splitter 方案取代后无引用） */
 .cmp-pane {
   min-width: 0; min-height: 0; display: flex; flex-direction: column;
   border-left: 1px solid var(--c-line);
@@ -465,14 +470,14 @@ pre.raw-json {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   padding: 6px 10px; border-bottom: 1px solid var(--c-line); background: rgba(127, 127, 155, 0.04);
 }
-.cmp-pane-title { font-size: 12px; font-weight: 600; color: var(--c-ink-1); white-space: nowrap; }
+.cmp-pane-title { font-size: 12px; font-weight: 600; color: var(--c-ink); white-space: nowrap; } /* 原 --c-ink-1 幽灵令牌修正 */
 .cmp-pane-badges { display: inline-flex; gap: 4px; flex-wrap: wrap; min-width: 0; }
 .cmp-badge {
   font-size: 10.5px; line-height: 16px; padding: 0 5px; border-radius: 4px;
   color: var(--c-ink-3); background: #f0f1f7; max-width: 130px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.cmp-badge.set { color: #4f46e5; background: rgba(79, 70, 229, 0.08); font-weight: 500; }
+.cmp-badge.set { color: var(--c-brand); background: rgba(79, 70, 229, 0.08); font-weight: 500; }
 .cmp-pane-stream { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; }
 .cmp-pane-stream .ant-bubble { max-width: none; margin-inline: 0; }
 .cmp-pane-empty {
@@ -500,8 +505,8 @@ pre.raw-json {
 /* REQ-150② 窗格状态对齐：流式/完成/出错/已停止状态点（生成中脉冲） */
 .cmp-pane-status { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--c-ink-3); white-space: nowrap; }
 .cmp-pane-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-ink-3, #999); flex: none; }
-.cmp-pane-status.st-streaming { color: #4f46e5; }
-.cmp-pane-status.st-streaming .dot { background: #4f46e5; animation: cmp-pulse 1.2s ease-in-out infinite; }
+.cmp-pane-status.st-streaming { color: var(--c-brand); }
+.cmp-pane-status.st-streaming .dot { background: var(--c-brand); animation: cmp-pulse 1.2s ease-in-out infinite; }
 .cmp-pane-status.st-done { color: #389e0d; }
 .cmp-pane-status.st-done .dot { background: #389e0d; }
 .cmp-pane-status.st-error { color: #d4380d; }

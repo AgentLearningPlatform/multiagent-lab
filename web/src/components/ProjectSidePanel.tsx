@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 import { Alert, Button, Checkbox, Divider, Empty, Form, Input, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import {
   BranchesOutlined,
-  CloseOutlined,
   DoubleLeftOutlined,
   DoubleRightOutlined,
   FileOutlined,
@@ -93,8 +92,9 @@ function gitStatusTag(s?: string | null) {
 
 /**
  * 项目右侧侧边栏（REQ-102，§VSCode activity bar 范式）：
- * 左侧 ~44px 小图标条（文件 / Git / 配置）+ 右侧视图区（~320px）。
- * 由 ProjectsPage 渲染为内容区 flex 兄弟节点，ChatWindow 头部提供开合入口。
+ * 左侧 44px 小图标条（文件 / Git / 配置，常驻）+ 右侧视图区（展开宽度 320~720 可拖拽记忆）。
+ * 由 ProjectsPage 渲染为内容区 flex 兄弟节点；REQ-237：面板常驻挂载（竖条对齐 REQ-217⑤
+ * 「常驻右侧」定案），open 仅控制展开/收缩，ChatWindow 头部提供同源开合入口。
  */
 export default function ProjectSidePanel({
   project,
@@ -102,15 +102,17 @@ export default function ProjectSidePanel({
   open,
   view,
   onViewChange,
-  onClose,
+  onOpenChange,
   onChanged,
 }: {
   project: Project
   agents: Agent[]
+  /** 展开态（true=内容面板，false=竖条）；面板常驻挂载（REQ-237） */
   open: boolean
   view: PanelView
   onViewChange: (v: PanelView) => void
-  onClose: () => void
+  /** 展开态变化（竖条点入口展开=true、再点收起=false）；与 ChatWindow 头部收放按钮同源 */
+  onOpenChange?: (open: boolean) => void
   onChanged?: () => void
 }) {
   // REQ-21803/M49：拖拽宽度（clamp 320~720 + localStorage 记忆 + 双击复位）
@@ -139,16 +141,22 @@ export default function ProjectSidePanel({
   }
   // REQ-21705/M48：默认收缩为一竖行按钮常驻右侧；点击按钮展开、再点同一按钮收起
   const [collapsed, setCollapsed] = useState(true)
+  // REQ-237：常驻挂载后 open=展开态权威（头部收放按钮/竖条入口双向同步）
+  useEffect(() => {
+    setCollapsed(!open)
+  }, [open])
   const switchView = (v: PanelView) => {
     if (v === view && !collapsed) {
       setCollapsed(true)
+      onOpenChange?.(false)
       return
     }
     onViewChange(v)
+    if (collapsed) onOpenChange?.(true)
     setCollapsed(false)
   }
   return (
-    <aside className={`proj-panel${open ? ' open' : ''}`} style={{ width: collapsed ? PANEL_BAR_WIDTH : panelWidth }}>
+    <aside className="proj-panel" style={{ width: collapsed ? PANEL_BAR_WIDTH : panelWidth }}>
       {!collapsed && (
         <div
           className="proj-panel-resizer"
@@ -197,19 +205,22 @@ export default function ProjectSidePanel({
           </button>
         </Tooltip>
         <span className="proj-bar-spacer" />
+        {/* REQ-237：竖条常驻后无「关闭」态——展开/收起即开合（原「关闭侧边栏」按钮退役，与收起语义重复） */}
         <Tooltip title={collapsed ? '展开侧边栏' : '收起为竖条'} placement="left">
           <button
             type="button"
             className="proj-bar-btn"
             aria-label={collapsed ? '展开侧边栏' : '收起为竖条'}
-            onClick={() => (collapsed ? setCollapsed(false) : switchView(view))}
+            onClick={() => {
+              if (collapsed) {
+                onOpenChange?.(true)
+                setCollapsed(false)
+              } else {
+                switchView(view)
+              }
+            }}
           >
             {collapsed ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
-          </button>
-        </Tooltip>
-        <Tooltip title="关闭侧边栏" placement="left">
-          <button type="button" className="proj-bar-btn" aria-label="关闭侧边栏" onClick={onClose}>
-            <CloseOutlined />
           </button>
         </Tooltip>
       </div>
@@ -333,7 +344,7 @@ function FilesView({ project, onOpenConfig }: { project: Project; onOpenConfig: 
       </div>
 
       {err ? (
-        <Alert type="warning" showIcon message="目录读取失败" description={err} />
+        <Alert type="warning" showIcon title="目录读取失败" description={err} />
       ) : previewLoading ? (
         <Spin size="small" />
       ) : previewErr ? (
@@ -343,7 +354,7 @@ function FilesView({ project, onOpenConfig }: { project: Project; onOpenConfig: 
               返回
             </Button>
           </div>
-          <Alert type="info" showIcon message="无法预览" description={previewErr} />
+          <Alert type="info" showIcon title="无法预览" description={previewErr} />
         </>
       ) : preview ? (
         <>
@@ -515,7 +526,7 @@ function GitView({ project }: { project: Project }) {
   if (err) {
     return (
       <div className="proj-view-body">
-        <Alert type="warning" showIcon message="Git 信息读取失败" description={err} />
+        <Alert type="warning" showIcon title="Git 信息读取失败" description={err} />
       </div>
     )
   }
@@ -546,7 +557,7 @@ function GitView({ project }: { project: Project }) {
             {patch?.path || '提交完整 diff'}
           </span>
         </div>
-        {patchLoading ? <Spin size="small" /> : patchErr ? <Alert type="info" showIcon message="无法查看 diff" description={patchErr} /> : <pre className="proj-preview">{patch?.text || '（空 diff）'}</pre>}
+        {patchLoading ? <Spin size="small" /> : patchErr ? <Alert type="info" showIcon title="无法查看 diff" description={patchErr} /> : <pre className="proj-preview">{patch?.text || '（空 diff）'}</pre>}
       </div>
     )
   }
@@ -757,7 +768,7 @@ function ConfigView({ project, agents, onChanged }: { project: Project; agents: 
           type="info"
           showIcon
           style={{ marginBottom: 8 }}
-          message="绑定即授权"
+          title="绑定即授权"
           description="保存后，项目对话中的智能体即获得该目录范围内的文件读写权限（list_files / read_file / save_file + Git 只读展示）；路径越界由系统强制防护（无法访问目录之外）。请仅绑定可信目录；每次工具调用在对话时间线可审计。"
         />
         <Form.Item

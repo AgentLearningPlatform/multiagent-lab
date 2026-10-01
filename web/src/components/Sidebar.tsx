@@ -205,7 +205,7 @@ export default function Sidebar({
                   <span className="side-node-chev">{expanded ? <DownOutlined /> : <RightOutlined />}</span>
                   {/* 智能体用品牌同源的三节点标记；项目保留各自图标，一眼可辨 */}
                   <span className="side-node-dot">{isAgent ? <AgentLogo backend={n.backend} logoUrl={n.logo} size={16} /> : <ProjectOutlined />}</span>
-                  <span className="side-node-name" title={n.name}>{n.name}</span>
+                  <span className="side-node-name" title={n.name}>{n.name || (mode === 'project' ? '未命名项目' : '未命名智能体')}</span>
                   {n.builtin && <Tag color="geekblue" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>内置</Tag>}
                   <span className="side-node-count">{n.convs.length}</span>
                 </button>

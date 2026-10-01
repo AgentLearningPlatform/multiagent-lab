@@ -33,6 +33,7 @@ import HighlightSpans from '../components/HighlightSpans'
 import KGGraphView, { KGGovernancePanel, KGGlobalPanel } from '../components/KGGraphView'
 import type { KBDoc, KBHit, KnowledgeBase } from '../api/types'
 import { useUI } from '../store/ui'
+import { SIDEBAR_WIDTH, sidebarDefaultSize, sidebarRemember } from '../lib/layout'
 
 /** 文档索引状态 → antd Badge 状态（后端未知状态优雅回退） */
 const DOC_STATUS: Record<string, { status: BadgeProps['status']; text: string }> = {
@@ -353,9 +354,9 @@ export default function KnowledgePage() {
   return (
     <Splitter
       className="main sidebar-splitter"
-      onResizeEnd={(sizes) => localStorage.setItem('eino.sidebar.width', String(Math.round(sizes[0])))}
+      onResizeEnd={sidebarRemember}
     >
-      <Splitter.Panel defaultSize={Number(localStorage.getItem('eino.sidebar.width')) || 280} min={220} max={480} className="sidebar-panel">
+      <Splitter.Panel defaultSize={sidebarDefaultSize()} min={SIDEBAR_WIDTH.min} max={SIDEBAR_WIDTH.max} className="sidebar-panel">
         <aside className="sidebar">
           <div className="side-head">
             <span className="side-title">知识库</span>
@@ -469,25 +470,18 @@ export default function KnowledgePage() {
                 </Popconfirm>
               </div>
 
-              {modeOf(active) === 'graphrag' && (
-                <Alert
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 12 }}
-                  message="GraphRAG 子模块（M14；M16 图谱增强已启用）"
-                  description="文档索引后自动把 chunks 同步抽取为自存 KG（D-O15 自研抽取：REQ-98 LLM 主路径 + 规则回退，零外部进程）；检索优先 GraphRAG，KG 无命中自动回退向量检索（不阻断）。下方「图谱视图」支持实体搜索、邻域展开、claims 溯源与聚焦检索（REQ-127/128）。"
-                />
-              )}
-              {modeOf(active) === 'graphrag' && <KGGraphView kbID={active.id} />}
-              {modeOf(active) === 'graphrag' && <KGGovernancePanel kbID={active.id} />}
-              {modeOf(active) === 'graphrag' && <KGGlobalPanel kbID={active.id} />}
+              {/* REQ-237（57 号 F6 整改）：GraphRAG 详情四页签——图谱与统计 / 抽取治理 / 全局问答 / 文档与检索，
+                  原「Alert+三大卡先于文档表」纵向巨页退役；RAG 模式维持直排。Tabs 懒挂载：
+                  图谱/治理/全局问答首访才取数，首屏不再全量拉取 */}
               <div className="stat-strip">
                 <StatTile k="文档" v={docs.length} />
                 <StatTile k="Chunks" v={docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0)} />
                 <StatTile k="TopK" v={active.top_k ?? '—'} />
                 <StatTile k="min_score" v={active.min_score ?? '—'} />
               </div>
-
+              {(() => {
+                const docRetrievalCards = (
+                  <>
               <Card
                 className="work-card"
                 size="small"
@@ -597,7 +591,7 @@ export default function KnowledgePage() {
                   columns={columns}
                   dataSource={docs}
                   loading={docsLoading}
-                  pagination={false}
+                  pagination={{ pageSize: 10, hideOnSinglePage: true, showSizeChanger: false }} /* REQ-237 F6：长列表分页（原无限增高） */
                   size="middle"
                   locale={{ emptyText: '暂无文档，点击右上「上传文档」导入 txt / md' }}
                 />
@@ -656,7 +650,7 @@ export default function KnowledgePage() {
                     type="warning"
                     showIcon
                     style={{ marginTop: 12 }}
-                    message="GraphRAG worker 不可达，本次结果来自向量检索回退（降级不阻断）"
+                    title="GraphRAG worker 不可达，本次结果来自向量检索回退（降级不阻断）"
                     description={searchMeta.error}
                   />
                 )}
@@ -687,6 +681,38 @@ export default function KnowledgePage() {
                   </div>
                 )}
               </Card>
+                </>
+                )
+                return modeOf(active) === 'graphrag' ? (
+                  <Tabs
+                    key={active.id}
+                    defaultActiveKey="graph"
+                    items={[
+                      {
+                        key: 'graph',
+                        label: '图谱与统计',
+                        children: (
+                          <>
+                            <Alert
+                              type="info"
+                              showIcon
+                              style={{ marginBottom: 12 }}
+                              title="GraphRAG 子模块（M14；M16 图谱增强已启用）"
+                              description="文档索引后自动把 chunks 同步抽取为自存 KG（D-O15 自研抽取：REQ-98 LLM 主路径 + 规则回退，零外部进程）；检索优先 GraphRAG，KG 无命中自动回退向量检索（不阻断）。图谱视图支持实体搜索、邻域展开、claims 溯源与聚焦检索（REQ-127/128）。"
+                            />
+                            <KGGraphView kbID={active.id} />
+                          </>
+                        ),
+                      },
+                      { key: 'governance', label: '抽取治理', children: <KGGovernancePanel kbID={active.id} /> },
+                      { key: 'global', label: '全局问答', children: <KGGlobalPanel kbID={active.id} /> },
+                      { key: 'docs', label: '文档与检索', children: docRetrievalCards },
+                    ]}
+                  />
+                ) : (
+                  docRetrievalCards
+                )
+              })()}
             </>
           )}
         </div>

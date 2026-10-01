@@ -1,3 +1,4 @@
+import { SIDEBAR_WIDTH, sidebarDefaultSize, sidebarRemember } from '../lib/layout'
 import { useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { Card, Menu, Space, Splitter, Tag, Typography } from 'antd'
 import {
@@ -224,7 +225,7 @@ function SourceMap({ meta, onOpenDoc }: { meta: Frontmatter; onOpenDoc: (path: s
               return clickable ? (
                 <Tag
                   key={it}
-                  style={{ marginInlineEnd: 6, cursor: 'pointer', color: '#4f46e5', borderColor: '#4f46e5' }}
+                  style={{ marginInlineEnd: 6, cursor: 'pointer', color: 'var(--c-brand)', borderColor: 'var(--c-brand)' }}
                   onClick={() => onOpenDoc(file)}
                 >
                   {it} · 点击查看
@@ -285,11 +286,12 @@ export default function ReferencePage() {
   }
   return (
     <>
-      <Splitter className="main sidebar-splitter">
+      {/* REQ-237（57 号 F4）：左栏宽度并入全站单一约定（eino.sidebar.width/280/220/480 + 写入回填；原独用 eino.ref.width 退役） */}
+      <Splitter className="main sidebar-splitter" onResizeEnd={sidebarRemember}>
       <Splitter.Panel
-        defaultSize={Number(localStorage.getItem('eino.ref.width')) || 240}
-        min={180}
-        max={400}
+        defaultSize={sidebarDefaultSize()}
+        min={SIDEBAR_WIDTH.min}
+        max={SIDEBAR_WIDTH.max}
         className="sidebar-panel"
       >
         <aside className="sidebar">

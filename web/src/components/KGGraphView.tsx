@@ -376,7 +376,7 @@ export function KGGovernancePanel({ kbID }: { kbID: string }) {
       <Typography.Text strong style={{ fontSize: 12 }}>合并建议（规则 + 向量双臂，人工确认后执行）</Typography.Text>
       {vecDegraded && (
         <Alert type="warning" showIcon style={{ margin: '4px 0' }}
-          message="向量消歧建议降级：embedding 未配置或不可用，当前仅名称包含规则建议（M36/KB-7）" />
+          title="向量消歧建议降级：embedding 未配置或不可用，当前仅名称包含规则建议（M36/KB-7）" />
       )}
       {sugs.length === 0 ? (
         <div style={{ margin: '4px 0 10px' }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>暂无建议</Typography.Text></div>
@@ -556,7 +556,7 @@ export function KGGlobalPanel({ kbID }: { kbID: string }) {
         <Button type="primary" onClick={ask} disabled={comms.length === 0}>全局问答</Button>
       </div>
       {degraded && (
-        <Alert type="warning" showIcon style={{ marginTop: 8 }} message={degradedMsg || '社区摘要未就绪'} />
+        <Alert type="warning" showIcon style={{ marginTop: 8 }} title={degradedMsg || '社区摘要未就绪'} />
       )}
       {hits && (
         hits.length === 0 ? (

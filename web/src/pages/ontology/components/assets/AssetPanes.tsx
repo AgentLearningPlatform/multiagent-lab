@@ -51,14 +51,14 @@ export function ValidatePane({
           type="success"
           showIcon
           style={{ marginTop: 4 }}
-          message="校验通过"
+          title="校验通过"
           description="Spec 满足 Schema 与引用完整性约束，可导出 TTL 装载进 SPARQL 型运行方案。"
         />
       )}
       {result && result.errors.length > 0 && (
         <Table<ValidationError>
           rowKey={(r) => `${r.path}::${r.message}`}
-          columns={ERR_COLUMNS}
+          columns={ERR_COLUMNS} scroll={{ x: 'max-content' }}
           dataSource={result.errors}
           pagination={false}
           size="small"
@@ -112,7 +112,7 @@ export function ArtifactsPane({ ontologyId }: { ontologyId: string }) {
         </Button>
       </div>
       {err ? (
-        <Alert type="warning" showIcon message="产物清单获取失败" description={err} />
+        <Alert type="warning" showIcon title="产物清单获取失败" description={err} />
       ) : (
         <Table<ArtifactMeta>
           rowKey="format"
@@ -137,7 +137,7 @@ export function ExportPane({ ontology }: { ontology: Ontology }) {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="spec_json → Turtle 导出（O1 sidecar）"
+        title="spec_json → Turtle 导出（O1 sidecar）"
         description="从零创建的本体（仅有 spec_json）经此导出 RDF 形态后，可在 SPARQL 型运行方案（Oxigraph/Fuseki）中加载运行；消费与审计环节见本体模块「消费与审计」栏（D-O15 自研 KG）。"
       />
       <Space>

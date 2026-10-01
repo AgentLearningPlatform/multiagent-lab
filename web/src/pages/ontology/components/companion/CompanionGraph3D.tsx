@@ -204,7 +204,7 @@ export default function CompanionGraph3D({ data }: { data: CompanionGraph }) {
     }
   }
 
-  if (initErr) return <Alert type="warning" showIcon message="三维视图初始化失败" description={initErr} />
+  if (initErr) return <Alert type="warning" showIcon title="三维视图初始化失败" description={initErr} />
   if (nodes.length === 0) {
     return (
       <div className="work-empty" style={{ minHeight: 200 }}>

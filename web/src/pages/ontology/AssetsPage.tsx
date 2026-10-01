@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Input, Popconfirm, Result, Space, Splitter, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Input, Popconfirm, Result, Space, Splitter, Tag, Tooltip, Typography } from 'antd'
 import { BranchesOutlined, DeleteOutlined, EditOutlined, ImportOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
 import { companionApi } from '../../api/companion'
@@ -23,13 +23,47 @@ import EmptyGuide from '../../components/EmptyGuide'
 // ---------------------------------------------------------------------------
 // 本体资产（AssetsPage，REQ-104 ③）：全部已构建本体统一管理
 //   REQ-181 v2 重构：平台统一「左列表（来源分组）+ 右主区」两栏（原选择条在上+详情在下）；
-//   详情工作区 Tabs：
-//   Spec 编辑 | 校验 | 版本（含源码视图 REQ-93）| 产物 | 可视化 | TTL 导出 | CSV 灌装（REQ-96）
+//   详情工作区（REQ-237，57 号 F1 整改）：原 12 页签平铺改「左锚点分区导航 + 右内容」——
+//   三簇分组（内容与编辑 / 质量与演进 / 消费与引用），加分区不再加宽；
+//   Spec 编辑常驻保活（切分区不丢未保存编辑），其余分区激活挂载（沿原 destroyOnHidden 行为）。
+//   分区：Spec 编辑 | 校验 | 质量卡 | 版本与源码 | 进化 | 图形编辑 | CSV 灌装 |
+//         可视化 | 伴生候选 | 被引用 | 产物 | TTL 导出
 //   正交红线：不出现任何引擎、端口、启停配置（运行看本体运行栏）
 // B1（REQ-145/M22）：Spec 编辑/校验/产物/导出/选择条/重命名/可视化拆至 components/assets/。
 // REQ-233/M60：资产列表搜索 + 空态 EmptyGuide 接入 + 详情「被引用」聚合区块 + 删除确认引用预检
 // （running 方案引用服务端拦截 409、前端禁用；stopped/KB 引用警示放行——聚合源 GET /{id}/references）。
 // ---------------------------------------------------------------------------
+
+/** 详情工作区分区（三簇；57 号 F1 分组口径） */
+const SECTION_GROUPS: { title: string; items: { key: string; label: string }[] }[] = [
+  {
+    title: '内容与编辑',
+    items: [
+      { key: 'spec', label: 'Spec 编辑' },
+      { key: 'graph-edit', label: '图形编辑' },
+      { key: 'ingest', label: 'CSV 灌装' },
+    ],
+  },
+  {
+    title: '质量与演进',
+    items: [
+      { key: 'validate', label: '校验' },
+      { key: 'quality', label: '质量卡' },
+      { key: 'versions', label: '版本与源码' },
+      { key: 'evolution', label: '进化' },
+    ],
+  },
+  {
+    title: '消费与引用',
+    items: [
+      { key: 'graph', label: '可视化' },
+      { key: 'companion', label: '伴生候选' },
+      { key: 'references', label: '被引用' },
+      { key: 'artifacts', label: '产物' },
+      { key: 'export', label: 'TTL 导出' },
+    ],
+  },
+]
 
 export default function AssetsPage() {
   const { showToast } = useUI()
@@ -125,6 +159,8 @@ export default function AssetsPage() {
     setTabKey(null)
   }, [activeId])
   const validation = activeId ? validations[activeId] : undefined
+  // 详情分区键（REQ-230② 规则保留：伴生型本体默认打开「伴生候选」分区，其余默认 Spec 编辑）
+  const secKey = tabKey ?? (active && boundIds.has(active.id) ? 'companion' : 'spec')
 
   /** 被 N 套方案引用（只读徽标，增强正交可见性） */
   const refCount = (o: Ontology) => profiles.filter((p) => (p.ontology_ids ?? []).includes(o.id)).length
@@ -340,112 +376,78 @@ export default function AssetsPage() {
           )}
 
           {forkErr && (
-            <Alert type="error" showIcon closable message="Fork 失败" description={forkErr} onClose={() => setForkErr(null)} />
+            <Alert type="error" showIcon closable title="Fork 失败" description={forkErr} onClose={() => setForkErr(null)} />
           )}
 
           <Card className="work-card onto-stage-card" size="small">
-            <Tabs
-              activeKey={tabKey ?? (boundIds.has(active.id) ? 'companion' : 'spec')} /* REQ-230②：伴生型本体默认打开候选页签 */
-              onChange={(k) => setTabKey(k)}
-              destroyOnHidden
-              items={[
-                {
-                  key: 'spec',
-                  label: 'Spec 编辑',
-                  children: (
-                    <SpecEditorPane
-                      ontology={active}
-                      spec={spec}
-                      specLoading={specLoading}
-                      specErr={specErr}
-                      onReloadSpec={() => setSpecTick((t) => t + 1)}
-                      onMetaSaved={() => reloadOntos()}
-                      onSpecSaved={refreshAfterSave}
-                    />
-                  ),
-                },
-                {
-                  key: 'validate',
-                  label: '校验',
-                  children: (
-                    <ValidatePane
-                      ontologyId={active.id}
-                      result={validation ?? null}
-                      onResult={(r) => setValidations((v) => ({ ...v, [active.id]: r }))}
-                    />
-                  ),
-                },
-                {
-                  key: 'quality',
-                  label: '质量卡',
-                  children: <QualityCardPane ontologyId={active.id} />,
-                },
-                {
-                  key: 'versions',
-                  label: '版本与源码',
-                  children: <SourceView ontologyId={active.id} currentVersion={active.version} spec={spec} />,
-                },
-                {
-                  key: 'artifacts',
-                  label: '产物',
-                  children: <ArtifactsPane ontologyId={active.id} />,
-                },
-                {
-                  key: 'graph',
-                  label: '可视化',
-                  children: <VizTabs spec={spec} ontologyId={active.id} />,
-                },
-                {
-                  key: 'evolution',
-                  label: '进化',
-                  children: <EvolutionPane key={active.id} ontologyId={active.id} />,
-                },
-                {
-                  key: 'companion',
-                  label: (
-                    <span>
-                      伴生候选
-                      {boundIds.has(active.id) && (
-                        <Tooltip title="对话生长：有智能体绑定该本体为伴生归属（REQ-216）">
-                          <Tag color="geekblue" style={{ margin: 0, marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 5px' }}>
-                            对话生长
-                          </Tag>
-                        </Tooltip>
-                      )}
-                    </span>
-                  ),
-                  children: <OntologyCompanionPane key={active.id} ontologyId={active.id} />,
-                },
-                {
-                  key: 'references',
-                  label: '被引用',
-                  children: <ReferencesPane key={active.id} ontologyId={active.id} />,
-                },
-                {
-                  key: 'graph-edit',
-                  label: '图形编辑',
-                  children: (
-                    <GraphEditor ontologyId={active.id} spec={spec} onSpecSaved={refreshAfterSave} />
-                  ),
-                },
-                {
-                  key: 'export',
-                  label: 'TTL 导出',
-                  children: <ExportPane ontology={active} />,
-                },
-                {
-                  key: 'ingest',
-                  label: 'CSV 灌装',
-                  children: (
-                    <CsvIngestPane
-                      ontologyId={active.id}
-                      spec={spec}
-                      onIngested={() => refreshAfterSave()}
-                    />
-                  ),
-                },
-              ]}
-            />
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              {/* 左锚点分区导航（REQ-183 同款范式：sticky + 常显标签；三簇分组） */}
+              <nav
+                aria-label="资产详情分区导航"
+                style={{ width: 172, flexShrink: 0, position: 'sticky', top: 8, display: 'flex', flexDirection: 'column', gap: 10 }}
+              >
+                {SECTION_GROUPS.map((g) => (
+                  <div key={g.title} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: 'var(--c-ink-3)', padding: '0 4px' }}>{g.title}</span>
+                    {g.items.map((it) => (
+                      <button
+                        key={it.key}
+                        type="button"
+                        aria-current={secKey === it.key || undefined}
+                        className={`onto-engine-item${secKey === it.key ? ' active' : ''}`}
+                        style={{ textAlign: 'left', width: '100%' }}
+                        onClick={() => setTabKey(it.key)}
+                      >
+                        <span className="onto-engine-top">
+                          <span className="onto-engine-label">{it.label}</span>
+                          {it.key === 'companion' && boundIds.has(active.id) && (
+                            <Tooltip title="对话生长：有智能体绑定该本体为伴生归属（REQ-216）">
+                              <Tag color="geekblue" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                                对话生长
+                              </Tag>
+                            </Tooltip>
+                          )}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </nav>
+
+              {/* 右内容区：Spec 编辑常驻保活（切分区不丢未保存编辑），其余激活挂载 */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: secKey === 'spec' ? 'block' : 'none' }}>
+                  <SpecEditorPane
+                    ontology={active}
+                    spec={spec}
+                    specLoading={specLoading}
+                    specErr={specErr}
+                    onReloadSpec={() => setSpecTick((t) => t + 1)}
+                    onMetaSaved={() => reloadOntos()}
+                    onSpecSaved={refreshAfterSave}
+                  />
+                </div>
+                {secKey === 'validate' && (
+                  <ValidatePane
+                    ontologyId={active.id}
+                    result={validation ?? null}
+                    onResult={(r) => setValidations((v) => ({ ...v, [active.id]: r }))}
+                  />
+                )}
+                {secKey === 'quality' && <QualityCardPane ontologyId={active.id} />}
+                {secKey === 'versions' && <SourceView ontologyId={active.id} currentVersion={active.version} spec={spec} />}
+                {secKey === 'artifacts' && <ArtifactsPane ontologyId={active.id} />}
+                {secKey === 'graph' && <VizTabs spec={spec} ontologyId={active.id} />}
+                {secKey === 'evolution' && <EvolutionPane key={active.id} ontologyId={active.id} />}
+                {secKey === 'companion' && <OntologyCompanionPane key={active.id} ontologyId={active.id} />}
+                {secKey === 'references' && <ReferencesPane key={active.id} ontologyId={active.id} />}
+                {secKey === 'graph-edit' && <GraphEditor ontologyId={active.id} spec={spec} onSpecSaved={refreshAfterSave} />}
+                {secKey === 'export' && <ExportPane ontology={active} />}
+                {secKey === 'ingest' && (
+                  <CsvIngestPane ontologyId={active.id} spec={spec} onIngested={() => refreshAfterSave()} />
+                )}
+              </div>
+            </div>
           </Card>
         </>
       )}

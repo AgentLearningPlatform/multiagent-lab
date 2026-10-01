@@ -122,7 +122,7 @@ export default function AuditQueryTab({ kbId }: { kbId?: string }) {
               type="info"
               showIcon
               style={{ marginBottom: 10 }}
-              message="TTL 来源 = 本体 TTL 装载链路（运行平面 SPARQL，D-O19 边界规则①）"
+              title="TTL 来源 = 本体 TTL 装载链路（运行平面 SPARQL，D-O19 边界规则①）"
               description="对已装载本体做关键词级实体检索（跨谓词字面量包含匹配）——「本体被消费成什么样」的直观试查；KB 文本抽取 KG 的展示归知识库 GraphRAG 子模块，两源在本页签内可切换、永不混排。"
             />
             <Space size={10} wrap style={{ marginBottom: 10 }}>
@@ -171,7 +171,7 @@ export default function AuditQueryTab({ kbId }: { kbId?: string }) {
               type="info"
               showIcon
               style={{ marginBottom: 10 }}
-              message="文本来源 = KB 文本抽取 KG（GraphRAG 试查，D-O15 自研）"
+              title="文本来源 = KB 文本抽取 KG（GraphRAG 试查，D-O15 自研）"
               description="向量命中 → KG 一跳扩展（教学口径三步）；该来源的知识图谱管理归知识库 GraphRAG 子模块，本页签仅作消费侧对照试查（D-O19 边界规则②）。"
             />
             <Input.TextArea
@@ -197,7 +197,7 @@ export default function AuditQueryTab({ kbId }: { kbId?: string }) {
               </Typography.Text>
             </Space>
             {result?.degraded && (
-              <Alert type="warning" showIcon style={{ marginTop: 10 }} message="已降级为向量检索" description={result.error} />
+              <Alert type="warning" showIcon style={{ marginTop: 10 }} title="已降级为向量检索" description={result.error} />
             )}
             {result && !result.degraded && result.hits.length === 0 && (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '16px 0' }} description="无命中（换个问法或先建 KG）" />

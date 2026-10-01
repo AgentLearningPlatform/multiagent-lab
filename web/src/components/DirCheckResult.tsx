@@ -9,7 +9,7 @@ import type { DirValidation } from '../api/types'
  */
 export default function DirCheckResult({ result }: { result: DirValidation }) {
   if (!result.format_ok) {
-    return <Alert type="error" showIcon message="目录检测未通过" description={result.error || '路径不是绝对路径'} />
+    return <Alert type="error" showIcon title="目录检测未通过" description={result.error || '路径不是绝对路径'} />
   }
   return (
     <div className="dir-check">
@@ -17,7 +17,7 @@ export default function DirCheckResult({ result }: { result: DirValidation }) {
         <Alert
           type="warning"
           showIcon
-          message="部分信息获取失败"
+          title="部分信息获取失败"
           description={result.error}
           style={{ marginBottom: 6 }}
         />

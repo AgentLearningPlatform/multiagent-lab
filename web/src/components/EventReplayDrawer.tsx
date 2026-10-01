@@ -4,6 +4,7 @@ import { CaretRightOutlined, PauseOutlined, StepForwardOutlined } from '@ant-des
 import { api } from '../api/client'
 import type { RunEventDTO } from '../api/types'
 import { describeEvent, levelGated } from './ChatWindow'
+import { DRAWER_SIZES, drawerSizeProps } from '../lib/layout'
 
 /**
  * 事件流重放视图（M17 阶段二：M17 行"事件流导出与重放"，合并需求池「事件流重放视图」）：
@@ -99,7 +100,7 @@ export default function EventReplayDrawer({
   const percent = gated.length ? Math.round((cursor / gated.length) * 100) : 0
 
   return (
-    <Drawer open={open} onClose={onClose} width={680} title={`事件流重放 · ${title}`} destroyOnHidden>
+    <Drawer open={open} onClose={onClose} {...drawerSizeProps('replay', DRAWER_SIZES.medium)} title={`事件流重放 · ${title}`} destroyOnHidden>
       {loading ? (
         <Spin size="small" />
       ) : events.length === 0 ? (
@@ -138,7 +139,7 @@ export default function EventReplayDrawer({
               type="info"
               showIcon
               style={{ margin: '8px 0' }}
-              message={`简洁档：已隐藏 ${events.length - gated.length} 条调试细节事件（模型调用链路/装配快照）；切到详细/调试档可完整回放`}
+              title={`简洁档：已隐藏 ${events.length - gated.length} 条调试细节事件（模型调用链路/装配快照）；切到详细/调试档可完整回放`}
             />
           )}
           {level >= 1 && !hasDebugRecorded && (
@@ -146,7 +147,7 @@ export default function EventReplayDrawer({
               type="warning"
               showIcon
               style={{ margin: '8px 0' }}
-              message="该会话历史未记录调试细节"
+              title="该会话历史未记录调试细节"
               description="运行时未开启「调试事件入库」，或该会话早于该功能——存量运行不可追溯；在「过程展示」中开启后，之后的运行将留存。"
             />
           )}

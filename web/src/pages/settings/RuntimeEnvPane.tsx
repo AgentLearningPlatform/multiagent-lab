@@ -53,7 +53,7 @@ export function RuntimeEnvPane() {
   useEffect(load, [])
 
   if (err) {
-    return <Alert type="error" showIcon message={err} action={<Button size="small" onClick={() => { setErr(null); load() }}>重试</Button>} />
+    return <Alert type="error" showIcon title={err} action={<Button size="small" onClick={() => { setErr(null); load() }}>重试</Button>} />
   }
   if (!payload || !form) {
     return <div style={{ marginTop: 16 }}><Spin /></div>
@@ -198,7 +198,7 @@ function EngineExecMethodCard() {
   }
   return (
     <>
-      {err && <Alert type="error" showIcon style={{ marginTop: 12 }} message={err} closable onClose={() => setErr(null)} />}
+      {err && <Alert type="error" showIcon style={{ marginTop: 12 }} title={err} closable onClose={() => setErr(null)} />}
       {!cfg ? (
         <div style={{ marginTop: 16 }}>{err ? null : <Spin />}</div>
       ) : (

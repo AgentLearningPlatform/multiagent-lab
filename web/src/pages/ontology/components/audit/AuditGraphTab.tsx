@@ -89,7 +89,7 @@ export default function AuditGraphTab({ kbId, kbName }: { kbId?: string; kbName?
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message={
+        title={
           <Space size={8} wrap>
             <span>数据来源：知识库「{kbName || kbId}」（观测台只读展示；治理与重建入口在知识库模块）。本体 TTL 装载引擎后的运行态图谱在「本体资产 → 可视化 → 运行态实渲」（REQ-234③ 对齐 D-O19 观测台定位）</span>
             <Button

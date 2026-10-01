@@ -3,6 +3,7 @@ import { Alert, Button, Card, Drawer, Empty, Space, Spin, Table, Tag, Tooltip, T
 import type { ColumnsType } from 'antd/es/table'
 import { PlayCircleOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { api } from '../../../api/client'
+import { DRAWER_SIZES, drawerSizeProps } from '../../../lib/layout'
 import type { LifecyclePlan, LifecycleAction } from '../../../api/client'
 
 // ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ export default function LifecyclePane({ open, onClose }: { open: boolean; onClos
     <Drawer
       open={open}
       onClose={onClose}
-      width={880}
+      {...drawerSizeProps('lifecycle', DRAWER_SIZES.large)}
       title={
         <Space>
           <ThunderboltOutlined style={{ color: 'var(--c-brand)' }} />
@@ -116,14 +117,14 @@ export default function LifecyclePane({ open, onClose }: { open: boolean; onClos
         </Button>
       }
     >
-      {err && <Alert type="error" showIcon style={{ marginBottom: 10 }} message="生命周期计划加载失败" description={err} action={<Button size="small" onClick={load}>重试</Button>} />}
+      {err && <Alert type="error" showIcon style={{ marginBottom: 10 }} title="生命周期计划加载失败" description={err} action={<Button size="small" onClick={load}>重试</Button>} />}
 
       {results && (
         <Alert
           type={results.fails.length === 0 ? 'success' : 'warning'}
           showIcon
           style={{ marginBottom: 10 }}
-          message={`已执行 ${results.ok}/${results.total} 项动作`}
+          title={`已执行 ${results.ok}/${results.total} 项动作`}
           description={results.fails.length > 0 ? results.fails.join('；') : '全部动作成功；计划已重算。'}
         />
       )}
@@ -136,7 +137,7 @@ export default function LifecyclePane({ open, onClose }: { open: boolean; onClos
             type={plan.actions.length === 0 ? 'success' : 'info'}
             showIcon
             style={{ marginBottom: 10 }}
-            message={plan.actions.length === 0 ? '无待执行动作——期望态与实际态一致' : `计划包含 ${plan.actions.length} 项动作（start=拉起未运行方案；reload=spec 版本漂移重载）`}
+            title={plan.actions.length === 0 ? '无待执行动作——期望态与实际态一致' : `计划包含 ${plan.actions.length} 项动作（start=拉起未运行方案；reload=spec 版本漂移重载）`}
           />
           <Table
             rowKey="profile_id"

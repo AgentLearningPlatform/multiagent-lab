@@ -166,7 +166,7 @@ export default function WebVowlView({ ontologyId }: { ontologyId: string }) {
         <Alert
           type="warning"
           showIcon
-          message="WebVOWL 对照视图不可用"
+          title="WebVOWL 对照视图不可用"
           description={err}
           style={{ marginBottom: 8 }}
         />

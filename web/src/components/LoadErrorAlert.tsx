@@ -21,7 +21,7 @@ export default function LoadErrorAlert({
     <Alert
       type="error"
       showIcon
-      message={title}
+      title={title}
       description={message}
       style={style}
       action={
