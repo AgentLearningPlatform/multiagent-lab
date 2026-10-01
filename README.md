@@ -21,6 +21,10 @@
 - **执行后端可插拔**：进程内装配（默认）/ Docker 沙箱（每 Agent 独立容器）/ K8s Pod 后端（同接口扩展）。
 - **平台知识**：产品设计 / 技术原理 / 模块导读按模块组织，文档互引点击即读。
 
+## 官网（GitHub Pages）
+
+**https://xiaoyao.github.io/multiagent-lab/** —— 项目概览、模块详细介绍（构建期读取 `platform-knowledge/` 导读档，单源同步）与内置示例本体的在线可视化演示；推送 main 自动构建发布（`.github/workflows/website-deploy.yml`，首次需在仓库 Settings → Pages 将 Source 设为 GitHub Actions）。
+
 ## 快速开始
 
 ```bash
@@ -68,6 +72,7 @@ backend/              Go 主平台后端（:8080，含前端静态托管）
 ontology-service/     本体构建平面（:8091，spec_json 多形态资产 / 六路径 / qualitygate 质量门禁 / toolchain）
 runtime-manager/      本体运行平面（:8090，Oxigraph / Fuseki 引擎方案管理）
 web/                  React 18 + Vite + TS + AntD 6（src/pages 含 ontology 五栏与 settings/ 组件族）
+website/              项目官网（GitHub Pages，vite+React；构建期内联 platform-knowledge 导读与种子演示数据）
 platform-knowledge/   平台知识（产品设计 / 技术原理 / 模块导读，平台知识页内联渲染）
 docs/                 需求与设计文档（事实源，见下）
 seeds/ learning/      技能与示例本体内容单源

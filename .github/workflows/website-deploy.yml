@@ -1,0 +1,54 @@
+# REQ-238：项目官网（website/）构建并发布到 GitHub Pages
+# 内容单源：模块介绍构建期内联 platform-knowledge/ 模块导读页、演示数据内联
+# ontology-service/internal/seed/ 种子 spec——这些目录变更时站点随重建更新。
+# 首次启用需在仓库 Settings → Pages 将 Source 设为「GitHub Actions」。
+name: website-deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'platform-knowledge/**'
+      - 'ontology-service/internal/seed/**'
+      - 'web/src/api/types.ts'
+      - '.github/workflows/website-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Build website
+        working-directory: website
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

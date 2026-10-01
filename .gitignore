@@ -1,6 +1,8 @@
 backend/data/
 web/node_modules/
 web/dist/
+website/node_modules/
+website/dist/
 *.log
 web/tsconfig.tsbuildinfo
 *.tsbuildinfo

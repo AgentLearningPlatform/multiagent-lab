@@ -13,7 +13,7 @@
 - `runtime-manager/` 本体运行平面（:8090，多引擎方案管理：Oxigraph / Fuseki）
 - `web/` React 前端（Vite + AntD；本体模块五栏 IA：学习中心 / 构建 / 资产 / 运行 / 消费与审计）
 - `tools/` 工具脚本（`tools/semantica-worker/` 已归档休眠——代码保留、**勿重新启用**，D-O15）
-- `website/` 项目官网（GitHub Pages，REQ-238：vite+React 独立小站；构建期内联 platform-knowledge 导读档与种子 spec——内容单源；`.github/workflows/website-deploy.yml` 推送 main 自动发布，首次启用需 Settings→Pages 选 GitHub Actions）；- `deploy/` Docker Compose + Helm；`seeds/` 种子数据与学习中心内容包（学习包/方法论/外部资源单源）
+- `website/` 项目官网（GitHub Pages，REQ-238：vite+React 独立小站；构建期内联 platform-knowledge 导读档与种子 spec——内容单源；`.github/workflows/website-deploy.yml` 推送 main 自动发布，首次启用需 Settings→Pages 选 GitHub Actions）；- `website/` 项目官网（GitHub Pages，REQ-238：vite+React 独立小站；构建期内联 platform-knowledge 导读档与种子 spec——内容单源；`.github/workflows/website-deploy.yml` 推送 main 自动发布，首次启用需 Settings→Pages 选 GitHub Actions）；- `deploy/` Docker Compose + Helm；`seeds/` 种子数据与学习中心内容包（学习包/方法论/外部资源单源）
 - `docs/` **需求与开发进度统一管理目录**（G-5，2026-09-27；文档内维护人称谓一律用「开发者」，G-6）：需求事实源（01/03/11）+ 工程活文档（02/04/12/14 方案与里程碑进度）+ 治理台账（15/18）+ 冒烟清单（20）；`platform-knowledge/` **平台知识目录**（REQ-161/G-5）：按模块子目录放调研/开发/产品设计文档与模块导读——**页面「平台知识」与目录一致，agent 维护的文档人在页面可见**（REQ-161/169/184）；**收录规则（2026-10-01 重组，开发者指令「文档自顶向下按内容分模块组织管理」）**：各模块目录下 `08_调研预研/` 收录该模块的资料与调研预研（开源分析/调研报告/未拍板方案/已交付方案依据档）；模块根放**子模块实现状态文档**（每子模块一档记录当前实现+演进，本体=01_学习中心~05_消费与审计 五档已落、智能体=53~56 号先例，其余模块按需补齐）；全局 `08_调研预研/` 只收跨模块调研并承载收录规则总则（判定口径见 `platform-knowledge/08_调研预研/00_调研预研.md`；原 09-29「未拍板归全局 08」规则已演进，档案已按内容分流）
 
 ## 开发前必读（按需读，不必全读；版本号不在此 pin，以各文档头部为准）
