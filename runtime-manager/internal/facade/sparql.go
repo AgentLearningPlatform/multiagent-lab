@@ -204,6 +204,10 @@ func (f *Facade) companionOntology(agentID, convID string) (string, *mcp.CallToo
 	return oid, nil
 }
 
+// ValidateReadonlySelect 词法级只读校验的导出面（REQ-236⑥/M63：SPARQL 工作台代理端点
+// 服务端兜底与 facade tools/call 同一权威口径；此前校验仅在前端拦截+facade MCP 面）。
+func ValidateReadonlySelect(query string) error { return vetReadonlySelect(query) }
+
 // vetReadonlySelect 词法级只读校验：PREFIX/BASE 前导声明后首关键词必须是 SELECT，
 // 全文裸词不得命中变更关键字（字符串字面量、IRI、注释中的同形词不误伤）。
 func vetReadonlySelect(query string) error {
@@ -234,7 +238,7 @@ func vetReadonlySelect(query string) error {
 	return nil
 }
 
-// sparqlTokens 词法扫描：收集裸词 token；字符串字面量（含 '''/""" 长串与反斜杠转义）、
+// sparqlTokens 词法扫描：收集裸词 token；字符串字面量（含 ”'/""" 长串与反斜杠转义）、
 // IRI <…>、注释 #… 的内容不产出 token。
 func sparqlTokens(q string) []string {
 	var toks []string

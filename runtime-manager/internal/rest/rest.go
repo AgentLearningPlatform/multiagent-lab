@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/engine/oxigraph"
+	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/facade"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/manager"
 	"github.com/xiaoyao/eino-multiagent-lab/runtime-manager/internal/store"
 )
@@ -78,10 +79,19 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 
 // engines 引擎自检汇总（REQ-146）：GET /api/engines → {engines:[EngineStatus]}。
 // runtimeConfigGet / runtimeConfigPut REQ-179/M-O16：全局运行配置读写（执行方式；系统级配置）。
+// REQ-236④/M63：effective_method=启动期实际生效值（配置 docker 但探测不可用 → 降级 native，
+// D-O20 v0.73「未安装 docker 降级进程内」）——配置值不写回，前端可呈现「降级生效」态。
 func (s *Server) runtimeConfigGet(w http.ResponseWriter, r *http.Request) {
+	cfg := s.Store.GetConfig().ExecutionMethod
+	dockerOK := oxigraph.DockerAvailable()
+	effective := cfg
+	if cfg == "docker" && !dockerOK {
+		effective = "native"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"execution_method": s.Store.GetConfig().ExecutionMethod,
-		"docker_available": oxigraph.DockerAvailable(),
+		"execution_method": cfg,
+		"effective_method": effective,
+		"docker_available": dockerOK,
 		"options":          []map[string]string{{"value": "docker", "label": "docker 容器"}, {"value": "native", "label": "内置二进制"}, {"value": "k8s", "label": "k8s（接口预留）"}},
 	})
 }
@@ -276,6 +286,9 @@ func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
 // sparql GET|POST /api/runtime-profiles/{id}/sparql：标准 SPARQL protocol 端点
 // （REQ-92，§4.8.1 Yasgui 内嵌工作台数据源）。GET ?query= 与 POST
 // application/sparql-query 均支持；响应头与状态码透传引擎返回。
+// REQ-236⑥/M63：服务端只读 SELECT 白名单兜底（facade ValidateReadonlySelect 同一权威
+// 口径）——此前变更拦截仅在前端（SparqlWorkbench），绕过前端即直打引擎；oxigraph /query
+// 端点语义拒 UPDATE 属巧合而非读控设计，现在代理层显式拦截。
 func (s *Server) sparql(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	p, err := s.Store.Get(id)
@@ -299,11 +312,19 @@ func (s *Server) sparql(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 query 参数"})
 			return
 		}
+		if verr := facade.ValidateReadonlySelect(q); verr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "工作台仅允许只读 SELECT（与 facade 同口径）: " + verr.Error()})
+			return
+		}
 		req, err = http.NewRequestWithContext(r.Context(), "GET", ep+"?query="+url.QueryEscape(q), nil)
 	} else {
 		body, err2 := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 		if err2 != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "读取请求体失败"})
+			return
+		}
+		if verr := facade.ValidateReadonlySelect(string(body)); verr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "工作台仅允许只读 SELECT（与 facade 同口径）: " + verr.Error()})
 			return
 		}
 		req, err = http.NewRequestWithContext(r.Context(), "POST", ep, bytes.NewReader(body))

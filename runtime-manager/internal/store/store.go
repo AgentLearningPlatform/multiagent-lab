@@ -97,18 +97,20 @@ func scanProfile(row interface{ Scan(...any) error }) (*Profile, error) {
 	return &p, nil
 }
 
-// RuntimeConfig 全局运行配置（REQ-179/M-O16：执行方式为系统级配置而非方案级——2026-09-27 开发者指示变更）。
+// RuntimeConfig 全局运行配置（REQ-179/M-O16：执行方式为系统级配置而非方案级——2026-09-27 开发者指示变更；
+// REQ-236④/M63 D-O20 v0.73 变更拍板：默认执行方式改 docker，未安装 docker 时启动期降级进程内 native）。
 type RuntimeConfig struct {
-	ExecutionMethod string `json:"execution_method"` // docker | native | k8s（默认 k8s）
+	ExecutionMethod string `json:"execution_method"` // docker | native | k8s（默认 docker）
 }
 
-// GetConfig 读全局运行配置（无行/空值 = 默认 k8s）。
+// GetConfig 读全局运行配置（无行/空值 = 默认 docker——D-O20 v0.73 变更；docker 不可用的
+// 运行期降级在 manager.startEngine 探测兜底，配置值不写回）。
 func (s *Store) GetConfig() RuntimeConfig {
 	var method string
 	_ = s.db.QueryRow(`SELECT execution_method FROM runtime_config WHERE id=1`).Scan(&method)
 	method = strings.TrimSpace(method)
 	if method == "" {
-		method = "k8s"
+		method = "docker"
 	}
 	return RuntimeConfig{ExecutionMethod: method}
 }
@@ -210,8 +212,10 @@ func (s *Store) Delete(id string) error {
 }
 
 // RunningByOntology 返回加载了指定本体且处于 running 状态的方案（facade 路由用）。
+// REQ-236②/M63：同本体多方案时取**最早创建**（created_at 升序，并列按 id 字典序）——
+// 消除「取第一个匹配」的任意性，路由结果确定可复现（显式绑定语义随需求推进）。
 func (s *Store) RunningByOntology(ontologyID string) (*Profile, error) {
-	rows, err := s.db.Query(`SELECT ` + profileCols + ` FROM runtime_profile WHERE status='running'`)
+	rows, err := s.db.Query(`SELECT ` + profileCols + ` FROM runtime_profile WHERE status='running' ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}

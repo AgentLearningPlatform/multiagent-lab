@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -358,11 +360,18 @@ func (m *Manager) ProcEndpoint(id string) (string, error) {
 
 // startEngine 按引擎能力分发启动（实现 ReasoningRuntime 的引擎透传推理开关，O6）。
 func (m *Manager) startEngine(ctx context.Context, eng engine.Runtime, p *store.Profile, port int, ttls map[string]string) (*engine.Process, error) {
-	// REQ-179/M-O16：执行方式为系统级全局配置（2026-09-27 开发者指示变更，默认 k8s）——
-	// docker=容器执行（oxigraph 官方镜像）；native=内置二进制子进程；k8s=接口预留（复用 M10 10d K8sBackend 模式，随集群环境落地）
+	// REQ-179/M-O16：执行方式为系统级全局配置——docker=容器执行（oxigraph 官方镜像）；
+	// native=内置二进制子进程；k8s=接口预留。
+	// REQ-236④/M63（D-O20 v0.73 变更，2026-10-01 开发者拍板）：默认执行方式改 docker，
+	// **未安装 docker 时启动期降级进程内 native**（迁移 006 翻转存量默认值；此处为配置 docker
+	// 但运行环境探测不可用的运行期兜底——配置值不写回，用户显式配置优先）。
 	switch m.Store.GetConfig().ExecutionMethod {
 	case "docker":
 		if ox, ok := eng.(*oxigraph.Runtime); ok {
+			if !oxigraph.DockerAvailable() {
+				log.Printf("[manager] 方案 %s：执行方式配置为 docker 但 docker 不可用，降级进程内 native（REQ-236④）", p.ID)
+				break
+			}
 			return ox.DockerStart(ctx, p.ID, port, ttls)
 		}
 		return nil, fmt.Errorf("执行方式 docker 当前仅支持 oxigraph 引擎（fuseki docker 化随需求推进）")
@@ -386,15 +395,32 @@ func profileReasoning(cfgJSON string) bool {
 	return cfg.Reasoning
 }
 
+// nextPort 端口分配（REQ-236③/M63）：在 max+1 基线上逐个 bind 试探（127.0.0.1 回环探测，
+// 占用即跳过），治「手工指定/残留进程占用同端口只能靠引擎 bind 失败进 error」——分配即确认可用。
 func nextPort(st *store.Store) int {
 	list, _ := st.List()
 	max := 9200
+	taken := map[int]bool{}
 	for _, p := range list {
 		if p.Port > max {
 			max = p.Port
 		}
+		if p.Port > 0 {
+			taken[p.Port] = true
+		}
 	}
-	return max + 1
+	for cand := max + 1; cand < max+64; cand++ {
+		if taken[cand] {
+			continue
+		}
+		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cand)))
+		if err != nil {
+			continue // 占用（引擎残留/其他服务），跳过
+		}
+		_ = ln.Close()
+		return cand
+	}
+	return max + 1 // 兜底（探测全部失败交由引擎启动报错，不静默吞）
 }
 
 func errStr(err error) string {

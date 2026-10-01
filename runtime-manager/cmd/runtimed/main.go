@@ -57,6 +57,10 @@ func main() {
 		fc.TraceSparql = false
 	}
 
+	// REQ-236①/M63：启动对账——DB running 态逐一探测，存活引擎领养重建句柄、
+	// 已死收敛 stopped（治重启后 procs 内存句柄丢失的僵尸 running/孤儿引擎双向漂移）。
+	mg.Reconcile()
+
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", fc.Mount())
 	rest.New(st, mg).Mount(mux)

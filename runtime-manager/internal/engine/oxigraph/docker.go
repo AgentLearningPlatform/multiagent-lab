@@ -101,9 +101,10 @@ func (r *Runtime) DockerStart(ctx context.Context, profileID string, port int, t
 		}
 		_ = os.Remove(f)
 	}
-	// serve：-p 宿主 port → 容器 8080
+	// serve：-p 宿主 port → 容器 8080（REQ-236⑤：端口映射绑 127.0.0.1——容器内 serve 必须
+	// 绑 0.0.0.0 才能被宿主网桥转发，但宿主侧只暴露回环，治 0.0.0.0 全网卡暴露可写 /update 端点）
 	if _, serr := run("run", "-d", "--name", containerName(profileID),
-		"-p", fmt.Sprintf("%d:8080", port),
+		"-p", fmt.Sprintf("127.0.0.1:%d:8080", port),
 		"-v", abs+":/data",
 		image, "serve", "--location", "/data", "--bind", "0.0.0.0:8080"); serr != nil {
 		return nil, fmt.Errorf("oxigraph 容器启动失败: %s", serr)
@@ -116,7 +117,8 @@ func (r *Runtime) DockerStart(ctx context.Context, profileID string, port int, t
 	}), nil
 }
 
-// DockerRunning 容器对账：容器存在且运行中 → 返回 endpoint（服务重启后领用，与 native 孤儿进程对账同思路）。
+// DockerRunning 容器对账：容器存在且运行中 → 返回 endpoint（服务重启后领用，与 native 孤儿进程对账同思路；
+// REQ-236①/M63 起 manager.Reconcile 启动对账正式接线）。
 func DockerRunning(profileID string, port int) (string, bool) {
 	bin := dockerBin()
 	if bin == "" {
@@ -129,4 +131,17 @@ func DockerRunning(profileID string, port int) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/query", port), true
+}
+
+// DockerStop 按容器名强制回收（REQ-236①：对账领养句柄的 Stop 闭包）。
+func DockerStop(profileID string) error {
+	bin := dockerBin()
+	if bin == "" {
+		return fmt.Errorf("docker CLI 不可用，无法回收容器 %s", containerName(profileID))
+	}
+	out, err := exec.Command(bin, "rm", "-f", containerName(profileID)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker rm -f %s: %v: %s", containerName(profileID), err, tail(out, 200))
+	}
+	return nil
 }
