@@ -91,7 +91,7 @@ export default function AuditGraphTab({ kbId, kbName }: { kbId?: string; kbName?
         style={{ marginBottom: 12 }}
         message={
           <Space size={8} wrap>
-            <span>数据来源：知识库「{kbName || kbId}」（观测台只读展示；治理与重建入口在知识库模块）</span>
+            <span>数据来源：知识库「{kbName || kbId}」（观测台只读展示；治理与重建入口在知识库模块）。本体 TTL 装载引擎后的运行态图谱在「本体资产 → 可视化 → 运行态实渲」（REQ-234③ 对齐 D-O19 观测台定位）</span>
             <Button
               size="small"
               type="link"
@@ -125,7 +125,7 @@ export default function AuditGraphTab({ kbId, kbName }: { kbId?: string; kbName?
         ) : entities.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="该库暂无 KG（graphrag 模式导入文档自动抽取，或点顶部「重建 KG」）"
+            description="该库暂无 KG（graphrag 模式导入文档时自动抽取；重建入口在知识库模块图谱视图——本页为只读观测台）"
           />
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>

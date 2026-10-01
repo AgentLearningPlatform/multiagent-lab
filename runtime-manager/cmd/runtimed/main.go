@@ -1,5 +1,5 @@
 // runtimed 运行平面服务（方案 04 §4，:8090）：
-// 运行方案编排 + Oxigraph 引擎适配 + 统一 MCP facade（/mcp，4 个 onto_* 工具）。
+// 运行方案编排 + Oxigraph 引擎适配 + 统一 MCP facade（/mcp，6 个 onto_* 工具：get_concept/get_instance/list_instances/neighbors/list_concepts/sparql_query——Q-14 契约 4→5→6）。
 package main
 
 import (

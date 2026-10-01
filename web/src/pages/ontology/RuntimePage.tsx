@@ -195,6 +195,30 @@ export default function RuntimePage() {
 // 引擎分组页（Oxigraph；Fuseki 交付后共用模板）
 // ---------------------------------------------------------------------------
 
+
+// REQ-234①/M61：装载质量快照低分警示（只警示不阻断——快照由启动异步快评写入，
+// overall<80 或存在 error 级命中即橙标；无快照/解析失败静默不显示）。
+function qualityWarn(p: RuntimeProfile): { label: string; tip: string } | null {
+  if (!p.loaded_quality) return null
+  try {
+    const q = JSON.parse(p.loaded_quality) as Record<string, { overall?: number; error_count?: number; warning_count?: number }>
+    const entries = Object.entries(q)
+    if (entries.length === 0) return null
+    const worst = entries.sort((a, b) => (a[1].overall ?? 100) - (b[1].overall ?? 100))[0]
+    const [oid, v] = worst
+    const errs = v.error_count ?? 0
+    if ((v.overall ?? 100) < 80 || errs > 0) {
+      return {
+        label: `质量 ${Math.round(v.overall ?? 0)}`,
+        tip: `本体 ${oid} 装载质量分 ${Math.round(v.overall ?? 0)}（error ${errs} / warning ${v.warning_count ?? 0}）——仅警示不阻断；详情见本体资产「质量卡」页签`,
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 function EngineProfilesPage({
   engine,
   engineStatus,
@@ -369,6 +393,13 @@ function EngineProfilesPage({
                   <Tag color="red" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
                     引擎缺失
                   </Tag>
+                )}
+                {qualityWarn(p) && (
+                  <Tooltip title={qualityWarn(p)!.tip}>
+                    <Tag color="orange" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                      {qualityWarn(p)!.label}
+                    </Tag>
+                  </Tooltip>
                 )}
                 <span className="dot">·</span>
                 <span>端口 {p.port ?? '—'}</span>

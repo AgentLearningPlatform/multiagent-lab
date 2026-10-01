@@ -23,7 +23,7 @@ import PipelinePane from './components/PipelinePane'
 // REQ-139：要点结构化渲染——按 ①②③/序号/句读自动分段为要点列表（排版降噪），全部卡片统一受益
 function structuredPoints(text: string): { marker: string; text: string }[] {
   // 先按 ①②③/1.2.3. 等序号标记切分
-  const m = text.match(/(?:^|[。；;]s*)([①②③④⑤⑥⑦⑧⑨]|d+[.、])s*/g)
+  const m = text.match(/(?:^|[。；;]\s*)([①②③④⑤⑥⑦⑧⑨]|\d+[.、])\s*/g)
   if (m && m.length >= 2) {
     const parts = text.split(/(?:^|[。；;]s*)(?:[①②③④⑤⑥⑦⑧⑨]|\d+[.、])\s*/).filter((x) => x.trim())
     if (parts.length >= 2) {
@@ -34,7 +34,7 @@ function structuredPoints(text: string): { marker: string; text: string }[] {
   }
   // 无序号：按句切分为要点
   return text
-    .split(/(?<=[。；;])s*/)
+    .split(/(?<=[。；;])\s*/)
     .map((x) => x.trim())
     .filter(Boolean)
     .map((t) => ({ marker: '', text: t }))

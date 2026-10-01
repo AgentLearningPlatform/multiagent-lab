@@ -32,6 +32,7 @@ type Profile struct {
 	UpdatedAt   string   `json:"updated_at"`
 	// REQ-155/M-O15 阶段二：启动/重载成功时的加载版本快照（JSON {ontology_id: version}），生命周期 drift 检测数据源
 	LoadedVersions string `json:"loaded_versions,omitempty"`
+	LoadedQuality string `json:"loaded_quality,omitempty"` // REQ-234①/M61：装载质量快照 JSON {oid:{overall,error_count,warning_count}}
 }
 
 type Store struct{ db *sql.DB }
@@ -84,16 +85,16 @@ func (s *Store) migrate(dir string) error {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-const profileCols = `id,name,engine,ontology_ids,config,port,status,pid,last_error,created_at,updated_at,IFNULL(loaded_versions,'')`
+const profileCols = `id,name,engine,ontology_ids,config,port,status,pid,last_error,created_at,updated_at,IFNULL(loaded_versions,''),IFNULL(loaded_quality,'')`
 
 func scanProfile(row interface{ Scan(...any) error }) (*Profile, error) {
 	var p Profile
-	var oids, cfg, pid, lastErr, loadedVersions string
-	if err := row.Scan(&p.ID, &p.Name, &p.Engine, &oids, &cfg, &p.Port, &p.Status, &pid, &lastErr, &p.CreatedAt, &p.UpdatedAt, &loadedVersions); err != nil {
+	var oids, cfg, pid, lastErr, loadedVersions, loadedQuality string
+	if err := row.Scan(&p.ID, &p.Name, &p.Engine, &oids, &cfg, &p.Port, &p.Status, &pid, &lastErr, &p.CreatedAt, &p.UpdatedAt, &loadedVersions, &loadedQuality); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(oids), &p.OntologyIDs)
-	p.Config, p.PID, p.LastError, p.LoadedVersions = cfg, pid, lastErr, loadedVersions
+	p.Config, p.PID, p.LastError, p.LoadedVersions, p.LoadedQuality = cfg, pid, lastErr, loadedVersions, loadedQuality
 	return &p, nil
 }
 
@@ -125,6 +126,12 @@ func (s *Store) SetConfig(cfg RuntimeConfig) error {
 // SetLoadedVersions REQ-155/M-O15 阶段二：记录启动/重载成功时的加载版本快照。
 func (s *Store) SetLoadedVersions(id string, versionsJSON string) error {
 	_, err := s.db.Exec(`UPDATE runtime_profile SET loaded_versions=? WHERE id=?`, versionsJSON, id)
+	return err
+}
+
+// SetLoadedQuality 记录装载质量快照（REQ-234①/M61；快评失败时传空串清除）。
+func (s *Store) SetLoadedQuality(id string, qualityJSON string) error {
+	_, err := s.db.Exec(`UPDATE runtime_profile SET loaded_quality=? WHERE id=?`, qualityJSON, id)
 	return err
 }
 

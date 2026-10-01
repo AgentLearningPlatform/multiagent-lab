@@ -563,6 +563,10 @@ export const api = {
   putIngestMapping: (id: string, mapping: IngestMapping) =>
     req<{ saved: boolean }>(`/api/ontologies/${id}/ingest-mapping`, { method: 'PUT', body: JSON.stringify(mapping) }),
   /** fork 本体：POST /api/ontologies/{id}/fork → 201 新本体（forked_from=源 id，version 重置 1） */
+  /** OntoExtend ODP 精选清单（M-O14 P2②；A-7 清扫：原裸 fetch 收编） */
+  ontoExtendODPs: () => req<{ odps: unknown[] }>('/api/ontology/ontoextend/odps'),
+  /** LOV 词表搜索（REQ-171 P1；上游不可达 502 优雅降级） */
+  vocabSearch: (q: string) => req<{ results?: unknown[]; items?: unknown[] }>(`/api/ontology/vocabularies/search?q=${encodeURIComponent(q)}`),
   forkOntology: (id: string, input: ForkOntologyInput = {}) =>
     req<Ontology>(`/api/ontologies/${id}/fork`, { method: 'POST', body: JSON.stringify(input) }),
 

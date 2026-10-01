@@ -375,7 +375,7 @@ export default function AssetsPage() {
                   ),
                 },
                 {
-                  key: 'versions',
+                  key: 'quality',
                   label: '质量卡',
                   children: <QualityCardPane ontologyId={active.id} />,
                 },

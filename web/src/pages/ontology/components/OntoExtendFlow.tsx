@@ -58,10 +58,10 @@ export default function OntoExtendFlow() {
 
   const loadOdps = useCallback(() => {
     setOdpsLoading(true)
-    fetch('/api/ontology/ontoextend/odps')
-      .then((r) => r.json())
+    api
+      .ontoExtendODPs()
       .then((d) => {
-        setOdps(d.odps ?? [])
+        setOdps((d.odps ?? []) as OdpItem[])
         setOdpsErr(null)
       })
       .catch((e: any) => setOdpsErr(e?.message ?? 'ODP 加载失败'))
@@ -78,11 +78,10 @@ export default function OntoExtendFlow() {
     if (!q) return
     setLovLoading(true)
     setLovErr(null)
-    fetch(`/api/ontology/vocabularies/search?q=${encodeURIComponent(q)}`)
-      .then(async (r) => {
-        const d = await r.json()
-        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
-        const results = d.results ?? d.items ?? []
+    api
+      .vocabSearch(q)
+      .then((d) => {
+        const results = (d.results ?? d.items ?? []) as never[]
         setLovHits(results.slice(0, 12))
       })
       .catch((e: any) => setLovErr(e?.message ?? 'LOV 检索失败（上游不可达时为预期降级）'))

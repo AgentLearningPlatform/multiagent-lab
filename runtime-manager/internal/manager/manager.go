@@ -238,6 +238,44 @@ func (m *Manager) FetchVersion(ontologyID string) (int, error) {
 	return meta.Version, nil
 }
 
+// FetchQuality 构建平面快评（REQ-234①/M61）：POST quality/check save=false 内存评分
+// 零副作用；返回精简摘要。失败返回 nil（快照尽力而为，不阻断启动）。
+func (m *Manager) FetchQuality(ontologyID string) map[string]any {
+	body := fmt.Sprintf(`{"ontology_id":%q,"save":false}`, ontologyID)
+	req, err := http.NewRequest(http.MethodPost, m.BuildURL+"/api/ontology/quality/check", strings.NewReader(body))
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req.WithContext(ctx))
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var out struct {
+		Report struct {
+			ErrorCount   int `json:"error_count"`
+			WarningCount int `json:"warning_count"`
+			Score        struct {
+				Overall float64 `json:"overall"`
+			} `json:"score"`
+		} `json:"report"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out) != nil {
+		return nil
+	}
+	return map[string]any{
+		"overall":       out.Report.Score.Overall,
+		"error_count":   out.Report.ErrorCount,
+		"warning_count": out.Report.WarningCount,
+	}
+}
+
 // Start 启动方案：starting → 拉形态 → 引擎装载 → 健康检查 → running（失败进 error）。
 func (m *Manager) Start(ctx context.Context, id string) error {
 	p, err := m.Store.Get(id)
@@ -296,6 +334,21 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 			if b, jerr := json.Marshal(loadedVersions); jerr == nil {
 				_ = m.Store.SetLoadedVersions(id, string(b)) // REQ-155 阶段二：加载版本快照（drift 检测）
 			}
+			// REQ-234①/M61：装载质量快照（低分警示不阻断——异步快评，失败静默跳过）
+			go func(ids []string, pid string) {
+				q := map[string]any{}
+				for _, oid := range ids {
+					if sum := m.FetchQuality(oid); sum != nil {
+						q[oid] = sum
+					}
+				}
+				if len(q) == 0 {
+					return
+				}
+				if b, jerr := json.Marshal(q); jerr == nil {
+					_ = m.Store.SetLoadedQuality(pid, string(b))
+				}
+			}(p.OntologyIDs, id)
 			_ = m.Store.SetStatus(id, "running", "", "")
 			return nil
 		}

@@ -601,6 +601,8 @@ export interface RuntimeProfile {
   last_error?: string
   created_at?: string
   updated_at?: string
+  /** REQ-234①/M61：装载质量快照 JSON {oid:{overall,error_count,warning_count}}（启动异步快评） */
+  loaded_quality?: string
 }
 
 // ---- P1 尾适配（REQ-92/93/94 + 学习示例） ----
