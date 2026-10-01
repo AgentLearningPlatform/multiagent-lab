@@ -175,6 +175,24 @@ func (s *Store) CreateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	return s.GetKnowledgeBase(k.ID)
 }
 
+// ListKBsByKGOntology REQ-233②：以指定本体为约束词表（kg_ontology_id）的知识库清单（引用聚合用）。
+func (s *Store) ListKBsByKGOntology(ontologyID string) ([]*KnowledgeBase, error) {
+	rows, err := s.DB.Query(`SELECT `+kbCols+` FROM knowledge_base WHERE kg_ontology_id=? ORDER BY name`, ontologyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*KnowledgeBase
+	for rows.Next() {
+		k, err := scanKB(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // UpdateKnowledgeBase 全量更新。
 func (s *Store) UpdateKnowledgeBase(k *KnowledgeBase) (*KnowledgeBase, error) {
 	if k.Mode != "graphrag" {

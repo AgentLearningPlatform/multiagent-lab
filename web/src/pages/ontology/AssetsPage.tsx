@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, Popconfirm, Result, Space, Splitter, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Input, Popconfirm, Result, Space, Splitter, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { BranchesOutlined, DeleteOutlined, EditOutlined, ImportOutlined } from '@ant-design/icons'
 import { api, ApiError } from '../../api/client'
 import { companionApi } from '../../api/companion'
-import type { Ontology, RuntimeProfile, Spec } from '../../api/types'
+import type { Ontology, OntologyReferences, RuntimeProfile, Spec } from '../../api/types'
 import { useUI } from '../../store/ui'
 import { sourceTag, type ValidationState } from './shared'
 import CsvIngestPane from './components/CsvIngestPane'
@@ -16,6 +16,8 @@ import OntologyCompanionPane from './components/companion/OntologyCompanionPane'
 import AssetList from './components/assets/AssetList'
 import QualityCardPane from './components/assets/QualityCardPane'
 import ImportMergeWizard from './components/assets/ImportMergeWizard'
+import ReferencesPane from './components/assets/ReferencesPane'
+import EmptyGuide from '../../components/EmptyGuide'
 
 // ---------------------------------------------------------------------------
 // 本体资产（AssetsPage，REQ-104 ③）：全部已构建本体统一管理
@@ -24,6 +26,8 @@ import ImportMergeWizard from './components/assets/ImportMergeWizard'
 //   Spec 编辑 | 校验 | 版本（含源码视图 REQ-93）| 产物 | 可视化 | TTL 导出 | CSV 灌装（REQ-96）
 //   正交红线：不出现任何引擎、端口、启停配置（运行看本体运行栏）
 // B1（REQ-145/M22）：Spec 编辑/校验/产物/导出/选择条/重命名/可视化拆至 components/assets/。
+// REQ-233/M60：资产列表搜索 + 空态 EmptyGuide 接入 + 详情「被引用」聚合区块 + 删除确认引用预检
+// （running 方案引用服务端拦截 409、前端禁用；stopped/KB 引用警示放行——聚合源 GET /{id}/references）。
 // ---------------------------------------------------------------------------
 
 export default function AssetsPage() {
@@ -124,6 +128,12 @@ export default function AssetsPage() {
   /** 被 N 套方案引用（只读徽标，增强正交可见性） */
   const refCount = (o: Ontology) => profiles.filter((p) => (p.ontology_ids ?? []).includes(o.id)).length
 
+  // REQ-233③：删除确认引用预检（打开确认框时拉一次三源聚合；running/伴生绑定=服务端将 409，前端禁用删除）
+  const [delRefs, setDelRefs] = useState<OntologyReferences | null>(null)
+  const delRunning = (delRefs?.runtime_plans ?? []).filter((p) => p.status === 'running')
+  const delStopped = (delRefs?.runtime_plans ?? []).filter((p) => p.status !== 'running')
+  const delBlocking = delRunning.length > 0 || (delRefs?.companion_agents.length ?? 0) > 0
+
   const removeActive = async () => {
     if (!active) return
     try {
@@ -198,7 +208,19 @@ export default function AssetsPage() {
               </p>
             </div>
           </div>
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无本体资产——到「本体构建」栏选择一条构建路径开始" />
+          <EmptyGuide
+            title="暂无本体资产"
+            steps={[
+              '到「本体构建」栏选择一条构建路径（自定义 / OntoChat / 由知识库构建 / OntoExtend / OO 回流）',
+              '构建产物统一进入本栏管理：编辑、校验、质量卡、版本、可视化、导出',
+              '在「本体运行」栏创建运行方案装载本体，供智能体对话查询',
+            ]}
+            actionLabel="前往本体构建"
+            onAction={() => {
+              localStorage.setItem('eino.onto.sidebar', 'build')
+              window.dispatchEvent(new CustomEvent('onto-sidebar-change'))
+            }}
+          />
         </>
       ) : (
         <>
@@ -256,10 +278,44 @@ export default function AssetsPage() {
               </Button>
               <Popconfirm
                 title={`删除本体「${active.name}」？`}
-                description="级联删除其 Spec、产物与引用；已启动的运行方案不受影响（REQ-87）。"
+                description={
+                  <Space direction="vertical" size={4} style={{ maxWidth: 320 }}>
+                    <span style={{ fontSize: 12 }}>级联删除其 Spec、产物与引用；已启动的运行方案不受影响（REQ-87）。</span>
+                    {delRunning.length > 0 && (
+                      <span style={{ fontSize: 12, color: '#cf1322' }}>
+                        被 {delRunning.length} 个运行中方案挂载（{delRunning.map((p) => p.name || p.id).join('、')}）——须先停止再删除。
+                      </span>
+                    )}
+                    {(delRefs?.companion_agents.length ?? 0) > 0 && (
+                      <span style={{ fontSize: 12, color: '#cf1322' }}>
+                        被 {delRefs!.companion_agents.length} 个智能体绑定为伴生归属——须先解绑/换绑。
+                      </span>
+                    )}
+                    {delStopped.length > 0 && (
+                      <span style={{ fontSize: 12, color: '#d46b08' }}>
+                        仍被 {delStopped.length} 个未运行方案配置引用，删除后这些方案启动将失败。
+                      </span>
+                    )}
+                    {(delRefs?.kb_vocabs.length ?? 0) > 0 && (
+                      <span style={{ fontSize: 12, color: '#d46b08' }}>
+                        仍被 {delRefs!.kb_vocabs.length} 个知识库用作约束词表，删除后其 KG 约束抽取将降级为自由抽取。
+                      </span>
+                    )}
+                  </Space>
+                }
                 okText="删除"
-                okButtonProps={{ danger: true }}
+                okButtonProps={{ danger: true, disabled: delBlocking }}
                 cancelText="取消"
+                onOpenChange={(o) => {
+                  if (o && active) {
+                    api
+                      .ontologyReferences(active.id)
+                      .then(setDelRefs)
+                      .catch(() => setDelRefs(null))
+                  } else {
+                    setDelRefs(null)
+                  }
+                }}
                 onConfirm={removeActive}
               >
                 <Button danger icon={<DeleteOutlined />}>
@@ -353,6 +409,11 @@ export default function AssetsPage() {
                     </span>
                   ),
                   children: <OntologyCompanionPane key={active.id} ontologyId={active.id} />,
+                },
+                {
+                  key: 'references',
+                  label: '被引用',
+                  children: <ReferencesPane key={active.id} ontologyId={active.id} />,
                 },
                 {
                   key: 'graph-edit',

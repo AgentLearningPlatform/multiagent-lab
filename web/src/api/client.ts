@@ -35,6 +35,7 @@ import type {
   Message,
   ModelConnection,
   Ontology,
+  OntologyReferences,
   OntoChatSession,
   OntoChatTurnResult,
   Project,
@@ -222,6 +223,10 @@ export const api = {
 
   // model connections
   listConnections: () => req<ModelConnection[]>('/api/model-connections'),
+  // REQ-231⑤⑥：运行时工具预览（四源合并确定性结果）与 hook 注册真相（Harness 页签数据源）
+  agentToolPreview: (id: string) =>
+    req<{ tools: { name: string; source: string }[]; masked?: { name: string; source: string }[]; notes?: string[] }>(`/api/agents/${id}/tool-preview`),
+  listHooks: () => req<{ hooks: { name: string; active: boolean; description: string }[] }>('/api/hooks'),
   createConnection: (c: any) => req<ModelConnection>('/api/model-connections', { method: 'POST', body: JSON.stringify(c) }),
   updateConnection: (id: string, c: any) => req<ModelConnection>(`/api/model-connections/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
   deleteConnection: (id: string) => req<{ deleted: string }>(`/api/model-connections/${id}`, { method: 'DELETE' }),
@@ -381,6 +386,8 @@ export const api = {
   updateOntologyMeta: (id: string, m: { name: string; description?: string }) =>
     req<Ontology>(`/api/ontologies/${id}`, { method: 'PUT', body: JSON.stringify(m) }),
   deleteOntology: (id: string) => req<{ deleted?: string }>(`/api/ontologies/${id}`, { method: 'DELETE' }),
+  /** REQ-233②/M60：本体「被引用」三源聚合（运行方案挂载/KB 约束词表/伴生绑定；删除确认预检同源） */
+  ontologyReferences: (id: string) => req<OntologyReferences>(`/api/ontologies/${id}/references`),
   /** 原始 Spec JSON；从未保存过 → 404（UI 视为空 Spec） */
   getSpec: (id: string) => req<Spec>(`/api/ontologies/${id}/spec`),
   /** 全量保存 Spec（校验门控、递增 version）；400 时错误带 validation_errors */

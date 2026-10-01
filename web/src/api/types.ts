@@ -9,8 +9,12 @@ export interface Agent {
   temperature: number | null
   max_tokens: number | null
   max_iteration: number
-  /** REQ-14：agent 级工具审批策略（''=关闭 | 'all' 全部审批；会话级可覆盖）——REQ-219 顺修前端类型缺字段 */
+  /** REQ-14：agent 级工具审批策略（''=关闭 | 'danger' 危险档 | 'all' 全部审批；会话级可覆盖）——REQ-219 顺修前端类型缺字段 */
   tool_approval?: string
+  /** REQ-231②：审批豁免清单（danger/all 档下免审工具名） */
+  approval_exempt?: string[]
+  /** REQ-231③：审批挂起超时（小时；0=不限） */
+  approval_timeout_hours?: number
   tools: string[]
   skills: string[]
   mcp_servers: { name: string; url: string }[]
@@ -452,6 +456,21 @@ export interface Ontology {
   n_concepts?: number
   n_relations?: number
   n_instances?: number
+}
+
+/** REQ-233②/M60：本体「被引用」三源聚合（GET /api/ontologies/{id}/references，主后端拼装） */
+export interface OntologyPlanRef {
+  id: string
+  name: string
+  engine?: string
+  status: string
+}
+export interface OntologyReferences {
+  ontology_id: string
+  runtime_plans: OntologyPlanRef[]
+  kb_vocabs: { id: string; name: string; mode?: string }[]
+  companion_agents: { id: string; name: string }[]
+  warnings?: string[]
 }
 
 /** Spec 概念（S2 编辑对象） */

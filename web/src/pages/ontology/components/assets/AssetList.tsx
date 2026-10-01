@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Empty, Tag } from 'antd'
+import { Empty, Input, Tag } from 'antd'
 import { ontoStatus, stageDoneFlags, type ValidationState } from '../../shared'
 import type { Ontology, RuntimeProfile } from '../../../../api/types'
 import { companionApi } from '../../../../api/companion'
+import EmptyGuide from '../../../../components/EmptyGuide'
 
 // ---------------------------------------------------------------------------
 // REQ-181/M-O17：资产左列表（平台统一侧栏形态）——来源分组（自建 / 对话生长 / 种子 / fork）
@@ -10,6 +11,8 @@ import { companionApi } from '../../../../api/companion'
 // + 构建段完成度 dots / 版本 / 运行状态标注。选中高亮。
 // REQ-216⑦：来源分组扩「对话生长」——有智能体绑定该本体为伴生归属（companion_ontology_id
 // 指向它）即归入（作为一个类型；伴生产物归属容器化的资产可见性落点）。
+// REQ-233①/M60：列表搜索（名称/描述/ID/来源分组名子串过滤，前端过滤零接口变更）
+// + 空态 EmptyGuide 接入（跳「本体构建」动线，治纯文案空态）。
 // ---------------------------------------------------------------------------
 
 /** 来源分组（v1 零迁移派生口径，D-O21；REQ-216 增 grown 组，优先于既有判定）：
@@ -52,24 +55,54 @@ export default function AssetList({
       .catch(() => setBound(new Set()))
   }, [ontos])
 
+  // REQ-233①：搜索（名称/描述/ID/来源分组名子串，大小写不敏感；前端过滤零接口变更）
+  const [q, setQ] = useState('')
+  const ql = q.trim().toLowerCase()
+  const hit = (o: Ontology, g: string) =>
+    !ql ||
+    [o.name, o.description ?? '', o.id, GROUP_META[g].label].some((s) => s.toLowerCase().includes(ql))
+
   // 分组：自建 → 对话生长 → 种子 → fork（组内按 updated_at 已有排序保持）
   const groups = new Map<string, Ontology[]>()
   for (const o of ontos) {
     const g = groupOf(o, bound)
+    if (!hit(o, g)) continue
     if (!groups.has(g)) groups.set(g, [])
     groups.get(g)!.push(o)
   }
   const ordered = [...groups.entries()].sort((a, b) => GROUP_META[a[0]].order - GROUP_META[b[0]].order)
 
+  const goBuild = () => {
+    localStorage.setItem('eino.onto.sidebar', 'build')
+    window.dispatchEvent(new CustomEvent('onto-sidebar-change'))
+  }
+
   if (ontos.length === 0) {
     return (
-      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无本体——到「本体构建」栏创建" style={{ marginTop: 24 }} />
+      <EmptyGuide
+        title="暂无本体"
+        steps={['到「本体构建」栏选择一条构建路径（自定义 / OntoChat / 由知识库构建等）', '构建产物统一进入本资产列表管理']}
+        actionLabel="前往本体构建"
+        onAction={goBuild}
+      />
     )
   }
 
   return (
     <div className="asset-list">
-      {ordered.map(([g, items]) => (
+      <Input
+        allowClear
+        size="small"
+        placeholder="搜索名称 / 描述 / 来源"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        style={{ marginBottom: 10 }}
+        data-testid="asset-search"
+      />
+      {ordered.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`无匹配「${q.trim()}」的本体`} style={{ marginTop: 16 }} />
+      ) : (
+        ordered.map(([g, items]) => (
         <div key={g} className="asset-group">
           <div className="asset-group-title">{GROUP_META[g].label} <span className="side-count">{items.length}</span></div>
           {items.map((o) => {
@@ -100,7 +133,8 @@ export default function AssetList({
             )
           })}
         </div>
-      ))}
+        ))
+      )}
     </div>
   )
 }
