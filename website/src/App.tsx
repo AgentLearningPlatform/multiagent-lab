@@ -3,7 +3,7 @@ import { GithubOutlined } from '@ant-design/icons'
 import { Spin } from 'antd'
 import HomePage from './pages/Home'
 import ModulePage from './pages/ModulePage'
-import { MODULES, REPO_URL } from './content'
+import { MODULES, REPO_SLUG, REPO_URL } from './content'
 
 // 演示页懒加载：three.js/react-force-graph 体量大（主包 ~3MB→首屏 ~1MB），首访演示页才拉取
 const DemoPage = lazy(() => import('./pages/DemoPage'))
@@ -102,7 +102,7 @@ export default function App() {
           ))}
         </nav>
         <span className="topnav-spacer" />
-        <a className="gh-link" href={REPO_URL} target="_blank" rel="noreferrer" aria-label="GitHub 仓库" title="github.com/xiaoyao/multiagent-lab">
+        <a className="gh-link" href={REPO_URL} target="_blank" rel="noreferrer" aria-label="GitHub 仓库" title={`github.com/${REPO_SLUG}`}>
           <GithubOutlined />
           <span className="gh-text">GitHub</span>
         </a>

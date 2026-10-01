@@ -150,11 +150,13 @@ export default function HomePage() {
           <div className="qs-grid">
             <div className="qs-card">
               <div className="qs-title">一条命令启动（开发/演示）</div>
-              <pre className="qs-code">{`git clone https://github.com/xiaoyao/multiagent-lab.git
+              <pre className="qs-code">{`git clone https://github.com/<owner>/multiagent-lab.git
 cd multiagent-lab
 ./run-dev.sh
 # 打开 http://localhost:8080（前端 :5173 由反代同源承载）`}</pre>
-              <p className="qs-note">零 Python venv 依赖；首次启动自动建库（SQLite）并播种示例本体与学习中心内容包。</p>
+              <p className="qs-note">
+                仓库地址见本页右上角「GitHub」链接；零 Python venv 依赖；首次启动自动建库（SQLite）并播种示例本体与学习中心内容包。
+              </p>
             </div>
             <div className="qs-card">
               <div className="qs-title">Docker Compose / Helm</div>

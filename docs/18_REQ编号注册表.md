@@ -151,6 +151,7 @@
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
+| v2.28 | 2026-10-01 | REQ-238 追加定案交付（开发者指示「仓库地址链接使用执行 action 的当前仓库地址，无法动态获取则用组织仓库 AgentLearningPlatform/multiagent-lab；快速开始避免具体仓库地址」）：vite define `__REPO_SLUG__`=WEBSITE_REPO_SLUG env（CI 传 github.repository 动态跟随，缺省组织仓库）+content.ts REPO_URL 改注入常量（右上角/快速开始/导读档互引源链接全链跟随）+Home 快速开始 clone 地址改 `<owner>` 占位+workflow 注入 env；本地双机制验证（无 env=组织仓库嵌入/env=动态 slug 嵌入）+tsc 绿；16 v0.6 补注 | 董奎 × 协作 Agent |
 
 | v2.28 | 2026-10-01 | REQ-240 行扩注（前端空间与交互优化五项先行交付：NAV/列表栏收起图标列+列表 220+锚点 132+伴生仅伴生型+Maximizeable 页内最大化+三维与运行态合并=3D 数据源切换独立运行态形态退役；headless 14/14 smoke/req240fe/；03 v0.80/02 v0.163/20 v1.92 S4.40） | 董奎 × 协作 Agent || v2.27 | 2026-10-01 | REQ-238 分配+转正（✅ 立项即交付：项目官网 GitHub Pages——website/ vite+React 小站，概览/模块导读单源/种子演示复用平台可视化组件/Actions 自动发布；headless 16/16；16 v0.6/README/AGENTS synced） | 董奎 × 协作 Agent |
 

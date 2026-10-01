@@ -21,7 +21,9 @@ import geneCoreRaw from '../../ontology-service/internal/seed/examples/gene_core
 import medCommonRaw from '../../ontology-service/internal/seed/examples/med_common.json?raw'
 import type { Spec } from '../../web/src/api/types'
 
-export const REPO_URL = 'https://github.com/xiaoyao/multiagent-lab'
+/** 仓库地址：构建期注入（CI=触发仓库 github.repository，随迁移/fork 自动跟随；缺省=组织仓库），见 vite.config.ts define */
+export const REPO_SLUG: string = __REPO_SLUG__
+export const REPO_URL = `https://github.com/${REPO_SLUG}`
 const REPO_RAW_BASE = `${REPO_URL}/blob/main`
 
 export interface ModuleInfo {

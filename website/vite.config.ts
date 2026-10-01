@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 // REQ-238：项目官网（GitHub Pages）。默认部署在仓库子路径 /multiagent-lab/，
 // 自定义域名时用 WEBSITE_BASE=/ 覆盖。内容单源：模块介绍构建期内联 platform-knowledge/
 // 模块导读页、演示数据内联 ontology-service 种子 spec（web 前端 ReferencePage 同手法）。
+//
+// 仓库地址链接：CI 构建时经 WEBSITE_REPO_SLUG 注入触发仓库（workflow 传 github.repository，
+// 随仓库迁移/fork 自动跟随）；本地无该 env 时缺省用组织仓库地址。
 const stripIEHacks = (): Plugin => ({
   // 与 web/vite.config.ts 同款：剥第三方 CSS 的 IE 星号 hack（*zoom 等），消构建告警噪音
   name: 'strip-ie-hacks',
@@ -19,6 +22,9 @@ const stripIEHacks = (): Plugin => ({
 export default defineConfig({
   plugins: [react(), stripIEHacks()],
   base: process.env.WEBSITE_BASE ?? '/multiagent-lab/',
+  define: {
+    __REPO_SLUG__: JSON.stringify(process.env.WEBSITE_REPO_SLUG ?? 'AgentLearningPlatform/multiagent-lab'),
+  },
   server: {
     port: 5174,
     // dev 模式跨目录 import：platform-knowledge/、ontology-service/internal/seed/、web/src/ 组件

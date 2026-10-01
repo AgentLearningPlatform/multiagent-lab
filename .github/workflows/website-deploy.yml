@@ -44,6 +44,9 @@ jobs:
         run: npm ci
       - name: Build website
         working-directory: website
+        env:
+          # 仓库地址链接随触发仓库动态注入（site 内所有 GitHub 链接/互引源链接自动跟随）
+          WEBSITE_REPO_SLUG: ${{ github.repository }}
         run: |
           npm ci
           npm run build
