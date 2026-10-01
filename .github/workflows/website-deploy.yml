@@ -33,7 +33,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: |
+            website/package-lock.json
+            web/package-lock.json
+      # website 构建跨目录复用 web/src 可视化组件（Graph3D/SpecGraph），组件的 bare import
+      # （antd/three/@xyflow/react 等）自 web/ 目录向上解析依赖——必须先装 web/node_modules
+      # （本地可构建正是同因；缺失即 Rollup failed to resolve import "antd"）
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
       - name: Build website
         working-directory: website
         run: |
